@@ -2,6 +2,13 @@ http://103.253.20.14:8093/demo/path
 
 ========
 
+API tiếng anh: 
+```
+curl --location 'http://103.253.20.13:25010/api/text-to-speech' \
+--header 'Content-Type: application/json' \
+--data '{"text": "hello. Its me.Can you tell me?","voice": "en-AU-WilliamNeural","speed": 1}'
+```
+
 
 Đây là cách gọi API bằng cURL:
 
