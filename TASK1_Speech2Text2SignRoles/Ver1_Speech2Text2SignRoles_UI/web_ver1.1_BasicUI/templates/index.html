@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech to Text and Assign Roles</title>
+    <style>
+        .disabled-button {
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>Speech to Text and Assign Roles</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="audioFile" name="file" accept=".mp3,.wav">
+        <button type="submit" id="speechToTextButton">Speech to Text</button>
+    </form>
+    <div>
+        <h2>Transcription</h2>
+        <textarea id="transcriptionText" rows="10" cols="80"></textarea>
+    </div>
+    <button id="assignRolesButton">Assign Roles</button>
+    <div>
+        <h2>Assigned Roles</h2>
+        <textarea id="rolesText" rows="10" cols="80"></textarea>
+    </div>
+    <div id="message" style="color: blue; font-weight: bold;"></div>
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            var formData = new FormData();
+            var file = document.getElementById('audioFile').files[0];
+            formData.append('file', file);
+
+            var speechToTextButton = document.getElementById('speechToTextButton');
+            var messageDiv = document.getElementById('message');
+
+            speechToTextButton.disabled = true;
+            speechToTextButton.classList.add('disabled-button');
+            messageDiv.innerText = "Vui lòng đợi trong giây lát...";
+
+            fetch('/speech_to_text', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('transcriptionText').value = data.transcription;
+                } else {
+                    alert('Error: ' + data.msg);
+                }
+                messageDiv.innerText = "";
+                speechToTextButton.disabled = false;
+                speechToTextButton.classList.remove('disabled-button');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Request failed: ' + error);
+                messageDiv.innerText = "";
+                speechToTextButton.disabled = false;
+                speechToTextButton.classList.remove('disabled-button');
+            });
+        });
+
+        document.getElementById('assignRolesButton').addEventListener('click', function() {
+            var transcription = document.getElementById('transcriptionText').value;
+            var assignRolesButton = document.getElementById('assignRolesButton');
+            var messageDiv = document.getElementById('message');
+
+            assignRolesButton.disabled = true;
+            assignRolesButton.classList.add('disabled-button');
+            messageDiv.innerText = "Vui lòng đợi trong giây lát...";
+
+            fetch('/assign_roles', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ transcription: transcription })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('rolesText').value = data.roles;
+                } else {
+                    alert('Error: ' + data.msg);
+                }
+                messageDiv.innerText = "";
+                assignRolesButton.disabled = false;
+                assignRolesButton.classList.remove('disabled-button');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Request failed: ' + error);
+                messageDiv.innerText = "";
+                assignRolesButton.disabled = false;
+                assignRolesButton.classList.remove('disabled-button');
+            });
+        });
+    </script>
+</body>
+</html>

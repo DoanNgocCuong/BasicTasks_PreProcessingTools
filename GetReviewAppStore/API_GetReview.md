@@ -1,0 +1,1 @@
+curl -L -X GET 'http://103.253.20.13:25026/get_review'

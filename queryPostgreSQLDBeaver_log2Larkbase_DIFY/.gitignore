@@ -1,0 +1,21 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SSH Keys - ignore actual keys but keep examples
+id_rsa
+id_rsa.pub
+!id_rsa.example
+!id_rsa.pub.example
+
+
+# Excel files
+*.xlsx
+*.xls
+*.csv

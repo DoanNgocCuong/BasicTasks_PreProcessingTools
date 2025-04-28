@@ -1,0 +1,26 @@
+
+en-US-GuyNeural - Giọng kể chuyện mạnh for an enthusiastic and dynamic American male voice
+en-GB-RyanNeural for a compelling and engaging British male voice => Giọng diễn cảm hơn. HIỆN ĐANG DÙNG GIỌNG NÀY
+
+
+en-AU-NatashaNeural - Giọng nữ Úc, ấm áp và tự nhiên.  ------- đang chọn 
+
+
+https://pixabay.com/vi/music/vo-kich-ep-ambient-piano-and-strings-10711/
+
+- Nam tiếng việt 
+vi-VN-NamMinhNeural
+
+
+
+
+other: 
+Nữ tiếng anh 
+en-US-JennyNeural - Giọng nữ Mỹ, nhẹ nhàng và thân thiện.    ------- đang chọn 
+en-GB-LibbyNeural - Giọng nữ Anh, mượt mà và rõ ràng, lý tưởng cho nội dung kể chuyện hoặc hướng dẫn.
+en-US-AmberNeural - Giọng nữ Mỹ, diễn cảm, phù hợp cho giọng kể chuyện mạnh mẽ.
+
+
+Nam tiếng anh 
+en-AU-WilliamNeural - Giọng Đọc
+en-US-ChristopherNeural

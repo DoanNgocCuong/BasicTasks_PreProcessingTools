@@ -1,0 +1,7 @@
+functions-framework==3.8.2
+requests==2.*
+flask==2.*
+python-dotenv==1.0.1
+bs4==4.12.2
+pandas==2.1.1
+openpyxl==3.1.2

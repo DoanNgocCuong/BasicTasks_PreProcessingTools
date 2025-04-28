@@ -1,0 +1,10 @@
+# # Push lên docker hub thì set up cái này 
+# # chẳng hạn 
+# .env
+# .venv
+# .config.py
+# *.txt
+# *.key
+# *.pem
+
+# Còn ko thì tắt đi ạ, bật lên làm a trúc ko chạy được 

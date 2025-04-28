@@ -1,0 +1,19 @@
+# Web framework
+flask==3.0.2
+flask-cors==4.0.0
+werkzeug==3.0.1
+
+# Database
+psycopg2-binary==2.9.9
+sshtunnel==0.4.0
+
+# Data processing
+pandas==2.2.1
+openpyxl==3.1.2  # Để đọc/ghi Excel files
+
+# Scheduling & HTTP
+apscheduler==3.10.4
+requests==2.31.0
+
+# Development (chỉ cần trong dev environment)
+watchdog==4.0.0  # Cho hot reload

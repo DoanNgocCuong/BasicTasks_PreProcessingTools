@@ -1,0 +1,28 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+# gcc (GNU C Compiler):
+# Nhiều Python packages cần được compile từ source code
+# Ví dụ: psycopg2-binary, pandas có các phần viết bằng C cần compile
+# Không có gcc, việc cài đặt các packages này sẽ fail
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install
+COPY requirements.txt ./
+RUN pip install -r requirements.txt -i https://pypi.org/simple
+
+# Install development packages
+RUN pip install watchdog[watchmedo]
+
+# Create necessary directories
+RUN mkdir -p api/scripts/query_results
+
+# Don't copy source code here - we'll mount it via volume
+EXPOSE 5000
+
+# Use watchdog to auto-reload when files change
+CMD ["watchmedo", "auto-restart", "--directory=.", "--pattern=*.py", "--recursive", "--", "python", "app.py"]

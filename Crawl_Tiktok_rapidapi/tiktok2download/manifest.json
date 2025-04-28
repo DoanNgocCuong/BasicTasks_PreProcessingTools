@@ -1,0 +1,11 @@
+[
+    {
+      "audio_filepath": "video_downloaded/video_test.mp4",
+      "offset": 0,
+      "duration": null,
+      "label": "infer",
+      "text": null,
+      "num_speakers": 2
+    }
+  ]
+  

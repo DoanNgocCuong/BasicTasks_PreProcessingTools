@@ -1,0 +1,35 @@
+# Dockerfile.poetry
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Cài đặt Poetry
+RUN curl -sSL https://install.python-poetry.org | python3 - && \
+    ln -s /root/.local/bin/poetry /usr/local/bin/poetry
+
+# Cập nhật PATH
+ENV PATH="/root/.local/bin:$PATH"
+
+# Copy SSH key
+COPY ./id_rsa /root/.ssh/id_rsa
+RUN chmod 600 /root/.ssh/id_rsa
+
+# Sao chép tệp pyproject.toml và poetry.lock
+COPY pyproject.toml poetry.lock* ./
+
+# Kiểm tra cài đặt Poetry
+RUN poetry --version
+
+# Cài đặt phụ thuộc
+RUN poetry install --no-root --no-dev
+
+# Create necessary directories
+RUN mkdir -p api/scripts/query_results
+VOLUME /app/api/scripts/query_results
+
+# Copy source code
+COPY . .
+
+EXPOSE 5000
+
+CMD ["poetry", "run", "python", "app.py"]

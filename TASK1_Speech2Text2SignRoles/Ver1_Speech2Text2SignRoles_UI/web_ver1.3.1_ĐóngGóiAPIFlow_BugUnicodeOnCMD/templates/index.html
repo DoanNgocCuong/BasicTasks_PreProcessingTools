@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech to Text and Assign Roles</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .btn {
+            background-color: #3498db;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        .btn:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        #transcriptionText {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            margin-top: 20px;
+        }
+        .chat-bubble {
+            margin: 10px 0;
+            padding: 10px 15px;
+            border-radius: 20px;
+            max-width: 70%;
+            position: relative;
+            font-size: 14px;
+        }
+        .customer {
+            background-color: #e8f5e9;
+            align-self: flex-start;
+            border-bottom-left-radius: 0;
+        }
+        .sales {
+            background-color: #e3f2fd;
+            align-self: flex-end;
+            border-bottom-right-radius: 0;
+        }
+        #message {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #3498db;
+        }
+        #audioFileName {
+            margin-left: 10px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Speech to Text and Assign Roles</h1>
+        <div class="form-group">
+            <input type="file" id="audioFile" name="file" accept=".mp3,.wav" style="display: none;">
+            <button class="btn" onclick="document.getElementById('audioFile').click()">Choose Audio File</button>
+            <span id="audioFileName"></span>
+        </div>
+        <button class="btn" id="speechToTextButton">Speech to Text</button>
+        <div class="form-group">
+            <h2>Transcription</h2>
+            <textarea id="transcriptionText" rows="10"></textarea>
+        </div>
+        <button class="btn" id="assignRolesButton">Assign Roles</button>
+        <div id="message"></div>
+        <div class="form-group">
+            <h2>Assigned Roles</h2>
+            <div id="chatContainer" class="chat-container"></div>
+        </div>
+    </div>
+    <script>
+        document.getElementById('audioFile').addEventListener('change', function(event) {
+            var fileName = event.target.files[0].name;
+            document.getElementById('audioFileName').textContent = fileName;
+        });
+
+        document.getElementById('speechToTextButton').addEventListener('click', function() {
+            var formData = new FormData();
+            var file = document.getElementById('audioFile').files[0];
+            if (!file) {
+                alert('Please select an audio file first.');
+                return;
+            }
+            formData.append('file', file);
+
+            var speechToTextButton = document.getElementById('speechToTextButton');
+            var messageDiv = document.getElementById('message');
+
+            speechToTextButton.disabled = true;
+            messageDiv.innerText = "Processing... Please wait.";
+
+            fetch('/speech_to_text', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('transcriptionText').value = data.transcription;
+                } else {
+                    alert('Error: ' + data.msg);
+                }
+                messageDiv.innerText = "";
+                speechToTextButton.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Request failed: ' + error);
+                messageDiv.innerText = "";
+                speechToTextButton.disabled = false;
+            });
+        });
+
+        document.getElementById('assignRolesButton').addEventListener('click', function() {
+            var transcription = document.getElementById('transcriptionText').value;
+            var assignRolesButton = document.getElementById('assignRolesButton');
+            var messageDiv = document.getElementById('message');
+
+            if (!transcription.trim()) {
+                alert('Please provide a transcription first.');
+                return;
+            }
+
+            assignRolesButton.disabled = true;
+            messageDiv.innerText = "Assigning roles... Please wait.";
+
+            fetch('/assign_roles', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ transcription: transcription })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    renderChat(data.roles);
+                } else {
+                    alert('Error: ' + data.msg);
+                }
+                messageDiv.innerText = "";
+                assignRolesButton.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Request failed: ' + error);
+                messageDiv.innerText = "";
+                assignRolesButton.disabled = false;
+            });
+        });
+
+        function renderChat(assignedRoles) {
+            var chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = '';
+
+            var lines = assignedRoles.split('\n');
+            lines.forEach(function(line) {
+                if (line.trim() === '') return;
+
+                var chatBubble = document.createElement('div');
+                chatBubble.classList.add('chat-bubble');
+
+                if (line.startsWith('Nhân viên bán hàng:')) {
+                    chatBubble.classList.add('sales');
+                    chatBubble.textContent = line.replace('Nhân viên bán hàng:', '').trim();
+                } else if (line.startsWith('Khách hàng:')) {
+                    chatBubble.classList.add('customer');
+                    chatBubble.textContent = line.replace('Khách hàng:', '').trim();
+                } else {
+                    return;
+                }
+
+                chatContainer.appendChild(chatBubble);
+            });
+        }
+    </script>
+</body>
+</html>

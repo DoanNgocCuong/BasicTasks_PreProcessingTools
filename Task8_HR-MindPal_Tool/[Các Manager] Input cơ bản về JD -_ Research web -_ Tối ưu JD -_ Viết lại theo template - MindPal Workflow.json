@@ -1,0 +1,84 @@
+{
+  "title": "[Các Manager] Input cơ bản về JD -> Research web -> Tối ưu JD -> Viết lại theo template",
+  "WorkflowUserInputNode": [
+    {
+      "index": 0,
+      "WorkflowTriggerInput": [
+        {
+          "index": 0,
+          "name": "Số lượng cần tuyển",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 1,
+          "name": "Vị trí cần tuyển",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 2,
+          "name": "Ngôn ngữ JD",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 3,
+          "name": "JD cơ bản hoặc JD hoàn chỉnh",
+          "type": "LONG_TEXT",
+          "isRequired": true
+        }
+      ]
+    }
+  ],
+  "WorkflowNode": [
+    {
+      "index": 1,
+      "title": "Nghiên cứu thông tin thị trường",
+      "prompt": "Tìm kiếm thông tin về mức lương, yêu cầu và đãi ngộ cho vị trí [Vị trí cần tuyển] trên các trang web việc làm và diễn đàn chuyên ngành. Ghi chú lại các thông tin quan trọng để tối ưu hóa JD.\n\n### GIVEN THIS INFORMATION:\n## Vị trí cần tuyển: @[Vị trí cần tuyển](66dedba91e79882db16cd0e6)\n\n",
+      "triggerInputNameList": [
+        "Vị trí cần tuyển"
+      ],
+      "inputNodeTitleList": [],
+      "Agent": {
+        "title": "Quy trình tối ưu hóa JD tuyển dụng - Nghiên cứu thông tin thị trường",
+        "instruction": "Bạn là một chuyên gia nghiên cứu nhân sự với kinh nghiệm trong việc phân tích thị trường lao động và các yêu cầu tuyển dụng. Bạn có khả năng tìm kiếm thông tin trên các trang web và nguồn tài liệu khác nhau để thu thập dữ liệu cần thiết.",
+        "tools": [
+          "upload_cv"
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "title": "Tối ưu hóa JD",
+      "prompt": "Dựa trên thông tin đã thu thập được từ bước trước, chỉnh sửa JD cơ bản hoặc JD hoàn chỉnh theo template đã cung cấp. Đảm bảo rằng JD phản ánh chính xác yêu cầu và đãi ngộ cho vị trí [Vị trí cần tuyển].\n\n### GIVEN THIS INFORMATION:\n## JD cơ bản hoặc JD hoàn chỉnh: @[JD cơ bản hoặc JD hoàn chỉnh](66dedba91e79882db16cd0e8)\n\n\n\n### GIVEN THIS INFORMATION:\n## Nghiên cứu thông tin thị trường: #[Nghiên cứu thông tin thị trường](66dedba91e79882db16cd0ec)\n\n",
+      "triggerInputNameList": [
+        "JD cơ bản hoặc JD hoàn chỉnh"
+      ],
+      "inputNodeTitleList": [
+        "Nghiên cứu thông tin thị trường"
+      ],
+      "Agent": {
+        "title": "Quy trình tối ưu hóa JD tuyển dụng - Tối ưu hóa JD",
+        "instruction": "Bạn là một chuyên gia viết mô tả công việc với kinh nghiệm trong việc tạo ra các JD hấp dẫn và chính xác. Bạn hiểu rõ các yêu cầu và tiêu chuẩn của từng vị trí tuyển dụng.",
+        "tools": []
+      }
+    },
+    {
+      "index": 3,
+      "title": "Chỉnh sửa JD theo template",
+      "prompt": "Sử dụng template JD đã cung cấp để chỉnh sửa và định dạng JD đã tối ưu hóa. Đảm bảo rằng tất cả các phần của JD được điền đầy đủ và rõ ràng. Ngôn ngữ của JD được viết bằng ngôn ngữ: @[Ngôn ngữ JD](66dedba91e79882db16cd0e7).\n\n### GIVEN THIS INFORMATION:\n## Tối ưu hóa JD: #[Tối ưu hóa JD](66dedba91e79882db16cd0ed)\n\n### TEMPLATE JD: \n\nDưới đây là template JD dành cho các vị trí tuyển dụng trong công ty Step Up mà bạn có thể điều chỉnh phù hợp với từng vị trí cụ thể:\n\n---\n\n### **[Vị trí Tuyển dụng]**\n(VD: React Native Developer, Product Marketer, Learning Design Specialist)\n\n---\n\n#### **1. Giới thiệu về công ty**\n\nStep Up là một trong những công ty tiên phong ở Việt Nam ứng dụng AI vào sản phẩm học ngoại ngữ. Với các sản phẩm giáo dục chất lượng như cuốn sách Hack Não và ứng dụng The Coach, Step Up đã giúp hàng triệu người học tiếng Anh một cách hiệu quả. Chúng tôi luôn tìm kiếm những tài năng mới, đồng hành cùng Step Up trong việc mang lại những trải nghiệm học tập tốt nhất cho khách hàng.\n\n---\n\n#### **2. Mô tả công việc**\n(Điền các nhiệm vụ chính của vị trí)\n\n- **Vai trò và trách nhiệm chính:**\n   - Phát triển sản phẩm hoặc tính năng mới theo yêu cầu.\n   - Làm việc trực tiếp với [Team Leader/PO/BA] để hiểu và triển khai dự án.\n   - Tối ưu hiệu suất sản phẩm.\n   - [Các nhiệm vụ khác liên quan đến vị trí].\n\n- **Nền tảng công nghệ:** (Nếu có yêu cầu cụ thể về nền tảng hoặc công nghệ, VD: React Native, Firebase, Redux, etc.)\n\n- **Thời gian làm việc:** 8h30 – 18h00, nghỉ trưa 1h30 phút, từ thứ 2 đến thứ 6 hàng tuần.\n\n---\n\n#### **3. Yêu cầu công việc**\n(Điền các yêu cầu công việc liên quan)\n\n- Tối thiểu [số năm] kinh nghiệm liên quan đến vị trí.\n- Thành thạo [công nghệ/kỹ năng cụ thể, VD: Redux Saga, Firebase, etc.].\n- Kỹ năng làm việc với [các công cụ hoặc nền tảng cụ thể].\n- Kinh nghiệm tối ưu hiệu suất ứng dụng hoặc sản phẩm.\n- [Các yêu cầu bổ sung như tư duy chiến lược, khả năng làm việc nhóm, kỹ năng giao tiếp, etc.]\n\n---\n\n#### **4. Quyền lợi**\n\n- **Lương cơ bản:** [Lương cơ bản + Gross/Net]\n- **Phúc lợi:** BHXH sau thử việc, nghỉ phép năm.\n- **Các phúc lợi khác:**\n   - Ăn trưa miễn phí tại công ty (suất ăn [số tiền]/ngày).\n   - Lương tháng 13, thưởng lễ, quỹ bonding.\n   - Học miễn phí các sản phẩm tiếng Anh của công ty.\n   - Cơ hội phát triển nghề nghiệp và thăng tiến nhanh chóng.\n\n---\n\n#### **5. Cách thức ứng tuyển**\n\n- Gửi CV về địa chỉ email: **[email của bộ phận tuyển dụng]**\n- Tiêu đề email: **[Vị trí tuyển dụng] _ Họ tên của bạn**\n- Liên hệ bộ phận tuyển dụng qua số điện thoại: **[Số điện thoại liên hệ]**\n\n---\n\n#### **6. Quy trình tuyển dụng**\n\n- Vòng 1: Xét duyệt CV/Portfolio (1-3 ngày làm việc)\n- Vòng 2: Screen phone từ HR (10-15 phút)\n- Vòng 3: Phỏng vấn trực tiếp với bộ phận chuyên môn\n- Vòng 4: Coffee Talk với BOD (nếu cần)\n",
+      "triggerInputNameList": [
+        "Ngôn ngữ JD"
+      ],
+      "inputNodeTitleList": [
+        "Tối ưu hóa JD"
+      ],
+      "Agent": {
+        "title": "Quy trình tối ưu hóa JD tuyển dụng - Chỉnh sửa JD theo template",
+        "instruction": "Bạn là một nhân viên hành chính có kinh nghiệm trong việc sử dụng các công cụ văn phòng và quản lý tài liệu. Bạn có khả năng chỉnh sửa và định dạng tài liệu một cách chuyên nghiệp.",
+        "tools": []
+      }
+    }
+  ]
+}

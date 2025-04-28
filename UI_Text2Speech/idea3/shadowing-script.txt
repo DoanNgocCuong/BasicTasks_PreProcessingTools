@@ -1,0 +1,27 @@
+text,voice,output_file,speed
+"Chào mừng bạn đến với bài luyện tập shadowing hôm nay! Bạn sẽ học cách nói chuyện khi đặt phòng khách sạn, với từng câu được chia thành các phần nhỏ để bạn dễ dàng luyện tập. Khi luyện shadowing, bạn sẽ nghe và lặp lại từng phần, dần dần ghép lại thành câu hoàn chỉnh. Hãy sẵn sàng, và bắt đầu nào!",vi-VN-HoaiMyNeural,intro_welcome.mp3,1
+"Chúng ta sẽ bắt đầu bằng cách luyện từng cụm từ ngắn. Hãy lắng nghe rồi lặp lại theo mình.",vi-VN-HoaiMyNeural,scenario1_intro.mp3,1
+"I'd like to book a room.",en-AU-NatashaNeural,scenario1_chunk1.mp3,0.8
+"Tốt lắm! Một lần nữa nhé.",vi-VN-HoaiMyNeural,scenario1_feedback1.mp3,1
+"I'd like to book a room.",en-AU-NatashaNeural,scenario1_chunk1_repeat.mp3,0.8
+"For three nights.",en-AU-NatashaNeural,scenario1_chunk2.mp3,0.8
+"Thử thêm lần nữa nào.",vi-VN-HoaiMyNeural,scenario1_feedback2.mp3,1
+"For three nights.",en-AU-NatashaNeural,scenario1_chunk2_repeat.mp3,0.8
+"Starting this Friday.",en-AU-NatashaNeural,scenario1_chunk3.mp3,0.8
+"Rất tốt! Hãy lặp lại lần nữa.",vi-VN-HoaiMyNeural,scenario1_feedback3.mp3,1
+"Starting this Friday.",en-AU-NatashaNeural,scenario1_chunk3_repeat.mp3,0.8
+"Bây giờ, hãy ghép các cụm từ lại thành các câu dài hơn. Lắng nghe và lặp lại sau mình.",vi-VN-HoaiMyNeural,scenario2_intro.mp3,1
+"I'd like to book a room for three nights.",en-AU-NatashaNeural,scenario2_phrase1.mp3,0.8
+"Rất tốt, hãy lặp lại một lần nữa nào.",vi-VN-HoaiMyNeural,scenario2_feedback1.mp3,1
+"I'd like to book a room for three nights.",en-AU-NatashaNeural,scenario2_phrase1_repeat.mp3,0.8
+"Starting this Friday, for three nights.",en-AU-NatashaNeural,scenario2_phrase2.mp3,0.8
+"Thử lại lần nữa nhé!",vi-VN-HoaiMyNeural,scenario2_feedback2.mp3,1
+"Starting this Friday, for three nights.",en-AU-NatashaNeural,scenario2_phrase2_repeat.mp3,0.8
+"Cuối cùng, chúng ta sẽ ghép tất cả thành một câu hoàn chỉnh. Hãy nghe và lặp lại cả câu này nhé.",vi-VN-HoaiMyNeural,scenario3_intro.mp3,1
+"I'd like to book a room for three nights, starting this Friday.",en-AU-NatashaNeural,scenario3_complete_slow.mp3,0.7
+"Rất tốt! Hãy lặp lại lần nữa với tốc độ tự nhiên.",vi-VN-HoaiMyNeural,scenario3_feedback1.mp3,1
+"I'd like to book a room for three nights, starting this Friday.",en-AU-NatashaNeural,scenario3_complete_natural.mp3,1
+"Hello, this is Ocean View Hotel. How can I help you?",en-AU-NatashaNeural,scenario3_roleplay_hotel.mp3,1
+"Rất tuyệt! Bạn đã hoàn thành phần luyện tập shadowing của mình.",vi-VN-HoaiMyNeural,scenario3_completion.mp3,1
+"Hôm nay, bạn đã luyện tập cách đặt phòng khách sạn bằng phương pháp shadowing. Hãy nhớ cấu trúc câu mà bạn đã học để sử dụng khi cần nhé.",vi-VN-HoaiMyNeural,outro_review1.mp3,1
+"Xuất sắc! Bạn đã hoàn thành bài luyện tập hôm nay. Shadowing sẽ giúp bạn tăng khả năng phản xạ và phát âm tự nhiên hơn. Hãy tiếp tục luyện tập nhé!",vi-VN-HoaiMyNeural,outro_final.mp3,1

@@ -1,0 +1,76 @@
+{
+  "title": "[Các Manager] Input cơ bản về JD -> Research web -> Viết lại theo template",
+  "WorkflowUserInputNode": [
+    {
+      "index": 0,
+      "WorkflowTriggerInput": [
+        {
+          "index": 0,
+          "name": "Số lượng cần tuyển",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 1,
+          "name": "Vị trí cần tuyển",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 2,
+          "name": "Ngôn ngữ JD",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 3,
+          "name": "JD cơ bản hoặc JD hoàn chỉnh",
+          "type": "LONG_TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 4,
+          "name": "Ghi chú người tạo",
+          "type": "TEXT",
+          "isRequired": true
+        }
+      ]
+    }
+  ],
+  "WorkflowNode": [
+    {
+      "index": 1,
+      "title": "Nghiên cứu thông tin thị trường - Model: 4o",
+      "prompt": "Tìm kiếm thông tin về mức lương, Key Responsibilities, yêu cầu và đãi ngộ cho vị trí [Vị trí cần tuyển] trong toàn bộ KNOWLEDGE & WEB RESEARCH và trên các trang web việc làm và diễn đàn chuyên ngành.\n\nGhi chú lại các thông tin quan trọng.\n\n### GIVEN THIS INFORMATION:\n## Vị trí cần tuyển: @[Vị trí cần tuyển](66dff686fd8d3bc71a6e7030)\n\n",
+      "triggerInputNameList": [
+        "Vị trí cần tuyển"
+      ],
+      "inputNodeTitleList": [],
+      "Agent": {
+        "title": "Quy trình tối ưu hóa JD tuyển dụng - Nghiên cứu thông tin thị trường",
+        "instruction": "You are a human resources research expert with extensive experience in labor market analysis and recruitment requirements. You possess strong skills in sourcing information from various websites and resources to gather necessary data. Your expertise includes identifying trends in employment, understanding the skills and qualifications demanded by employers, and analyzing workforce demographics. You are adept at using data analytics tools to interpret and present findings in a clear and actionable manner.",
+        "format": "A comprehensive report that includes: - An analysis of current labor market trends - A detailed overview of recruitment requirements for specific industries - Insights into emerging skills and qualifications in demand - Recommendations for HR strategies based on data findings",
+        "tools": [
+          "upload_cv"
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "title": "Chỉnh sửa JD theo template",
+      "prompt": "- Kết hợp: @[JD cơ bản hoặc JD hoàn chỉnh](66dff686fd8d3bc71a6e702f) với #[Nghiên cứu thông tin thị trường - Model: 4o](66dff687fd8d3bc71a6e7034) và TEMPATE JD bên dưới để hoàn thiện JD \n- Ngôn ngữ JD: @[Ngôn ngữ JD](66dff686fd8d3bc71a6e702e).\n\n### GIVEN THIS INFORMATION:\n## TEMPLATE JD: \n\nDưới đây là template JD dành cho các vị trí tuyển dụng trong công ty Step Up mà bạn có thể điều chỉnh phù hợp với từng vị trí cụ thể:\n\n---\n\n\n\n**Address:** Nam Trung Yen Urban Area, Cau Giay, Hanoi  \n**Hotline:** 0931.323.822  \n**Email:** recruitment@stepup.edu.vn  \n\n# STEP UP EDUCATION  \n**Position:** [Position Name]  \n\n## ABOUT STEP UP  \n“Before turning 30, it’s time to experiment and learn. If you plan to spend your youth at a company, find a small-scale company that is always looking to solve pressing problems in innovative ways.” - Tony Fadell, the father of the iPod.  \nStep Up is the ideal environment for those seeking opportunities to experiment and learn in the field of English education. Widely recognized for its No. 1 Tiki bestseller, Hack Não 1500, and its top 5 App Store communication app, The Coach, Step Up continually strives to help Vietnamese people learn English in a smarter and more enjoyable way.\n\n**Achievements of The Coach:**  \n- **VSLP 2022:** The Coach App won second place in the largest AI competition in Vietnam, competing against 15 formidable tech teams.  \n- **App Store Rankings:** The Coach topped the educational app store rankings in Vietnam for communication apps shortly after its launch.  \n- **Vietnam Edtech Forum 2023:** The Coach was honored as the Educational Influence of the Year.  \n- **User Engagement:** Over 1 million downloads and nearly 35 thousand feedbacks, with an average rating of 4.8 to 4.9 stars.\n\n**Learn more about the company at:** https://stepup.edu.vn/the-step-up-story/\n\n---\n\n## II. RECRUITMENT DETAILS  \n\n**Position:** [Position Name]  \n**Start Date:** [Month, Year]  \n**Working Hours:** 08:30 AM - 6:00 PM, with a 1.5-hour lunch break.  \nMonday to Friday, weekends off.  \n**Address:** Nam Trung Yen Urban Area, Cau Giay, Hanoi  \n\n---\n\n## III. Job Descriptions  \n\n**[Summary of the Position]:**  \nThe Coach is a leading e-learning platform that provides high-quality educational content to students of all ages. We are seeking a passionate and experienced [Position Name] to join our team and contribute to our mission of enhancing student learning experiences.  \n\n- **Key Responsibilities:**  \n\n1. [First major task or responsibility]\n[2-3 bullet points describing the task]\n2. [Second major task or responsibility]\n[2-3 bullet points describing the task]\n3. [Additional task or responsibility]\n4. [Additional task or responsibility]\n5. [Additional task or responsibility]\n\n---\n\n## IV. Requirements  \n\n- **Experience:**  \n   - At least [X years] of experience (full-time) in [field or position].  \n   - Proven ability in [specific skills or tasks related to the position].\n\n- **Skills:**  \n   - Fluent in English communication skills (IELTS [desired score] or higher), with a strong sense of natural conversational English.  \n   - Excellent time management skills and the ability to meet deadlines.  \n   - Ability to digitize and measure the effectiveness of developed materials.  \n   - Strong communication and collaboration skills.  \n   - Effective teamwork abilities, working well in a cross-functional team.  \n   - Quick adaptability, with strong self-learning and research capabilities.  \n   - Ability to work with collaborators from various fields to develop suitable materials for different groups.  \n\n- **Tools/Technology:**  \n   - Familiarity with using ChatGPT and other AI tools to assist in material development and quality control.  \n   - [Additional specific tools/technologies if needed].  \n\n---\n\n## V. Benefits  \n\n**Salary and Bonuses:**  \n- Monthly salary: [Position-specific salary]  \n- Performance-Based Bonuses: Project-based OKR bonuses, creative idea bonuses, and workflow improvement bonuses.  \n- Additional Bonuses: Holiday and birthday bonuses.  \n\n**Development Opportunities:**  \n- **Training Programs:** Enhance your job-related skills and knowledge through our comprehensive training programs.  \n- **Expert Connections:** Investment to connect and learn from experts in the domain.  \n- **Career Advancement:** Fast-track promotion to specialized management or project management positions.  \n\n**Other Benefits:**  \n- Free lunch at the company.  \n- Full insurance benefits as per state regulations after the probation period, including a 13th-month salary bonus.  \n\n---\n\n## VI. Application Method  \nInterested candidates, please submit your application and CV (in English) to the following address:  \n**Email:** recruitment@stepup.edu.vn  \n**Subject line:** [Position Name]_Your Name  \nYour application should contain a photograph of your IELTS certificate if required.\n\n**Hotline:** 0931323822 or Zalo 0397694640 (Ms. Hoàng Mơ)  \nThe recruitment team will contact suitable applicants to arrange an interview at the earliest convenience.\n\n---\n\n**Step Up's Recruitment Stages:**  \n1. **Initial review of your CV:** (within 1-3 business days).  \n2. **Professional skills test:** (received via email) and submit it within 3 days.  \n3. **Brief HR phone interview:** (10-15 minutes to discuss job basics).  \n4. **In-person interview:** With the hiring manager.\n\n---\n\nYou can now customize specific job-related details while keeping sections like \"Key Responsibilities,\" \"Requirements,\" and \"Working Hours\" consistent.",
+      "triggerInputNameList": [
+        "Ngôn ngữ JD",
+        "JD cơ bản hoặc JD hoàn chỉnh"
+      ],
+      "inputNodeTitleList": [
+        "Nghiên cứu thông tin thị trường - Model: 4o"
+      ],
+      "Agent": {
+        "title": "Quy trình tối ưu hóa JD tuyển dụng - Chỉnh sửa JD theo template",
+        "instruction": "Bạn là một nhân viên hành chính có kinh nghiệm trong việc sử dụng các công cụ văn phòng và quản lý tài liệu. Bạn có khả năng chỉnh sửa và định dạng tài liệu một cách chuyên nghiệp.",
+        "tools": []
+      }
+    }
+  ]
+}

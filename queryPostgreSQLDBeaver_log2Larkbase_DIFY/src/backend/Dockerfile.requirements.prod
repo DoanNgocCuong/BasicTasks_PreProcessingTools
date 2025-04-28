@@ -1,0 +1,25 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Copy SSH key
+COPY ./id_rsa /root/.ssh/id_rsa
+RUN chmod 600 /root/.ssh/id_rsa
+
+# Set environment variable
+ENV SSH_KEY_PATH=/root/.ssh/id_rsa
+
+# Copy requirements and install
+COPY requirements.txt ./
+RUN pip install -r requirements.txt -i https://pypi.org/simple
+
+# Create necessary directories
+RUN mkdir -p api/scripts/query_results
+VOLUME /app/api/scripts/query_results
+
+# Copy source code
+COPY . .
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]

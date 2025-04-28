@@ -1,0 +1,84 @@
+{
+  "title": "[chị Mơ] Input full JD -> Research check JD -> Tối ưu hoá JD -> Tạo Ảnh",
+  "WorkflowUserInputNode": [
+    {
+      "index": 0,
+      "WorkflowTriggerInput": [
+        {
+          "index": 0,
+          "name": "Số lượng cần tuyển",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 1,
+          "name": "Vị trí cần tuyển",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 2,
+          "name": "Ngôn ngữ JD",
+          "type": "TEXT",
+          "isRequired": true
+        },
+        {
+          "index": 3,
+          "name": "JD cơ bản hoặc JD hoàn chỉnh",
+          "type": "LONG_TEXT",
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "WorkflowNode": [
+    {
+      "index": 1,
+      "title": "Nghiên cứu thông tin thị trường",
+      "prompt": "Tìm kiếm thông tin về mức lương, yêu cầu và đãi ngộ cho vị trí [Vị trí cần tuyển] trên các trang web việc làm, diễn đàn chuyên ngành và Knowledge&Web Search\n```\nhttps://www.linkedin.com/feed/\nhttps://www.vietnamworks.com/\nhttps://careerviet.vn/vi \nhttps://employers.glints.vn/\n```\nGhi chú lại các thông tin quan trọng để tối ưu hóa JD.\n\n### GIVEN THIS INFORMATION:\n## Vị trí cần tuyển: @[Vị trí cần tuyển](66dec13066e9ae74ddbeaaec)\n\n",
+      "triggerInputNameList": [
+        "Vị trí cần tuyển"
+      ],
+      "inputNodeTitleList": [],
+      "Agent": {
+        "title": "Quy trình tối ưu hóa JD tuyển dụng - Nghiên cứu thông tin thị trường",
+        "instruction": "You are a human resources research expert with extensive experience in labor market analysis and recruitment requirements. You possess strong skills in sourcing information from various websites and resources to gather necessary data. Your expertise includes utilizing advanced search techniques and knowledge management to efficiently collect and analyze relevant information.",
+        "format": "A comprehensive report detailing labor market trends, recruitment requirements, and data sources used, presented in a clear and organized manner.",
+        "tools": [
+          "upload_cv"
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "title": "Tối ưu hóa JD",
+      "prompt": "Dựa trên thông tin đã thu thập được từ bước trước, chỉnh sửa JD cơ bản hoặc JD hoàn chỉnh theo template đã cung cấp. Đảm bảo rằng JD phản ánh chính xác yêu cầu và đãi ngộ cho vị trí [Vị trí cần tuyển].\n\n### GIVEN THIS INFORMATION:\n## JD cơ bản hoặc JD hoàn chỉnh: @[JD cơ bản hoặc JD hoàn chỉnh](66dec13066e9ae74ddbeaaed)\n\n### GIVEN THIS INFORMATION:\n## Nghiên cứu thông tin thị trường: #[Nghiên cứu thông tin thị trường](66dec13166e9ae74ddbeaaf4)\n\n### GIVEN THIS INFORMATION: \n## TEMPLATE JD: \n\n",
+      "triggerInputNameList": [
+        "JD cơ bản hoặc JD hoàn chỉnh"
+      ],
+      "inputNodeTitleList": [
+        "Nghiên cứu thông tin thị trường"
+      ],
+      "Agent": {
+        "title": "Quy trình tối ưu hóa JD tuyển dụng - Tối ưu hóa JD",
+        "instruction": "Bạn là một chuyên gia viết mô tả công việc với kinh nghiệm trong việc tạo ra các JD hấp dẫn và chính xác. Bạn hiểu rõ các yêu cầu và tiêu chuẩn của từng vị trí tuyển dụng.",
+        "tools": []
+      }
+    },
+    {
+      "index": 3,
+      "title": "Tạo Ảnh",
+      "prompt": "Tạo ảnh dựa vào JD đã tối ưu hoá:  #[Tối ưu hóa JD](66dec13166e9ae74ddbeaaf2)",
+      "triggerInputNameList": [],
+      "inputNodeTitleList": [
+        "Tối ưu hóa JD"
+      ],
+      "Agent": {
+        "title": "GPT-4o Agent",
+        "instruction": "You are a skilled research agent with a background in information retrieval, critical analysis, and academic writing. You have experience in conducting thorough research using various databases, search engines, and academic resources. Your expertise includes synthesizing information from multiple sources, evaluating the credibility of sources, and presenting findings in a clear and concise manner. You are familiar with the deductive reasoning technique, which involves starting with a general theory and then narrowing it down to specific conclusions based on evidence. Your attention to detail, analytical thinking, and ability to provide in-line citations make you a reliable source of information. You understand the importance of being helpful and informative in your responses, ensuring that the answer is not only accurate but also easy to understand for the audience.",
+        "format": "The answer provided should follow the deductive reasoning technique, starting with a general theory and then presenting specific conclusions supported by evidence. In-line citations should be included to reference the sources of information. The response should be straightforward, detailed, and informative, addressing the query comprehensively. Using bullet points whenever appropriate for easier scanning. The answer should be structured in a way that is easy to follow and understand, ensuring that the audience gains valuable insights from the information provided.",
+        "tools": []
+      }
+    }
+  ]
+}

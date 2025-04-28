@@ -1,0 +1,15 @@
+
+        prompt = f"""
+        
+        Phân vai các đoạn hội thoại giữa 'Nhân viên bán hàng' và 'Khách hàng'.
+        Loại bỏ các phần không phù hợp như 'Ghiền Mì Gõ', 'La La La School', 'Cảm ơn các bạn đã theo dõi và hẹn gặp lại'.
+        Sử dụng cách xưng hô nhất quán (anh, chị, em). 
+        Sửa các lỗi chính tả nếu có. 
+        Không thêm hoặc bớt thông tin nào khác.\n\n{transcription}"
+
+        Vui lòng định dạng đầu ra như sau:
+        Nhân viên bán hàng: [lời thoại]
+        Khách hàng: [lời thoại]
+
+
+        """

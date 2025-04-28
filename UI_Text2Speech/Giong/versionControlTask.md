@@ -1,0 +1,3 @@
+- preDemo1/Demo1.0: Các audio rời nhau và chưa có transition, dùng tay làm trên wb
+- preDemo2/Demo1.1: Có transition, bước đầu dùng code để tạo pause_3sec.mp3, dùng code để merge audio, ghép transition, ghép background.  <7 điểm>
+- Demo1/Demo1.2: cải thiện scripts dưới góc nhìn User. <8.5 điểm> + Đóng full workflow: excel + Code Python => Build nhanh Audio. 

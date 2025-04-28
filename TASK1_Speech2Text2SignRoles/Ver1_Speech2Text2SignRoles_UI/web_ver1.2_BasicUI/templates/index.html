@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech to Text and Assign Roles</title>
+    <style>
+        .disabled-button {
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            margin: auto;
+        }
+        .chat-bubble {
+            margin: 10px;
+            padding: 10px;
+            border-radius: 20px;
+            max-width: 70%;
+            position: relative;
+            font-family: Arial, sans-serif;
+        }
+        .chat-bubble::before {
+            content: "";
+            position: absolute;
+            bottom: 10px;
+            width: 0;
+            height: 0;
+            border: 10px solid transparent;
+        }
+        .customer {
+            background-color: #f1f0f0;
+            align-self: flex-start;
+            border-top-left-radius: 0;
+        }
+        .customer::before {
+            left: -20px;
+            border-right-color: #f1f0f0;
+            border-left: 0;
+            border-bottom: 0;
+        }
+        .sales {
+            background-color: #d1e7dd;
+            align-self: flex-end;
+            border-top-right-radius: 0;
+        }
+        .sales::before {
+            right: -20px;
+            border-left-color: #d1e7dd;
+            border-right: 0;
+            border-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Speech to Text and Assign Roles</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="audioFile" name="file" accept=".mp3,.wav">
+        <button type="submit" id="speechToTextButton">Speech to Text</button>
+    </form>
+    <div>
+        <h2>Transcription</h2>
+        <textarea id="transcriptionText" rows="10" cols="80"></textarea>
+    </div>
+    <button id="assignRolesButton">Assign Roles</button>
+    <div>
+        <h2>Assigned Roles</h2>
+        <div id="chatContainer" class="chat-container"></div>
+    </div>
+    <div id="message" style="color: blue; font-weight: bold;"></div>
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            var formData = new FormData();
+            var file = document.getElementById('audioFile').files[0];
+            formData.append('file', file);
+
+            var speechToTextButton = document.getElementById('speechToTextButton');
+            var messageDiv = document.getElementById('message');
+
+            speechToTextButton.disabled = true;
+            speechToTextButton.classList.add('disabled-button');
+            messageDiv.innerText = "Vui lòng đợi trong giây lát...";
+
+            fetch('/speech_to_text', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Speech to Text API response:', data);
+                if (data.success) {
+                    document.getElementById('transcriptionText').value = data.transcription;
+                } else {
+                    alert('Error: ' + data.msg);
+                }
+                messageDiv.innerText = "";
+                speechToTextButton.disabled = false;
+                speechToTextButton.classList.remove('disabled-button');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Request failed: ' + error);
+                messageDiv.innerText = "";
+                speechToTextButton.disabled = false;
+                speechToTextButton.classList.remove('disabled-button');
+            });
+        });
+
+        document.getElementById('assignRolesButton').addEventListener('click', function() {
+            var transcription = document.getElementById('transcriptionText').value;
+            var assignRolesButton = document.getElementById('assignRolesButton');
+            var messageDiv = document.getElementById('message');
+
+            assignRolesButton.disabled = true;
+            assignRolesButton.classList.add('disabled-button');
+            messageDiv.innerText = "Vui lòng đợi trong giây lát...";
+
+            fetch('/assign_roles', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ transcription: transcription })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Assign Roles API response:', data);
+                if (data.success) {
+                    renderChat(data.roles);
+                } else {
+                    alert('Error: ' + data.msg);
+                }
+                messageDiv.innerText = "";
+                assignRolesButton.disabled = false;
+                assignRolesButton.classList.remove('disabled-button');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Request failed: ' + error);
+                messageDiv.innerText = "";
+                assignRolesButton.disabled = false;
+                assignRolesButton.classList.remove('disabled-button');
+            });
+        });
+
+        function renderChat(assignedRoles) {
+            var chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = '';
+
+            var lines = assignedRoles.split('\n');
+            console.log('Lines:', lines);
+            lines.forEach(function(line) {
+                if (line.trim() === '') return;
+
+                var chatBubble = document.createElement('div');
+                chatBubble.classList.add('chat-bubble');
+
+                if (line.startsWith('Nhân viên bán hàng:')) {
+                    chatBubble.classList.add('sales');
+                    chatBubble.textContent = line.replace('Nhân viên bán hàng:', '').trim();
+                } else if (line.startsWith('Khách hàng:')) {
+                    chatBubble.classList.add('customer');
+                    chatBubble.textContent = line.replace('Khách hàng:', '').trim();
+                } else {
+                    console.log('Ignoring line:', line);
+                    return;
+                }
+
+                chatContainer.appendChild(chatBubble);
+            });
+        }
+    </script>
+</body>
+</html>
