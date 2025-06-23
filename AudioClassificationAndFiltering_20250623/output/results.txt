@@ -1,0 +1,22 @@
+=== KẾT QUẢ PHÂN LOẠI AUDIO TRẺ EM/NGƯỜI LỚN ===
+
+📊 Model: audeering/wav2vec2-large-robust-24-ft-age-gender
+🎯 Ngưỡng Child Probability: 0.4
+🎯 Ngưỡng Age: 0.25 (25.0 tuổi)
+
+📈 THỐNG KÊ TỔNG QUÁT:
+Tổng số file: 100
+Thành công: 100
+Lỗi: 0
+Trẻ em: 27
+Người lớn: 73
+Tỷ lệ thành công: 100.00%
+Tỷ lệ trẻ em: 27.00%
+Tỷ lệ người lớn: 73.00%
+
+📝 HƯỚNG DẪN TẠO GROUNDTRUTH:
+Để đánh giá độ chính xác, tạo file groundtruth.csv với format:
+filename,true_label
+audio1.wav,child
+audio2.wav,adult
+
