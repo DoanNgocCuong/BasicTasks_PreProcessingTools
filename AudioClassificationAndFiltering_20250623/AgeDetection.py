@@ -310,6 +310,13 @@ def main():
                 ]
             })
             stats_df.to_excel(writer, sheet_name='Statistics', index=False)
+
+            # Thêm sheet cho child, adult, all
+            df_child = df[df['final_label'] == 'child']
+            df_adult = df[df['final_label'] == 'adult']
+            df_child.to_excel(writer, sheet_name='child', index=False)
+            df_adult.to_excel(writer, sheet_name='adult', index=False)
+            df.to_excel(writer, sheet_name='all', index=False)
         
         logger.info(f"✅ Đã lưu kết quả vào: {excel_path}")
     except Exception as e:
