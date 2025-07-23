@@ -1,38 +1,104 @@
+#!/usr/bin/env python3
+"""
+YouTube Audio Classifier with Model Caching and Language Detection
+
+This module provides advanced audio classification capabilities specifically designed for
+analyzing YouTube video content. It combines children's voice detection with Vietnamese
+language detection, featuring intelligent model caching for optimal performance.
+
+Key Features:
+    - Children's voice detection using pre-trained age/gender classification models
+    - Vietnamese language detection using OpenAI Whisper models
+    - Intelligent model caching to prevent repeated downloads and loading
+    - Dual-analysis workflow optimized for YouTube content processing
+    - Batch processing capabilities for URL collections
+    - Comprehensive error handling and logging
+    - Memory management with manual cache clearing options
+
+Machine Learning Models:
+    - Age/Gender Classification: audeering/wav2vec2-large-robust-24-ft-age-gender
+    - Language Detection: OpenAI Whisper (configurable model size)
+    - Model caching: Shared instances across multiple classifier objects
+
+Architecture:
+    - AudioClassifier: Main classification engine with caching
+    - Model Management: Automatic loading, caching, and memory management
+    - Integration Layer: Seamless connection with youtube_audio_downloader
+
+Classification Pipeline:
+    1. Audio preprocessing and validation
+    2. Language detection using Whisper models
+    3. Age/gender classification using wav2vec2 models
+    4. Confidence scoring and threshold application
+    5. Combined result aggregation and reporting
+
+Caching System:
+    - Class-level model sharing across instances
+    - Parameter-based cache validation
+    - Memory-efficient model reuse
+    - Manual cache clearing for memory management
+
+Output Formats:
+    - Boolean results for quick decision making
+    - Detailed prediction dictionaries with confidence scores
+    - Batch processing summaries with statistics
+
+Use Cases:
+    - Content moderation for child-appropriate material
+    - Dataset curation for Vietnamese children's content
+    - Audio content analysis and classification
+    - Research applications in child speech recognition
+    - Educational content filtering and organization
+
+Dependencies:
+    - transformers: For age/gender classification models
+    - whisper: For language detection
+    - torch: For neural network inference
+    - librosa: For audio preprocessing
+    - Dynamic import of AgeDetection module
+
+Performance Optimizations:
+    - Model caching prevents repeated loading
+    - Batch processing reduces overhead
+    - Efficient memory management
+    - Configurable confidence thresholds
+
+Usage:
+    python youtube_audio_classifier.py
+    
+    Options:
+    1. Test with sample audio file
+    2. Process YouTube URLs from text file  
+    3. Clear model cache
+
+    As a module:
+    from youtube_audio_classifier import AudioClassifier
+    
+    classifier = AudioClassifier()
+    is_child = classifier.is_child_audio("path/to/audio.wav")
+    is_vietnamese = classifier.is_vietnamese("path/to/audio.wav")
+
+Author: Le Hoang Minh
+Created: 2025
+Version: 1.0
+"""
+
 import sys
+import os
+import whisper
 import importlib.util
 from pathlib import Path
 from typing import Optional, List, Dict
-import os
-import whisper
 
-"""
-YouTube Audio Classifier with Model Caching
-
-This module provides an AudioClassifier that automatically caches the loaded model
-to avoid repeated downloads/loading. The model is loaded once and reused across
-multiple function calls and instances with the same parameters.
-
-Features:
-- Automatic model caching: Model is loaded only once per session
-- Parameter validation: Only reuses cached model if parameters match
-- Memory management: Provides clear_model_cache() method to free memory
-- Progress feedback: Shows when model is being loaded vs. reused
-
-Usage:
-- Multiple AudioClassifier() instances with same parameters will reuse the model
-- Call AudioClassifier.clear_model_cache() to force reload or free memory
-"""
-
-# Add the path to AgeDetection.py to import from it
-age_detection_path = Path(__file__).parent.parent.parent / "BasicTasks_PreProcessingTools" / "19_AudioClassificationAndFiltering_20250623"
+# Import the AudioClassifier from AgeDetection.py using dynamic import
+# (Required because folder name starts with numbers, which can't be imported directly)
+age_detection_path = Path(__file__).parent.parent / "19_AudioClassificationAndFiltering_20250623"
 age_detection_file = age_detection_path / "AgeDetection.py"
 
-# Import the AudioClassifier from AgeDetection.py using importlib
 if age_detection_file.exists():
     spec = importlib.util.spec_from_file_location("AgeDetection", age_detection_file)
     if spec and spec.loader:
         age_detection_module = importlib.util.module_from_spec(spec)
-        sys.modules["AgeDetection"] = age_detection_module
         spec.loader.exec_module(age_detection_module)
         BaseAudioClassifier = age_detection_module.AudioClassifier
     else:
@@ -40,19 +106,20 @@ if age_detection_file.exists():
 else:
     raise ImportError(f"AgeDetection.py not found at {age_detection_file}")
 
-# Import the download function from youtube_audio_converter.py
-converter_path = Path(__file__).parent / "youtube_audio_converter.py"
+# Import the classes from youtube_audio_downloader.py
+converter_path = Path(__file__).parent / "youtube_audio_downloader.py"
 if converter_path.exists():
-    spec = importlib.util.spec_from_file_location("youtube_audio_converter", converter_path)
+    spec = importlib.util.spec_from_file_location("youtube_audio_downloader", converter_path)
     if spec and spec.loader:
         converter_module = importlib.util.module_from_spec(spec)
-        sys.modules["youtube_audio_converter"] = converter_module
+        sys.modules["youtube_audio_downloader"] = converter_module
         spec.loader.exec_module(converter_module)
-        download_audio_from_yturl = converter_module.download_audio_from_yturl
+        Config = converter_module.Config
+        YoutubeAudioDownloader = converter_module.YoutubeAudioDownloader
     else:
-        raise ImportError(f"Could not load youtube_audio_converter module from {converter_path}")
+        raise ImportError(f"Could not load youtube_audio_downloader module from {converter_path}")
 else:
-    raise ImportError(f"youtube_audio_converter.py not found at {converter_path}")
+    raise ImportError(f"youtube_audio_downloader.py not found at {converter_path}")
 
 class AudioClassifier:
     # Class-level variable to store the shared model instance
@@ -252,8 +319,10 @@ def process_youtube_urls_from_file(txt_file_path: str) -> Dict[str, int]:
     
     print(f"Found {len(urls)} URLs to process...")
     
-    # Initialize classifier and counters
+    # Initialize classifier, downloader, and counters
     classifier = AudioClassifier()
+    config = Config()
+    downloader = YoutubeAudioDownloader(config)
     results = {"children": 0, "non_children": 0, "errors": 0}
     
     # Summary file path
@@ -270,7 +339,7 @@ def process_youtube_urls_from_file(txt_file_path: str) -> Dict[str, int]:
         try:
             # Download and convert to audio
             print(f"  Downloading and converting audio...")
-            audio_file_path = download_audio_from_yturl(url, index=i)
+            audio_file_path = downloader.download_audio_from_yturl(url, index=i)
             
             if audio_file_path is None:
                 print(f"  Failed to download/convert audio from: {url}")

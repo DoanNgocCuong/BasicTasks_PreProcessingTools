@@ -1,105 +1,167 @@
-# YouTube Video Searcher for Children's Speech Data Collection
+# YouTube Children's Voice Crawler
 
-This script implements an algorithm to collect YouTube videos containing children's speech using the YouTube Data API v3.
+AI-powered system for collecting YouTube videos with Vietnamese children's voices using ML-based audio analysis.
 
-## Setup Instructions
+## Setup
 
-### 1. Install Dependencies
+### Prerequisites
+
+- Python 3.8+ (check with `python --version`)
+- Git (for cloning)
+- Internet connection (for model downloads)
+
+### 1. Clone and navigate
+
+```bash
+git clone "https://github.com/DoanNgocCuong/BasicTasks_PreProcessingTools.git"
+cd BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice
+```
+
+### 2. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Get YouTube Data API Key
+### 3. Get YouTube Data API key
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the YouTube Data API v3
-4. Create credentials (API Key)
-5. Copy your API key
+- Go to [Google Cloud Console](https://console.cloud.google.com/)
+- Create new project or select existing one
+- Enable "YouTube Data API v3" in APIs & Services
+- Create credentials → API key
+- Copy the API key
 
-### 3. Set Environment Variable
-
-**Windows (PowerShell):**
-
-```powershell
-$env:YOUTUBE_API_KEY="your_api_key_here"
-```
-
-**Windows (Command Prompt):**
-
-```cmd
-set YOUTUBE_API_KEY=your_api_key_here
-```
-
-**Linux/Mac:**
+### 4. Set environment variable
 
 ```bash
+# Windows PowerShell
+$env:YOUTUBE_API_KEY="your_api_key_here"
+
+# Windows Command Prompt
+set YOUTUBE_API_KEY=your_api_key_here
+
+# Linux/Mac
 export YOUTUBE_API_KEY="your_api_key_here"
 ```
 
+### 5. Install FFmpeg
+
+**Windows:**
+
+- Download from [FFmpeg.org](https://ffmpeg.org/download.html)
+- Extract to folder (e.g., `C:\ffmpeg`)
+- Add `C:\ffmpeg\bin` to system PATH
+
+**Linux (Ubuntu/Debian):**
+
+```bash
+sudo apt update
+sudo apt install ffmpeg
+```
+
+**Mac:**
+
+```bash
+brew install ffmpeg
+```
+
+### 6. Verify installation
+
+```bash
+# Test FFmpeg
+ffmpeg -version
+
+# Test environment variable
+echo $YOUTUBE_API_KEY    # Linux/Mac
+echo %YOUTUBE_API_KEY%   # Windows CMD
+$env:YOUTUBE_API_KEY     # Windows PowerShell
+
+# Test Python imports
+python -c "import torch, transformers, whisper; print('ML dependencies OK')"
+```
+
+### 7. Create required directories (automatic)
+
+The script will automatically create:
+
+- `youtube_url_outputs/` - For collection results
+- `youtube_audio_outputs/` - For temporary audio files
+
 ## Usage
 
-### Basic Usage
+```bash
+# Main collection (interactive mode)
+python youtube_video_crawler.py
 
-```python
-python youtube-video-searcher.py
+# Validate URLs
+python youtube_output_validator.py
+
+# Test audio classifier
+python youtube_audio_classifier.py
 ```
 
-### Programmatic Usage
+## How It Works
 
-```python
-from youtube_video_searcher import YouTubeVideoSearcher
+1. **Search**: YouTube API searches with configurable queries
+2. **Download**: Convert videos to WAV using yt-dlp + FFmpeg
+3. **Analyze**: ML models detect children's voice + Vietnamese language
+4. **Explore**: Find similar content in promising channels
+5. **Report**: Generate statistics and cleaned datasets
 
-# Initialize with your API key
-searcher = YouTubeVideoSearcher("your_api_key_here")
+## Core Components
 
-# Collect videos
-video_urls = searcher.collect_videos()
-
-# Save results
-searcher.save_results("output_urls.txt")
-searcher.save_detailed_results("detailed_results.json")
-```
-
-### Customization
-
-You can modify the following parameters in the `YouTubeVideoSearcher` class:
-
-- `target_video_count`: Number of videos to collect (default: 50)
-- `initial_query`: Search query (default: "bé giới thiệu bản thân")
-
-## Algorithm Overview
-
-The script follows this logic:
-
-1. Search YouTube with initial query
-2. For each video found:
-   - Check if it contains children's voice (currently random for testing)
-   - Check if the channel hasn't been reviewed before
-   - If both conditions are met:
-     - Add the video to collection
-     - Search for similar videos in the same channel
-     - Add those videos to collection
-     - Mark channel as reviewed
-3. Continue until target number of videos is collected
+- `youtube_video_crawler.py` - Main orchestrator
+- `youtube_audio_classifier.py` - ML audio analysis (wav2vec2 + Whisper)
+- `youtube_audio_downloader.py` - YouTube to WAV conversion
+- `youtube_output_analyzer.py` - Statistics and reporting
+- `youtube_output_validator.py` - URL validation and deduplication
 
 ## Output Files
 
-- `newly_crawled_youtube_video_urls.txt`: List of video URLs
-- `collected_videos_detailed.json`: Detailed information including metadata
+```
+youtube_url_outputs/
+├── collected_video_urls.txt           # Final URL list
+├── detailed_collection_results.json   # Complete metadata
+├── query_efficiency_statistics.json   # Performance metrics
+└── backup_TIMESTAMP_*.txt             # Timestamped backups
+```
 
-## Important Notes
+## Configuration Examples
 
-- The `contains_children_voice()` function currently returns random True/False values
-- This is marked as TODO and needs to be implemented with proper voice detection
-- The script respects YouTube API quotas and includes error handling
-- Videos are deduplicated to avoid collecting the same video multiple times
+**Vietnamese search queries:**
 
-## API Quotas
+```
+bé giới thiệu bản thân    # Children introducing themselves
+bé tập nói tiếng Việt     # Children learning Vietnamese
+trẻ em kể chuyện          # Children telling stories
+```
 
-Be aware of YouTube Data API v3 quotas:
+**Recommended settings:**
 
-- Default quota: 10,000 units per day
-- Search operations cost 100 units each
-- Monitor your usage in Google Cloud Console
+- Videos per query: 10-50
+- Total target: 50-200
+- Enable debug mode for detailed logging
+
+## Key Dependencies
+
+```
+google-api-python-client  # YouTube API
+yt-dlp                   # Video downloading
+ffmpeg-python            # Audio conversion
+torch + transformers     # ML models
+openai-whisper          # Language detection
+```
+
+## Troubleshooting
+
+- **API errors**: Check `echo $YOUTUBE_API_KEY` and Google Console quotas
+- **FFmpeg errors**: Test with `ffmpeg -version`
+- **Model issues**: Use `AudioClassifier.clear_model_cache()`
+
+## Algorithm
+
+1. Load existing URLs (prevent duplicates)
+2. For each query: search → analyze audio → explore channels
+3. Filter: Vietnamese language + children's voice
+4. Track: reviewed channels, statistics, progress
+5. Output: URLs + comprehensive reports

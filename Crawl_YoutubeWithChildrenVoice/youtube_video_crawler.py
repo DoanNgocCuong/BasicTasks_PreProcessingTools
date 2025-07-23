@@ -1,14 +1,71 @@
+#!/usr/bin/env python3
+"""
+YouTube Video Crawler for Children's Voice Content Collection
+
+This module provides comprehensive functionality for collecting and analyzing YouTube videos
+containing Vietnamese children's voices. It integrates with YouTube Data API v3 to search
+for videos, downloads and analyzes audio content using machine learning models, and provides
+detailed reporting and statistics.
+
+Key Features:
+    - Multi-query video collection with intelligent deduplication
+    - Automated audio analysis for children's voice detection
+    - Vietnamese language detection and filtering
+    - Channel exploration for finding similar content
+    - Real-time progress tracking and statistics
+    - Comprehensive output analysis and reporting
+    - Configurable target limits and collection criteria
+
+Architecture:
+    The module follows a modular design with specialized classes:
+    - YouTubeVideoCrawler: Main orchestrator for video collection
+    - OutputManager: Centralized output formatting and display
+    - CollectionReporter: Handles collection progress and statistics reporting
+    - ErrorReporter: Manages error reporting and exception handling
+    - UserInputManager: Handles all user interaction and input validation
+    - DebugLogger: Provides detailed debugging and logging capabilities
+
+Workflow:
+    1. User configuration (target counts, search queries, debug mode)
+    2. YouTube API search for videos matching queries
+    3. Audio download and analysis (language + children's voice detection)
+    4. Channel exploration for finding similar content
+    5. Real-time progress tracking and duplicate prevention
+    6. Comprehensive reporting and statistics generation
+
+Dependencies:
+    - YouTube Data API v3 (requires YOUTUBE_API_KEY environment variable)
+    - youtube_audio_downloader: For converting YouTube videos to audio
+    - youtube_audio_classifier: For ML-based audio analysis
+    - youtube_output_analyzer: For generating comprehensive reports
+
+Usage:
+    python youtube_video_crawler.py
+    
+Environment Variables:
+    YOUTUBE_API_KEY: Required Google YouTube Data API v3 key
+
+Output Files:
+    - collected_video_urls.txt: List of collected video URLs
+    - collection_report.txt: Human-readable collection summary
+    - detailed_collection_results.json: Comprehensive statistics and metadata
+    - query_efficiency_statistics.json: Per-query performance metrics
+
+Author: Le Hoang Minh
+Created: 2025
+Version: 1.0
+"""
+
 import os
-import json
 import requests
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Set
 from dataclasses import dataclass
-from youtube_audio_converter import download_audio_from_yturl
+from youtube_audio_downloader import Config as AudioConfig, YoutubeAudioDownloader
 from youtube_audio_classifier import AudioClassifier
-import os
+from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
 
 
 # Configuration constants
@@ -22,10 +79,16 @@ class Config:
     
     # File names (relative to the script's directory)
     _SCRIPT_DIR = Path(__file__).parent
-    DEFAULT_URLS_FILE = str(_SCRIPT_DIR / "youtube-url-outputs/collected_video_urls.txt")
-    DEFAULT_REPORT_FILE = str(_SCRIPT_DIR / "youtube-url-outputs/collection_report.txt")
-    DEFAULT_DETAILED_RESULTS_FILE = str(_SCRIPT_DIR / "youtube-url-outputs/detailed_collection_results.json")
-    DEFAULT_STATISTICS_FILE = str(_SCRIPT_DIR / "youtube-url-outputs/query_efficiency_statistics.json")
+    DEFAULT_URLS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/collected_video_urls.txt")
+    DEFAULT_REPORT_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/collection_report.txt")
+    DEFAULT_DETAILED_RESULTS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/detailed_collection_results.json")
+    DEFAULT_STATISTICS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/query_efficiency_statistics.json")
+    
+    # Additional file paths for main() function
+    DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "youtube_url_outputs"
+    DEFAULT_MAIN_URLS_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_collected_video_urls.txt")
+    DEFAULT_MAIN_DETAILED_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_detailed_results.json")
+    DEFAULT_BACKUP_FILE_PREFIX = str(DEFAULT_OUTPUT_DIR / "backup")  # Will be used with timestamp
 
     # User input validation
     MIN_TARGET_COUNT = 1
@@ -47,22 +110,6 @@ class AnalysisResult:
     has_children_voice: Optional[bool]
     confidence: float
     error: Optional[str]
-
-
-@dataclass
-class QueryStatistics:
-    """Data class for query statistics."""
-    query: str
-    videos_collected: int
-    videos_reviewed: int
-    videos_evaluated: int
-    videos_with_children_voice: int
-    videos_vietnamese: int
-    videos_not_vietnamese: int
-    efficiency_rate: float
-    children_voice_rate: float
-    vietnamese_rate: float
-    new_channels_found: int
 
 
 class OutputManager:
@@ -256,7 +303,7 @@ class CollectionReporter:
     
     def report_collection_completion(self, total_collected: int) -> None:
         """Report completion of entire collection."""
-        print(f"\nCollection completed! Total videos collected: {total_collected}")
+        print(f"\nCollection completed! Videos collected in current session: {total_collected}")
     
     def report_file_operations(self, operation: str, filepath: str) -> None:
         """Report file operation results."""
@@ -487,9 +534,16 @@ class YouTubeVideoCrawler:
         self.error_reporter = ErrorReporter(self.output)
         self.input_manager = UserInputManager(self.output)
         
+        # Initialize output analyzer
+        self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
+        
         self.debug = DebugLogger(enabled=debug_mode)
         self.api_key = self._get_api_key()
         self.base_url = Config.YOUTUBE_API_BASE_URL
+        
+        # Initialize audio downloader
+        audio_config = AudioConfig()
+        self.audio_downloader = YoutubeAudioDownloader(audio_config)
         
         # Global variables for multiple query processing
         self.reviewed_channels: List[str] = []
@@ -498,6 +552,10 @@ class YouTubeVideoCrawler:
         
         # Load existing URLs from file if it exists
         self._load_existing_urls()
+        
+        # Track videos collected in current session only (not including pre-existing ones)
+        self.current_session_collected_count = 0
+        self.current_session_collected_urls: List[str] = []
         
         self.target_video_count_per_query = self.input_manager.get_target_count_per_query()
         self.total_target_count = self.input_manager.get_total_target_count()
@@ -561,7 +619,7 @@ class YouTubeVideoCrawler:
         try:
             # Convert YouTube video to .wav file once for both analyses
             # Use global download index to prevent file overlap
-            wav_file_path = download_audio_from_yturl(video['url'], index=self.global_video_download_index)
+            wav_file_path = self.audio_downloader.download_audio_from_yturl(video['url'], index=self.global_video_download_index)
             current_download_index = self.global_video_download_index
             self.global_video_download_index += 1  # Increment for next download
             
@@ -794,6 +852,8 @@ class YouTubeVideoCrawler:
             # Add current video to collection
             self.total_video_urls.append(video['url'])
             self.collected_url_set.add(video['url'])
+            self.current_session_collected_count += 1
+            self.current_session_collected_urls.append(video['url'])
             self._save_url_to_file(video, Config.DEFAULT_URLS_FILE)
             query_stats['videos_collected'] += 1
             
@@ -837,8 +897,11 @@ class YouTubeVideoCrawler:
             
             # Check if we've reached target counts
             if (query_stats['videos_collected'] >= self.target_video_count_per_query or 
-                len(self.total_video_urls) >= self.total_target_count):
+                self.current_session_collected_count >= self.total_target_count):
                 break
+            
+            # Count similar video as reviewed since we're processing it
+            query_stats['videos_reviewed'] += 1
             
             # Analyze similar video audio (language + children's voice detection)
             print(f"Analyzing similar video: {similar_video['title']}")
@@ -871,6 +934,8 @@ class YouTubeVideoCrawler:
                 # Only add to results when confirmed to have children's voice
                 self.total_video_urls.append(similar_video['url'])
                 self.collected_url_set.add(similar_video['url'])
+                self.current_session_collected_count += 1
+                self.current_session_collected_urls.append(similar_video['url'])
                 self._save_url_to_file(similar_video, Config.DEFAULT_URLS_FILE)
                 query_stats['videos_collected'] += 1
                 added_count += 1
@@ -913,8 +978,8 @@ class YouTubeVideoCrawler:
         
         # Main loop for each query
         for query_index, current_query in enumerate(self.query_list, 1):
-            # Check if we've reached the total target count
-            if len(self.total_video_urls) >= self.total_target_count:
+            # Check if we've reached the total target count for current session
+            if self.current_session_collected_count >= self.total_target_count:
                 self.output.print_success(f"🎯 Total target count of {self.total_target_count} videos reached!")
                 self.output.print_info(f"Stopping collection at query {query_index}/{len(self.query_list)}")
                 break
@@ -944,7 +1009,7 @@ class YouTubeVideoCrawler:
             # Collection loop for current query
             while (query_stats['videos_collected'] < self.target_video_count_per_query and 
                    video_index_current < len(video_list) and 
-                   len(self.total_video_urls) < self.total_target_count):
+                   self.current_session_collected_count < self.total_target_count):
                 
                 current_video_processing = video_list[video_index_current]
                 query_stats['videos_reviewed'] += 1
@@ -963,7 +1028,7 @@ class YouTubeVideoCrawler:
                 video_added = self._process_main_video(current_video_processing, query_stats)
                 
                 self.reporter.report_total_progress(
-                    len(self.total_video_urls), 
+                    self.current_session_collected_count, 
                     self.total_target_count,
                     query_stats['videos_collected'], 
                     self.target_video_count_per_query
@@ -978,16 +1043,60 @@ class YouTubeVideoCrawler:
             self.reporter.report_query_statistics(current_query_stats)
         
         # Generate and save final report
-        final_report = self._generate_final_report()
+        final_report = self.analyzer.generate_final_report(
+            self.current_session_collected_count,
+            self.total_video_urls,
+            self.total_target_count,
+            self.target_video_count_per_query,
+            self.total_videos_evaluated,
+            self.total_videos_with_children_voice,
+            self.total_videos_vietnamese,
+            self.total_videos_not_vietnamese,
+            self.query_list,
+            self.query_statistics,
+            self.reviewed_channels
+        )
         print(final_report)
-        self._save_report_to_file(final_report, Config.DEFAULT_REPORT_FILE)
         
-        # Save results and statistics
-        self._save_detailed_results_with_statistics()
-        self.save_statistics_to_file(Config.DEFAULT_STATISTICS_FILE)
-        self._create_backup_file()
+        # Create timestamped report filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        report_filename = str(Config.DEFAULT_OUTPUT_DIR / f"{timestamp}_collection_report.txt")
+        self.analyzer.save_report_to_file(final_report, report_filename)
         
-        self.reporter.report_collection_completion(len(self.total_video_urls))
+        # Save results and statistics with timestamps
+        detailed_results_filename = str(Config.DEFAULT_OUTPUT_DIR / f"{timestamp}_detailed_collection_results.json")
+        statistics_filename = str(Config.DEFAULT_OUTPUT_DIR / f"{timestamp}_query_efficiency_statistics.json")
+        self.analyzer.save_detailed_results_with_statistics(
+            detailed_results_filename,
+            self.current_session_collected_count,
+            self.total_video_urls,
+            self.total_target_count,
+            self.target_video_count_per_query,
+            self.total_videos_evaluated,
+            self.total_videos_with_children_voice,
+            self.total_videos_vietnamese,
+            self.total_videos_not_vietnamese,
+            self.query_list,
+            self.query_statistics,
+            self.reviewed_channels,
+            self.current_session_collected_urls,
+            self.start_time,
+            self.start_datetime
+        )
+        self.analyzer.save_statistics_to_file(
+            statistics_filename,
+            self.query_statistics,
+            self.query_list,
+            self.target_video_count_per_query,
+            self.total_target_count,
+            self.current_session_collected_count,
+            self.total_video_urls,
+            self.total_videos_evaluated,
+            self.total_videos_with_children_voice
+        )
+        self.analyzer.create_backup_file(self.total_video_urls)
+        
+        self.reporter.report_collection_completion(self.current_session_collected_count)
         return self.total_video_urls
     
     def _save_url_to_file(self, video_info: Dict, filename: str) -> None:
@@ -1006,217 +1115,6 @@ class YouTubeVideoCrawler:
         # In a full implementation, you would track which channels were found for each query
         return len(self.reviewed_channels)
     
-    def _generate_final_report(self) -> str:
-        """Generate comprehensive final report."""
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        total_children_voice_rate = (self.total_videos_with_children_voice / self.total_videos_evaluated * 100) if self.total_videos_evaluated > 0 else 0
-        total_vietnamese_rate = (self.total_videos_vietnamese / (self.total_videos_vietnamese + self.total_videos_not_vietnamese) * 100) if (self.total_videos_vietnamese + self.total_videos_not_vietnamese) > 0 else 0
-        
-        report = "=== FINAL COLLECTION REPORT FOR VIETNAMESE CHILDREN'S VOICE VIDEOS ===\n"
-        report += f"Report generated: {current_time}\n\n"
-        
-        report += "=== OVERALL STATISTICS ===\n"
-        report += f"Total videos collected: {len(self.total_video_urls)}\n"
-        report += f"Total target count: {self.total_target_count}\n"
-        report += f"Target per query: {self.target_video_count_per_query}\n"
-        report += f"Target achievement: {(len(self.total_video_urls) / self.total_target_count * 100):.2f}%\n"
-        report += f"Total videos evaluated: {self.total_videos_evaluated}\n"
-        report += f"Total videos with children's voice: {self.total_videos_with_children_voice}\n"
-        report += f"Total videos in Vietnamese: {self.total_videos_vietnamese}\n"
-        report += f"Total videos not in Vietnamese: {self.total_videos_not_vietnamese}\n"
-        report += f"Overall children's voice rate: {total_children_voice_rate:.2f}%\n"
-        report += f"Overall Vietnamese rate: {total_vietnamese_rate:.2f}%\n"
-        report += f"Total queries processed: {len(self.query_list)}\n"
-        report += f"Total channels reviewed: {len(self.reviewed_channels)}\n\n"
-        
-        report += "=== DETAILED STATISTICS BY QUERY ===\n"
-        for stat in self.query_statistics:
-            report += f"Query: \"{stat.query}\"\n"
-            report += f"  - Videos collected: {stat.videos_collected}\n"
-            report += f"  - Videos reviewed: {stat.videos_reviewed}\n"
-            report += f"  - Videos evaluated: {stat.videos_evaluated}\n"
-            report += f"  - Videos with children's voice: {stat.videos_with_children_voice}\n"
-            report += f"  - Videos in Vietnamese: {stat.videos_vietnamese}\n"
-            report += f"  - Videos not in Vietnamese: {stat.videos_not_vietnamese}\n"
-            report += f"  - Efficiency rate: {stat.efficiency_rate:.2f}%\n"
-            report += f"  - Children's voice rate: {stat.children_voice_rate:.2f}%\n"
-            report += f"  - Vietnamese rate: {stat.vietnamese_rate:.2f}%\n"
-            report += f"  - New channels found: {stat.new_channels_found}\n\n"
-        
-        # Find best and worst performing queries
-        if self.query_statistics:
-            best_efficiency = max(self.query_statistics, key=lambda x: x.efficiency_rate)
-            worst_efficiency = min(self.query_statistics, key=lambda x: x.efficiency_rate)
-            best_children_voice = max(self.query_statistics, key=lambda x: x.children_voice_rate)
-            best_vietnamese = max(self.query_statistics, key=lambda x: x.vietnamese_rate)
-            
-            report += "=== QUERY PERFORMANCE ANALYSIS ===\n"
-            report += f"Most efficient query: \"{best_efficiency.query}\" ({best_efficiency.efficiency_rate:.2f}%)\n"
-            report += f"Least efficient query: \"{worst_efficiency.query}\" ({worst_efficiency.efficiency_rate:.2f}%)\n"
-            report += f"Best children's voice rate: \"{best_children_voice.query}\" ({best_children_voice.children_voice_rate:.2f}%)\n"
-            report += f"Best Vietnamese rate: \"{best_vietnamese.query}\" ({best_vietnamese.vietnamese_rate:.2f}%)\n\n"
-            
-            report += "=== RECOMMENDATIONS ===\n"
-            report += f"- Prioritize using query: \"{best_efficiency.query}\" for high efficiency\n"
-            report += f"- Consider improving or replacing query: \"{worst_efficiency.query}\"\n"
-            report += f"- Query \"{best_children_voice.query}\" provides best quality results\n"
-            report += f"- Query \"{best_vietnamese.query}\" has highest Vietnamese content rate\n"
-            report += f"- Language detection helps improve collection accuracy\n\n"
-        
-        report += "=== END OF REPORT ===\n"
-        return report
-    
-    def _save_report_to_file(self, report_content: str, filename: str) -> None:
-        """Save report to file."""
-        try:
-            filepath = Path(filename)
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            with filepath.open('w', encoding='utf-8') as f:
-                f.write(report_content)
-            self.reporter.report_file_operations("Report saved to", str(filepath.resolve()))
-        except Exception as e:
-            self.error_reporter.report_file_error("saving report", e)
-    
-    def _save_detailed_results_with_statistics(self) -> None:
-        """Save detailed results with statistics to JSON file."""
-        filepath = Path(Config.DEFAULT_DETAILED_RESULTS_FILE)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        
-        end_time = time.time()
-        total_runtime = end_time - self.start_time
-        
-        # Convert QueryStatistics objects to dictionaries for JSON serialization
-        query_stats_dicts = []
-        for stat in self.query_statistics:
-            query_stats_dicts.append({
-                'query': stat.query,
-                'videos_collected': stat.videos_collected,
-                'videos_reviewed': stat.videos_reviewed,
-                'videos_evaluated': stat.videos_evaluated,
-                'videos_with_children_voice': stat.videos_with_children_voice,
-                'videos_vietnamese': stat.videos_vietnamese,
-                'videos_not_vietnamese': stat.videos_not_vietnamese,
-                'efficiency_rate': stat.efficiency_rate,
-                'children_voice_rate': stat.children_voice_rate,
-                'vietnamese_rate': stat.vietnamese_rate,
-                'new_channels_found': stat.new_channels_found
-            })
-        
-        detailed_results = {
-            'collection_summary': {
-                'total_videos_collected': len(self.total_video_urls),
-                'total_target_count': self.total_target_count,
-                'target_videos_per_query': self.target_video_count_per_query,
-                'target_achievement_rate': f"{(len(self.total_video_urls) / self.total_target_count * 100):.2f}%",
-                'total_queries_processed': len(self.query_list),
-                'reviewed_channels': len(self.reviewed_channels),
-                'total_videos_evaluated': self.total_videos_evaluated,
-                'total_videos_with_children_voice': self.total_videos_with_children_voice,
-                'total_videos_vietnamese': self.total_videos_vietnamese,
-                'total_videos_not_vietnamese': self.total_videos_not_vietnamese,
-                'overall_children_voice_rate': f"{(self.total_videos_with_children_voice / max(self.total_videos_evaluated, 1) * 100):.2f}%",
-                'overall_vietnamese_rate': f"{(self.total_videos_vietnamese / max(self.total_videos_vietnamese + self.total_videos_not_vietnamese, 1) * 100):.2f}%",
-                'runtime_statistics': {
-                    'start_time': self.start_datetime.isoformat(),
-                    'end_time': datetime.now().isoformat(),
-                    'total_runtime_seconds': round(total_runtime, 2),
-                    'total_runtime_formatted': self._format_duration(total_runtime),
-                    'collection_efficiency': f"{(len(self.total_video_urls) / max(self.total_videos_evaluated, 1)) * 100:.1f}%" if self.total_videos_evaluated > 0 else "0%"
-                }
-            },
-            'query_list': self.query_list,
-            'query_statistics': query_stats_dicts,
-            'reviewed_channels': self.reviewed_channels,
-            'video_urls': self.total_video_urls
-        }
-        
-        with filepath.open('w', encoding='utf-8') as f:
-            json.dump(detailed_results, f, indent=2, ensure_ascii=False)
-        
-        self.reporter.report_file_operations("Detailed results saved to", str(filepath.resolve()))
-    
-    def _create_backup_file(self) -> None:
-        """Create backup file with timestamp."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_filename = f"backup_{timestamp}_collected_videos.txt"
-        
-        try:
-            filepath = Path(backup_filename)
-            with filepath.open('w', encoding='utf-8') as f:
-                for url in self.total_video_urls:
-                    f.write(url + '\n')
-            self.reporter.report_file_operations("Backup created", backup_filename)
-        except Exception as e:
-            self.error_reporter.report_file_error("creating backup", e)
-    
-    def save_statistics_to_file(self, filename: str = Config.DEFAULT_STATISTICS_FILE) -> None:
-        """Save query statistics to JSON file."""
-        try:
-            filepath = Path(filename)
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Convert QueryStatistics objects to dictionaries for JSON serialization
-            query_stats_dicts = []
-            for stat in self.query_statistics:
-                query_stats_dicts.append({
-                    'query': stat.query,
-                    'videos_collected': stat.videos_collected,
-                    'videos_reviewed': stat.videos_reviewed,
-                    'videos_evaluated': stat.videos_evaluated,
-                    'videos_with_children_voice': stat.videos_with_children_voice,
-                    'videos_vietnamese': stat.videos_vietnamese,
-                    'videos_not_vietnamese': stat.videos_not_vietnamese,
-                    'efficiency_rate': stat.efficiency_rate,
-                    'children_voice_rate': stat.children_voice_rate,
-                    'vietnamese_rate': stat.vietnamese_rate,
-                    'new_channels_found': stat.new_channels_found
-                })
-            
-            statistics_data = {
-                'collection_metadata': {
-                    'collection_date': datetime.now().isoformat(),
-                    'total_queries': len(self.query_list),
-                    'target_per_query': self.target_video_count_per_query,
-                    'total_target_count': self.total_target_count,
-                    'total_videos_collected': len(self.total_video_urls),
-                    'target_achievement_rate': f"{(len(self.total_video_urls) / self.total_target_count * 100):.2f}%",
-                    'total_videos_evaluated': self.total_videos_evaluated,
-                    'total_videos_with_children_voice': self.total_videos_with_children_voice,
-                    'overall_efficiency': f"{(len(self.total_video_urls) / max(self.total_videos_evaluated, 1)) * 100:.2f}%"
-                },
-                'query_statistics': query_stats_dicts,
-                'query_list': self.query_list
-            }
-            
-            with filepath.open('w', encoding='utf-8') as f:
-                json.dump(statistics_data, f, indent=2, ensure_ascii=False)
-            
-            self.reporter.report_file_operations("Statistics saved to", str(filepath.resolve()))
-        except Exception as e:
-            self.error_reporter.report_file_error("saving statistics", e)
-    
-    def _format_duration(self, seconds: float) -> str:
-        """
-        Format duration in seconds to a readable string
-        
-        Args:
-            seconds (float): Duration in seconds
-            
-        Returns:
-            str: Formatted duration string
-        """
-        if seconds < 60:
-            return f"{seconds:.2f} seconds"
-        elif seconds < 3600:
-            minutes = int(seconds // 60)
-            remaining_seconds = seconds % 60
-            return f"{minutes}m {remaining_seconds:.1f}s"
-        else:
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            remaining_seconds = seconds % 60
-            return f"{hours}h {minutes}m {remaining_seconds:.1f}s"
-    
     def save_results(self, filename: str = Config.DEFAULT_URLS_FILE) -> None:
         """
         Save collected video URLs to a file
@@ -1232,54 +1130,12 @@ class YouTubeVideoCrawler:
                 f.write(url + '\n')
         
         self.reporter.report_file_operations("Results saved to", str(filepath.resolve()))
-    
-    def save_detailed_results(self, filename: str = "collected_videos_detailed.json"):
-        """
-        Save detailed video information to JSON file.
-        
-        Args:
-            filename (str): Output filename
-        """
-        filepath = Path(filename)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Calculate runtime statistics
-        end_time = time.time()
-        total_runtime = end_time - self.start_time
-        
-        detailed_results = {
-            'collection_summary': {
-                'total_videos': len(self.total_video_urls),
-                'total_target_count': self.total_target_count,
-                'target_count_per_query': self.target_video_count_per_query,
-                'target_achievement_rate': f"{(len(self.total_video_urls) / self.total_target_count * 100):.2f}%",
-                'reviewed_channels': len(self.reviewed_channels),
-                'query_list': self.query_list,
-                'runtime_statistics': {
-                    'start_time': self.start_datetime.isoformat(),
-                    'end_time': datetime.now().isoformat(),
-                    'total_runtime_seconds': round(total_runtime, 2),
-                    'total_runtime_formatted': self._format_duration(total_runtime),
-                    'videos_evaluated': self.total_videos_evaluated,
-                    'average_time_per_video_seconds': round(total_runtime / len(self.total_video_urls), 2) if self.total_video_urls else 0,
-                    'collection_efficiency': f"{(len(self.total_video_urls) / max(self.total_videos_evaluated, 1)) * 100:.1f}%" if self.total_videos_evaluated > 0 else "0%"
-                }
-            },
-            'reviewed_channels': self.reviewed_channels,
-            'video_urls': self.total_video_urls
-        }
-        
-        with filepath.open('w', encoding='utf-8') as f:
-            json.dump(detailed_results, f, indent=2, ensure_ascii=False)
-        
-        self.reporter.report_file_operations("Detailed results saved to", str(filepath.resolve()))
 
 def main():
     """Main function to run the YouTube video searcher."""
     output_manager = OutputManager()
     error_reporter = ErrorReporter(output_manager)
     input_manager = UserInputManager(output_manager)
-    reporter = CollectionReporter(output_manager)
     
     try:
         # Ask user about debug mode
@@ -1293,11 +1149,14 @@ def main():
         
         # Save results
         if video_urls:
-            base_dir = Path(__file__).parent
-            output_dir = base_dir / 'youtube-urls'
-            output_dir.mkdir(parents=True, exist_ok=True)
-            searcher.save_results(str(output_dir / "multi_query_collected_video_urls.txt"))
-            searcher.save_detailed_results(str(output_dir / "multi_query_detailed_results.json"))
+            # Ensure output directory exists
+            Config.DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # Create timestamped filenames for main results
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            main_urls_filename = str(Config.DEFAULT_OUTPUT_DIR / f"{timestamp}_multi_query_collected_video_urls.txt")
+            
+            searcher.save_results(main_urls_filename)
         else:
             output_manager.print_warning("No videos were collected")
             

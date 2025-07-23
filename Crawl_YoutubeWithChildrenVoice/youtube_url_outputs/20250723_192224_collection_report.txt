@@ -1,0 +1,57 @@
+=== FINAL COLLECTION REPORT FOR VIETNAMESE CHILDREN'S VOICE VIDEOS ===
+Report generated: 2025-07-23 19:22:24
+
+=== OVERALL STATISTICS ===
+Videos collected in current session: 2
+Total videos in file (including existing): 2064
+Total target count: 2
+Target per query: 1
+Target achievement: 100.00%
+Total videos evaluated: 3
+Total videos with children's voice: 2
+Total videos in Vietnamese: 3
+Total videos not in Vietnamese: 1
+Overall children's voice rate: 66.67%
+Overall Vietnamese rate: 75.00%
+Total queries processed: 2
+Total channels reviewed: 2
+
+=== DETAILED STATISTICS BY QUERY ===
+Query: "bé hát ca dao"
+  - Videos collected: 1
+  - Videos reviewed: 3
+  - Videos evaluated: 2
+  - Videos with children's voice: 1
+  - Videos in Vietnamese: 2
+  - Videos not in Vietnamese: 1
+  - Efficiency rate: 33.33%
+  - Children's voice rate: 50.00%
+  - Vietnamese rate: 66.67%
+  - New channels found: 1
+
+Query: "bé hát bài trẻ em"
+  - Videos collected: 1
+  - Videos reviewed: 1
+  - Videos evaluated: 1
+  - Videos with children's voice: 1
+  - Videos in Vietnamese: 1
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 100.00%
+  - Children's voice rate: 100.00%
+  - Vietnamese rate: 100.00%
+  - New channels found: 2
+
+=== QUERY PERFORMANCE ANALYSIS ===
+Most efficient query: "bé hát bài trẻ em" (100.00%)
+Least efficient query: "bé hát ca dao" (33.33%)
+Best children's voice rate: "bé hát bài trẻ em" (100.00%)
+Best Vietnamese rate: "bé hát bài trẻ em" (100.00%)
+
+=== RECOMMENDATIONS ===
+- Prioritize using query: "bé hát bài trẻ em" for high efficiency
+- Consider improving or replacing query: "bé hát ca dao"
+- Query "bé hát bài trẻ em" provides best quality results
+- Query "bé hát bài trẻ em" has highest Vietnamese content rate
+- Language detection helps improve collection accuracy
+
+=== END OF REPORT ===
