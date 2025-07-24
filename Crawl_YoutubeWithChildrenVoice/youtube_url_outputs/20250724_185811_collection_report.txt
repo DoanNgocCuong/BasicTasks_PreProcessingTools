@@ -1,0 +1,45 @@
+=== FINAL COLLECTION REPORT FOR VIETNAMESE CHILDREN'S VOICE VIDEOS ===
+Report generated: 2025-07-24 18:58:11
+
+=== OVERALL STATISTICS ===
+Videos collected in current session: 1
+Total videos in file (including existing): 9
+Total target count: 1
+Target per query: 1
+Target achievement: 100.00%
+Total videos evaluated: 2
+Total videos with children's voice: 1
+Total videos in Vietnamese: 2
+Total videos not in Vietnamese: 3
+Overall children's voice rate: 50.00%
+Overall Vietnamese rate: 40.00%
+Total queries processed: 1
+Total channels reviewed: 1
+
+=== DETAILED STATISTICS BY QUERY ===
+Query: "bé giới thiệu bản thân"
+  - Videos collected: 1
+  - Videos reviewed: 11
+  - Videos evaluated: 2
+  - Videos with children's voice: 1
+  - Videos in Vietnamese: 2
+  - Videos not in Vietnamese: 3
+  - Efficiency rate: 9.09%
+  - Children's voice rate: 50.00%
+  - Vietnamese rate: 40.00%
+  - New channels found: 1
+
+=== QUERY PERFORMANCE ANALYSIS ===
+Most efficient query: "bé giới thiệu bản thân" (9.09%)
+Least efficient query: "bé giới thiệu bản thân" (9.09%)
+Best children's voice rate: "bé giới thiệu bản thân" (50.00%)
+Best Vietnamese rate: "bé giới thiệu bản thân" (40.00%)
+
+=== RECOMMENDATIONS ===
+- Prioritize using query: "bé giới thiệu bản thân" for high efficiency
+- Consider improving or replacing query: "bé giới thiệu bản thân"
+- Query "bé giới thiệu bản thân" provides best quality results
+- Query "bé giới thiệu bản thân" has highest Vietnamese content rate
+- Language detection helps improve collection accuracy
+
+=== END OF REPORT ===

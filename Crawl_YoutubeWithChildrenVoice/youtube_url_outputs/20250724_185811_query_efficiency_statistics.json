@@ -1,0 +1,32 @@
+{
+  "collection_metadata": {
+    "collection_date": "2025-07-24T18:58:11.346175",
+    "total_queries": 1,
+    "target_per_query": 1,
+    "total_target_count": 1,
+    "videos_collected_current_session": 1,
+    "total_videos_in_file": 9,
+    "target_achievement_rate": "100.00%",
+    "total_videos_evaluated": 2,
+    "total_videos_with_children_voice": 1,
+    "overall_efficiency": "50.00%"
+  },
+  "query_statistics": [
+    {
+      "query": "bé giới thiệu bản thân",
+      "videos_collected": 1,
+      "videos_reviewed": 11,
+      "videos_evaluated": 2,
+      "videos_with_children_voice": 1,
+      "videos_vietnamese": 2,
+      "videos_not_vietnamese": 3,
+      "efficiency_rate": 9.090909090909092,
+      "children_voice_rate": 50.0,
+      "vietnamese_rate": 40.0,
+      "new_channels_found": 1
+    }
+  ],
+  "query_list": [
+    "bé giới thiệu bản thân"
+  ]
+}

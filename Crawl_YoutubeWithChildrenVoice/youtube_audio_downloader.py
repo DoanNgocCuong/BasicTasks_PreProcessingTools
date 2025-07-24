@@ -1,64 +1,12 @@
 #!/usr/bin/env python3
 """
-YouTube Audio Downloader and Converter
+YouTube Audio Downloader and Converter with Video Length Tracking
 
 This module provides functionality for downloading audio from YouTube videos and converting
 them to WAV format for further audio analysis. It uses yt-dlp for video downloading and
-FFmpeg for audio format conversion.
-
-Key Features:
-    - Download best available audio quality from YouTube URLs
-    - Automatic conversion from various formats (M4A, MP3, etc.) to WAV
-    - Configurable output directory and file naming
-    - Error handling for download and conversion failures
-    - Automatic cleanup of intermediate files
-    - Support for batch processing with indexed file naming
-
-Architecture:
-    - Config: Configuration management for paths and settings
-    - YoutubeAudioDownloader: Main downloader and converter class
-
-Workflow:
-    1. Download best available audio from YouTube URL using yt-dlp
-    2. Save as intermediate format (typically M4A)
-    3. Convert to WAV format using FFmpeg
-    4. Clean up intermediate files
-    5. Return path to final WAV file
-
-Dependencies:
-    - yt-dlp: For YouTube video/audio downloading
-    - ffmpeg-python: For audio format conversion
-    - FFmpeg binary: Must be installed and available in system PATH
-
-Output Format:
-    - WAV files with configurable naming pattern (output_N.wav)
-    - Stored in configurable output directory (default: youtube_audio_outputs/)
-
-Use Cases:
-    - Preprocessing YouTube videos for audio analysis
-    - Creating datasets for machine learning audio models
-    - Converting YouTube content for offline audio processing
-    - Batch audio extraction from video collections
-
-Error Handling:
-    - Network connectivity issues during download
-    - Invalid or unavailable YouTube URLs
-    - Audio conversion failures
-    - File system permission issues
-
-Usage:
-    python youtube_audio_downloader.py [youtube_url]
-    
-    Or as a module:
-    from youtube_audio_downloader import YoutubeAudioDownloader, Config
-    
-    config = Config()
-    downloader = YoutubeAudioDownloader(config)
-    wav_path = downloader.download_audio_from_yturl(url, index=0)
+FFmpeg for audio format conversion, with enhanced capabilities for video duration tracking.
 
 Author: Le Hoang Minh
-Created: 2025
-Version: 1.0
 """
 
 from __future__ import unicode_literals
@@ -66,6 +14,7 @@ import yt_dlp
 import ffmpeg
 import sys
 import os
+import json
 
 
 class Config:
@@ -104,6 +53,87 @@ class YoutubeAudioDownloader:
     def __init__(self, config):
         self.config = config
     
+    def get_video_info_with_duration(self, url):
+        """
+        Get video information including duration without downloading.
+        
+        Args:
+            url (str): YouTube URL to get information from
+            
+        Returns:
+            dict or None: Video information with duration if successful, None otherwise
+            Dictionary contains: {'duration': float, 'title': str, 'uploader': str, etc.}
+        """
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False
+        }
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info is not None:
+                    duration_raw = info.get('duration')
+                    return {
+                        'duration': float(duration_raw) if duration_raw is not None else None,
+                        'title': info.get('title', ''),
+                        'uploader': info.get('uploader', ''),
+                        'upload_date': info.get('upload_date', ''),
+                        'view_count': info.get('view_count', 0),
+                        'like_count': info.get('like_count', 0),
+                        'description': info.get('description', '')
+                    }
+                return None
+        except Exception as e:
+            print(f"⚠️ Error getting video info: {e}")
+            return None
+
+    def get_video_duration(self, url):
+        """
+        Get video duration from YouTube URL without downloading.
+        
+        Args:
+            url (str): YouTube URL to get duration from
+            
+        Returns:
+            float or None: Video duration in seconds if successful, None otherwise
+        """
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False
+        }
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info is not None:
+                    duration = info.get('duration')
+                    return float(duration) if duration is not None else None
+                return None
+        except Exception as e:
+            print(f"⚠️ Error getting video duration: {e}")
+            return None
+    
+    def get_audio_length_from_file(self, audio_file_path):
+        """
+        Get audio length from an audio file using ffprobe.
+        
+        Args:
+            audio_file_path (str): Path to the audio file
+            
+        Returns:
+            float or None: Audio length in seconds if successful, None otherwise
+        """
+        try:
+            probe = ffmpeg.probe(audio_file_path)
+            duration = float(probe['streams'][0]['duration'])
+            return duration
+        except Exception as e:
+            print(f"⚠️ Error getting audio length: {e}")
+            return None
+    
     def download_audio_from_yturl(self, url, index=0):
         """
         Download audio from YouTube URL and convert to WAV.
@@ -113,18 +143,73 @@ class YoutubeAudioDownloader:
             index (int): Index for output file naming
             
         Returns:
-            str or None: Path to output WAV file if successful, None otherwise
+            tuple: (wav_file_path, audio_duration) where audio_duration is in seconds,
+                   returns (None, None) if failed
         """
+        # Get video duration first (without downloading)
+        video_duration = self.get_video_duration(url)
+        
         # Configure output template
         ydl_opts = self.config.ydl_opts.copy()
         ydl_opts['outtmpl'] = self.config.get_output_path(self.config.get_m4a_filename(index))
         
-        # Download audio
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        try:
+            # Download audio
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            
+            # Convert to WAV and get actual audio length
+            wav_path, audio_length = self._convert_to_wav_with_duration(index)
+            
+            # Use actual audio length if available, otherwise fall back to video duration
+            final_duration = audio_length if audio_length is not None else video_duration
+            
+            return wav_path, final_duration
+            
+        except Exception as e:
+            print(f"⚠️ Error downloading audio: {e}")
+            return None, None
+    
+    def _convert_to_wav_with_duration(self, index):
+        """
+        Convert M4A file to WAV format and return both path and duration.
         
-        # Convert to WAV
-        return self._convert_to_wav(index)
+        Args:
+            index (int): Index for file naming
+            
+        Returns:
+            tuple: (wav_file_path, audio_duration_seconds) or (None, None) if failed
+        """
+        input_file = self.config.get_output_path(self.config.get_m4a_filename(index))
+        output_file = self.config.get_output_path(self.config.get_wav_filename(index))
+        
+        try:
+            # Convert using ffmpeg
+            stream = ffmpeg.input(input_file)
+            stream = ffmpeg.output(stream, output_file)
+            ffmpeg.run(stream, quiet=True, overwrite_output=True)
+            
+            # Get audio duration from the converted WAV file
+            audio_duration = None
+            if os.path.exists(output_file):
+                audio_duration = self.get_audio_length_from_file(output_file)
+            
+            # Clean up intermediate file
+            if os.path.exists(input_file):
+                os.remove(input_file)
+            
+            # Return output file path and duration if successful
+            if os.path.exists(output_file):
+                return output_file, audio_duration
+            else:
+                return None, None
+                
+        except Exception as e:
+            print(f"⚠️ Error converting to WAV: {e}")
+            # Clean up intermediate file even on error
+            if os.path.exists(input_file):
+                os.remove(input_file)
+            return None, None
     
     def _convert_to_wav(self, index):
         """
@@ -136,24 +221,44 @@ class YoutubeAudioDownloader:
         Returns:
             str or None: Path to output WAV file if successful, None otherwise
         """
-        input_file = self.config.get_output_path(self.config.get_m4a_filename(index))
-        output_file = self.config.get_output_path(self.config.get_wav_filename(index))
-        
-        # Convert using ffmpeg
-        stream = ffmpeg.input(input_file)
-        stream = ffmpeg.output(stream, output_file)
-        ffmpeg.run(stream, quiet=True, overwrite_output=True)
-        
-        # Clean up intermediate file
-        if os.path.exists(input_file):
-            os.remove(input_file)
-        
-        # Return output file path if successful
-        if os.path.exists(output_file):
-            return output_file
-        else:
-            return None
+        wav_path, _ = self._convert_to_wav_with_duration(index)
+        return wav_path
 
+
+    def test_video_duration_extraction(self, url):
+        """
+        Test method to verify video duration extraction without downloading.
+        
+        Args:
+            url (str): YouTube URL to test
+            
+        Returns:
+            dict: Test results with duration and metadata
+        """
+        print(f"🧪 Testing video duration extraction for: {url}")
+        
+        # Test duration extraction
+        duration = self.get_video_duration(url)
+        print(f"📏 Video duration: {duration} seconds")
+        if duration:
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+            print(f"📏 Video duration formatted: {minutes}:{seconds:02d}")
+        
+        # Test full video info extraction
+        video_info = self.get_video_info_with_duration(url)
+        if video_info:
+            print(f"📺 Video title: {video_info.get('title', 'N/A')}")
+            print(f"👤 Uploader: {video_info.get('uploader', 'N/A')}")
+            print(f"📅 Upload date: {video_info.get('upload_date', 'N/A')}")
+            print(f"👁️ View count: {video_info.get('view_count', 'N/A')}")
+        
+        return {
+            'url': url,
+            'duration_seconds': duration,
+            'video_info': video_info,
+            'success': duration is not None
+        }
 
 def main():
     """Main function to handle command line interface."""
@@ -162,17 +267,51 @@ def main():
     
     args = sys.argv[1:]
     
-    if len(args) > 1:
+    if len(args) > 2:
         print("Too many arguments.")
-        print("Usage: python youtubetowav.py <optional link>")
+        print("Usage: python youtube_audio_downloader.py <optional link> [--test-duration]")
         print("If a link is given it will automatically convert it to .wav. Otherwise a prompt will be shown")
+        print("Use --test-duration to test video duration extraction without downloading")
         exit()
+    
+    # Check for test duration flag
+    test_duration = False
+    if "--test-duration" in args:
+        test_duration = True
+        args.remove("--test-duration")
     
     if len(args) == 0:
         url = input("Enter Youtube URL: ")
-        downloader.download_audio_from_yturl(url)
+        if test_duration:
+            downloader.test_video_duration_extraction(url)
+        else:
+            result = downloader.download_audio_from_yturl(url)
+            if isinstance(result, tuple):
+                wav_path, duration = result
+                print(f"✅ Audio downloaded to: {wav_path}")
+                if duration:
+                    minutes = int(duration // 60)
+                    seconds = int(duration % 60)
+                    print(f"📏 Video duration: {minutes}:{seconds:02d}")
+            else:
+                # Handle backward compatibility
+                print(f"✅ Audio downloaded to: {result}")
     else:
-        downloader.download_audio_from_yturl(args[0])
+        url = args[0]
+        if test_duration:
+            downloader.test_video_duration_extraction(url)
+        else:
+            result = downloader.download_audio_from_yturl(url)
+            if isinstance(result, tuple):
+                wav_path, duration = result
+                print(f"✅ Audio downloaded to: {wav_path}")
+                if duration:
+                    minutes = int(duration // 60)
+                    seconds = int(duration % 60)
+                    print(f"📏 Video duration: {minutes}:{seconds:02d}")
+            else:
+                # Handle backward compatibility
+                print(f"✅ Audio downloaded to: {result}")
 
 if __name__ == "__main__":
     main()

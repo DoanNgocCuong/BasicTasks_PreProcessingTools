@@ -6,80 +6,7 @@ This module provides advanced audio classification capabilities specifically des
 analyzing YouTube video content. It combines children's voice detection with Vietnamese
 language detection, featuring intelligent model caching for optimal performance.
 
-Key Features:
-    - Children's voice detection using pre-trained age/gender classification models
-    - Vietnamese language detection using OpenAI Whisper models
-    - Intelligent model caching to prevent repeated downloads and loading
-    - Dual-analysis workflow optimized for YouTube content processing
-    - Batch processing capabilities for URL collections
-    - Comprehensive error handling and logging
-    - Memory management with manual cache clearing options
-
-Machine Learning Models:
-    - Age/Gender Classification: audeering/wav2vec2-large-robust-24-ft-age-gender
-    - Language Detection: OpenAI Whisper (configurable model size)
-    - Model caching: Shared instances across multiple classifier objects
-
-Architecture:
-    - AudioClassifier: Main classification engine with caching
-    - Model Management: Automatic loading, caching, and memory management
-    - Integration Layer: Seamless connection with youtube_audio_downloader
-
-Classification Pipeline:
-    1. Audio preprocessing and validation
-    2. Language detection using Whisper models
-    3. Age/gender classification using wav2vec2 models
-    4. Confidence scoring and threshold application
-    5. Combined result aggregation and reporting
-
-Caching System:
-    - Class-level model sharing across instances
-    - Parameter-based cache validation
-    - Memory-efficient model reuse
-    - Manual cache clearing for memory management
-
-Output Formats:
-    - Boolean results for quick decision making
-    - Detailed prediction dictionaries with confidence scores
-    - Batch processing summaries with statistics
-
-Use Cases:
-    - Content moderation for child-appropriate material
-    - Dataset curation for Vietnamese children's content
-    - Audio content analysis and classification
-    - Research applications in child speech recognition
-    - Educational content filtering and organization
-
-Dependencies:
-    - transformers: For age/gender classification models
-    - whisper: For language detection
-    - torch: For neural network inference
-    - librosa: For audio preprocessing
-
-Performance Optimizations:
-    - Model caching prevents repeated loading
-    - Batch processing reduces overhead
-    - Efficient memory management
-    - Configurable confidence thresholds
-
-Usage:
-    python youtube_audio_classifier.py
-    
-    Options:
-    1. Test with sample audio file
-    2. Process YouTube URLs from text file  
-    3. Clear model cache
-
-    As a module:
-    from youtube_audio_classifier import AudioClassifier
-    
-    classifier = AudioClassifier()
-    is_child = classifier.is_child_audio("path/to/audio.wav")
-    is_vietnamese = classifier.is_vietnamese("path/to/audio.wav")
-
 Author: Le Hoang Minh
-Created: 2025
-Version: 1.0
 """
 
 # @DoanNgocCuong - Embedded exact same logic from AgeDetection.py
@@ -91,12 +18,23 @@ import logging
 import importlib.util
 from pathlib import Path
 from typing import Optional, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import torch
 import torch.nn as nn
 import librosa
 import numpy as np
 import whisper
+
+# Import environment configuration
+try:
+    from env_config import config
+    USE_ENV_CONFIG = True
+    print("✅ Audio Classifier using environment configuration")
+except ImportError:
+    config = None
+    USE_ENV_CONFIG = False
+    print("⚠️ Environment configuration not available, using defaults")
 from transformers import Wav2Vec2Processor
 from transformers.models.wav2vec2.modeling_wav2vec2 import (
     Wav2Vec2Model,
@@ -153,21 +91,30 @@ class AgeGenderModel(Wav2Vec2PreTrainedModel):
 class BaseAudioClassifier:
     """Base audio classifier with exact same logic from AgeDetection.py"""
     
-    def __init__(self, model_name="audeering/wav2vec2-large-robust-24-ft-age-gender", 
-                 child_threshold=0.5, age_threshold=0.3):
+    def __init__(self, model_name=None, child_threshold=None, age_threshold=None):
         """
         Initialize classifier with model and confidence thresholds
         
         Args:
-            model_name: Model name on Hugging Face
-            child_threshold: Probability threshold for classifying as child
-            age_threshold: Age threshold for classifying as child (0.3 ~ 30 years)
+            model_name: Model name on Hugging Face (uses env config if None)
+            child_threshold: Probability threshold for classifying as child (uses env config if None)
+            age_threshold: Age threshold for classifying as child (uses env config if None)
         """
-        self.model_name = model_name
-        self.child_threshold = child_threshold
-        self.age_threshold = age_threshold
+        # Use environment configuration if available, otherwise defaults
+        if USE_ENV_CONFIG and config is not None:
+            self.model_name = model_name or config.WAV2VEC2_MODEL
+            self.child_threshold = child_threshold if child_threshold is not None else config.CHILD_THRESHOLD
+            self.age_threshold = age_threshold if age_threshold is not None else config.AGE_THRESHOLD
+        else:
+            self.model_name = model_name or "audeering/wav2vec2-large-robust-24-ft-age-gender"
+            self.child_threshold = child_threshold if child_threshold is not None else 0.5
+            self.age_threshold = age_threshold if age_threshold is not None else 0.3
+            
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
+        logger.info(f"Model: {self.model_name}")
+        logger.info(f"Child threshold: {self.child_threshold}")
+        logger.info(f"Age threshold: {self.age_threshold}")
         
         # Load model and processor
         try:
@@ -281,7 +228,15 @@ def filter_and_rename(input_dir="input"):
     for f in files:
         path = os.path.join(input_dir, f)
         try:
-            duration = librosa.get_duration(filename=path)
+            # Fast duration check without loading full audio
+            try:
+                import soundfile as sf
+                info = sf.info(path)
+                duration = info.frames / info.samplerate
+            except ImportError:
+                # Fallback to librosa if soundfile not available
+                duration = librosa.get_duration(filename=path)
+            
             if duration <= 2.0:
                 shutil.move(path, os.path.join(recycle_dir, f))
                 print(f"Moved {f} to recycle (duration: {duration:.2f}s)")
@@ -398,12 +353,37 @@ class AudioClassifier:
         except Exception as e:
             print(f"An error occurred: {e}")
             return None
+
+    def is_child_audio_optimized(self, audio_path: str) -> Optional[bool]:
+        """
+        OPTIMIZED: Determines whether audio contains child's voice using combined prediction.
+        
+        Args:
+            audio_path (str): Path to the .wav audio file.
+
+        Returns:
+            Optional[bool]: True if child voice, False otherwise, None if error.
+        """
+        try:
+            result = self.get_combined_prediction(audio_path)
+            if "error" in result:
+                return None
+            return result.get("is_child", False)
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None
     
     def _get_whisper_model(self):
         """Get or load Whisper model for language detection"""
         if AudioClassifier._shared_whisper_model is None:
-            print("🚀 Loading Whisper tiny model for language detection...")
-            AudioClassifier._shared_whisper_model = whisper.load_model("tiny")
+            # Use environment configuration for model size
+            if USE_ENV_CONFIG and config is not None:
+                model_size = config.WHISPER_MODEL_SIZE
+            else:
+                model_size = "tiny"
+                
+            print(f"🚀 Loading Whisper {model_size} model for language detection...")
+            AudioClassifier._shared_whisper_model = whisper.load_model(model_size)
             print("✅ Whisper model loaded and cached")
         else:
             print("🔄 Reusing existing Whisper model")
@@ -451,25 +431,125 @@ class AudioClassifier:
             print(f"Language detection error: {e}")
             return None
     
-    def get_detailed_prediction(self, audio_path: str) -> dict:
-        """
-        Get detailed prediction results including age, gender probabilities, classification, and language detection.
+    def _load_audio_once(self, audio_path: str):
+        """Load audio once for both age detection and language detection"""
+        try:
+            # Load with librosa for age detection (16kHz)
+            speech_array, original_sr = librosa.load(audio_path, sr=None)
+            if original_sr != 16000:
+                speech_array_16k = librosa.resample(speech_array, orig_sr=original_sr, target_sr=16000)
+            else:
+                speech_array_16k = speech_array.copy()
+            
+            # Normalize for age detection
+            if np.max(np.abs(speech_array_16k)) > 0:
+                speech_array_16k = speech_array_16k / np.max(np.abs(speech_array_16k))
+            
+            # Load with whisper format for language detection
+            whisper_audio = whisper.load_audio(audio_path)
+            whisper_audio = whisper.pad_or_trim(whisper_audio)
+            
+            return {
+                "age_audio": speech_array_16k.astype(np.float32),
+                "whisper_audio": whisper_audio,
+                "sample_rate": 16000
+            }
+        except Exception as e:
+            logger.error(f"Error loading audio {audio_path}: {e}")
+            return None
 
+    def _predict_age_from_audio_data(self, audio_data):
+        """Predict age/gender from pre-loaded audio data"""
+        if audio_data is None:
+            return None, None, None, "error"
+        
+        try:
+            speech_array = audio_data["age_audio"]
+            sampling_rate = audio_data["sample_rate"]
+            
+            # Process audio
+            inputs = self.classifier.processor(speech_array, sampling_rate=sampling_rate)
+            input_values = inputs['input_values'][0]
+            input_values = input_values.reshape(1, -1)
+            input_values = torch.from_numpy(input_values).to(self.classifier.device)
+            
+            # Prediction
+            with torch.no_grad():
+                hidden_states, age_logits, gender_probs = self.classifier.model(input_values)
+                
+                # Age prediction (0-1 scale, 0=0 years, 1=100 years)
+                age_normalized = float(age_logits.squeeze())
+                age_years = age_normalized * 100  # Convert to years
+                
+                # Gender prediction probabilities [female, male, child]
+                gender_probs = gender_probs.squeeze().cpu().numpy()
+                
+                return age_normalized, age_years, gender_probs, "success"
+                
+        except Exception as e:
+            logger.error(f"Error predicting from audio data: {e}")
+            return None, None, None, "error"
+
+    def _detect_language_from_audio_data(self, audio_data):
+        """Detect language from pre-loaded audio data"""
+        if audio_data is None:
+            return None
+        
+        try:
+            whisper_model = self._get_whisper_model()
+            whisper_audio = audio_data["whisper_audio"]
+            
+            # Make log-Mel spectrogram and move to the same device as the model
+            mel = whisper.log_mel_spectrogram(whisper_audio).to(whisper_model.device)
+            
+            # Detect the spoken language
+            _, probs = whisper_model.detect_language(mel)
+            
+            # Ensure probs is a dict (as expected by whisper)
+            if isinstance(probs, list) and len(probs) > 0 and isinstance(probs[0], dict):
+                probs = probs[0]
+            
+            if not isinstance(probs, dict):
+                print("Language detection failed: probs is not a dict")
+                return None
+            
+            detected_language, confidence = max(probs.items(), key=lambda x: x[1])
+            print(f"  Language detection: {detected_language} (confidence: {confidence:.3f})")
+            
+            # Return True if Vietnamese is detected with reasonable confidence
+            return detected_language == "vi" and confidence > 0.1
+            
+        except Exception as e:
+            print(f"Language detection error: {e}")
+            return None
+
+    def get_combined_prediction(self, audio_path: str) -> dict:
+        """
+        Get combined prediction with shared audio loading (OPTIMIZED VERSION)
+        
         Args:
             audio_path (str): Path to the .wav audio file.
-
+            
         Returns:
-            dict: Detailed prediction results with age, gender probabilities, final classification, and language detection.
+            dict: Combined prediction results with both age/gender and language detection
         """
         try:
-            age_norm, age_years, gender_probs, status = self.classifier.predict(audio_path)
-
+            # Load audio once for both predictions
+            audio_data = self._load_audio_once(audio_path)
+            if audio_data is None:
+                return {"error": "Failed to load audio file"}
+            
+            # Get age/gender prediction from shared audio data
+            age_norm, age_years, gender_probs, status = self._predict_age_from_audio_data(audio_data)
             if status == "error":
-                return {"error": "Failed to process audio file"}
-
+                return {"error": "Failed to process audio for age detection"}
+            
+            # Get language detection from shared audio data
+            is_vietnamese = self._detect_language_from_audio_data(audio_data)
+            
+            # Classify age group
             final_label, confidence = self.classifier.classify_age_group(age_norm, gender_probs)
-            is_vietnamese = self.is_vietnamese(audio_path)
-
+            
             return {
                 "age_normalized": age_norm,
                 "age_years": age_years,
@@ -483,9 +563,22 @@ class AudioClassifier:
                 "is_child": final_label == "child",
                 "is_vietnamese": is_vietnamese
             }
-
+            
         except Exception as e:
             return {"error": f"An error occurred: {e}"}
+
+    def get_detailed_prediction(self, audio_path: str) -> dict:
+        """
+        Get detailed prediction results including age, gender probabilities, classification, and language detection.
+
+        Args:
+            audio_path (str): Path to the .wav audio file.
+
+        Returns:
+            dict: Detailed prediction results with age, gender probabilities, final classification, and language detection.
+        """
+        # Use the optimized combined prediction method
+        return self.get_combined_prediction(audio_path)
 
 
 def process_youtube_urls_from_file(txt_file_path: str) -> Dict[str, int]:
@@ -549,7 +642,7 @@ def _initialize_components():
 
 
 def _process_urls(urls: list, classifier, downloader, base_dir: Path) -> Dict[str, int]:
-    """Process each URL and return summary statistics"""
+    """Process each URL and return summary statistics with parallel processing"""
     results = {"children": 0, "non_children": 0, "errors": 0}
     summary_file_path = base_dir / "classification_summary.txt"
     
@@ -557,52 +650,83 @@ def _process_urls(urls: list, classifier, downloader, base_dir: Path) -> Dict[st
     with open(summary_file_path, 'w', encoding='utf-8') as summary_file:
         summary_file.write("URL,Result\n")
     
-    # Process each URL
-    for i, url in enumerate(urls):
-        print(f"\nProcessing URL {i+1}/{len(urls)}: {url}")
-        result = _process_single_url(url, i, classifier, downloader)
+    # Collect results for batch writing
+    results_buffer = []
+    
+    # Process URLs in parallel with controlled concurrency
+    max_workers = min(4, len(urls))  # Limit to 4 concurrent workers
+    print(f"Processing {len(urls)} URLs with {max_workers} parallel workers...")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_url = {
+            executor.submit(_process_single_url, url, i, classifier, downloader): (url, i) 
+            for i, url in enumerate(urls)
+        }
         
-        # Update results and log to file
-        results[result] += 1
-        with open(summary_file_path, 'a', encoding='utf-8') as summary_file:
-            summary_file.write(f"{url},{result.title()}\n")
+        # Process completed tasks
+        for future in as_completed(future_to_url):
+            url, index = future_to_url[future]
+            try:
+                result = future.result()
+                results[result] += 1
+                results_buffer.append(f"{url},{result.title()}\n")
+                print(f"✓ Completed URL {index+1}/{len(urls)}: {url} -> {result.title()}")
+            except Exception as e:
+                print(f"✗ Error processing URL {index+1}/{len(urls)}: {url} -> {e}")
+                results["errors"] += 1
+                results_buffer.append(f"{url},Error\n")
+    
+    # Batch write all results to file
+    with open(summary_file_path, 'a', encoding='utf-8') as summary_file:
+        summary_file.writelines(results_buffer)
     
     _print_final_summary(len(urls), results)
     return {"children": results["children"], "non_children": results["non_children"], "errors": results["errors"]}
 
 
 def _process_single_url(url: str, index: int, classifier, downloader) -> str:
-    """Process a single URL and return classification result"""
+    """Process a single URL and return classification result with optimized audio loading"""
     try:
         # Download and convert to audio
-        print(f"  Downloading and converting audio...")
+        print(f"  [{index+1}] Downloading and converting audio from: {url}")
         audio_file_path = downloader.download_audio_from_yturl(url, index=index)
         
         if audio_file_path is None:
-            print(f"  Failed to download/convert audio from: {url}")
+            print(f"  [{index+1}] Failed to download/convert audio")
             return "errors"
         
-        print(f"  Audio saved to: {audio_file_path}")
+        print(f"  [{index+1}] Audio saved, classifying...")
         
-        # Classify the audio
-        print(f"  Classifying audio...")
-        is_child = classifier.is_child_audio(audio_file_path)
+        # Use optimized combined prediction (loads audio only once)
+        prediction_result = classifier.get_combined_prediction(audio_file_path)
         
-        # Clean up the audio file
+        # Clean up the audio file immediately after processing
         _cleanup_audio_file(audio_file_path)
         
-        if is_child is None:
-            print(f"  Classification failed")
+        # Check prediction result
+        if "error" in prediction_result:
+            print(f"  [{index+1}] Classification failed: {prediction_result['error']}")
             return "errors"
-        elif is_child:
-            print(f"  ✓ CHILD voice detected")
+        
+        is_child = prediction_result.get("is_child", False)
+        is_vietnamese = prediction_result.get("is_vietnamese", False)
+        
+        if is_child:
+            status = "✓ CHILD voice detected"
+            if is_vietnamese:
+                status += " (Vietnamese)"
+            print(f"  [{index+1}] {status}")
             return "children"
         else:
-            print(f"  ✗ NON-CHILD voice detected")
+            status = "✗ NON-CHILD voice detected"
+            if is_vietnamese:
+                status += " (Vietnamese)"
+            print(f"  [{index+1}] {status}")
             return "non_children"
             
     except Exception as e:
-        print(f"  Error processing {url}: {e}")
+        print(f"  [{index+1}] Error processing {url}: {e}")
         return "errors"
 
 

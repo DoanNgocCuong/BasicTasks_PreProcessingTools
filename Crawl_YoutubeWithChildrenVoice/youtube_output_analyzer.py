@@ -6,83 +6,49 @@ This module provides comprehensive analysis and reporting capabilities for YouTu
 collection results. It generates detailed statistics, performance metrics, and formatted
 reports for collection campaigns targeting Vietnamese children's voice content.
 
-Key Features:
-    - Comprehensive final report generation with collection statistics
-    - Per-query performance analysis and efficiency metrics
-    - Runtime tracking and collection efficiency calculations
-    - JSON-based detailed results with complete metadata
-    - Backup file creation with timestamp-based naming
-    - Query-specific statistics and comparative analysis
-    - Multi-format output (text reports, JSON data, backup files)
-
-Report Types:
-    - Final Collection Report: Human-readable summary with key metrics
-    - Detailed JSON Results: Complete dataset with metadata and statistics
-    - Query Statistics: Per-query performance and efficiency analysis
-    - Backup Files: Timestamped collection snapshots
-
-Key Metrics:
-    - Collection efficiency rates (videos collected vs. reviewed)
-    - Children's voice detection rates
-    - Vietnamese language detection rates
-    - Channel discovery and exploration statistics
-    - Runtime performance and speed metrics
-    - Target achievement tracking
-
-Data Classes:
-    - QueryStatistics: Comprehensive per-query metrics and analysis
-    - Structured data for consistent reporting and analysis
-
-Analytics Capabilities:
-    - Best/worst performing query identification
-    - Collection efficiency optimization insights
-    - Language detection accuracy tracking
-    - Children's voice detection success rates
-    - Channel exploration effectiveness metrics
-
-Output Formats:
-    - Text Reports: Human-readable formatted summaries
-    - JSON Files: Machine-readable data with complete metadata
-    - Statistical Analysis: Detailed performance breakdowns
-    - Backup Collections: Timestamped URL collections
-
-Integration:
-    - Seamless integration with youtube_video_crawler
-    - Compatible with collection workflow and statistics
-    - Supports real-time and post-collection analysis
-    - Extensible for additional metrics and reporting needs
-
-Use Cases:
-    - Collection campaign performance analysis
-    - Quality assurance and process optimization
-    - Research data compilation and reporting
-    - Historical collection tracking and comparison
-    - Dataset documentation and metadata management
-
-Dependencies:
-    - json: For structured data serialization
-    - pathlib: For file system operations
-    - datetime: For timestamp management
-    - typing: For type annotations and validation
-
-Usage:
-    from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
-    
-    analyzer = YouTubeOutputAnalyzer(output_dir)
-    report = analyzer.generate_final_report(...)
-    analyzer.save_report_to_file(report, filename)
-
 Author: Le Hoang Minh
-Created: 2025
-Version: 1.0
 """
 
 import json
 import time
+import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Any
 from dataclasses import dataclass
+
+
+class NumpyJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types."""
+    
+    def default(self, o):
+        if isinstance(o, np.integer):
+            return int(o)
+        elif isinstance(o, np.floating):
+            return float(o)
+        elif isinstance(o, np.ndarray):
+            return o.tolist()
+        elif hasattr(o, 'item'):  # Handle numpy scalar types
+            return o.item()
+        return super(NumpyJSONEncoder, self).default(o)
+
+
+def sanitize_for_json(obj: Any) -> Any:
+    """Recursively sanitize data to ensure JSON compatibility."""
+    if isinstance(obj, dict):
+        return {key: sanitize_for_json(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif hasattr(obj, 'item'):  # Handle numpy scalar types
+        return obj.item()
+    else:
+        return obj
 
 
 @dataclass
@@ -229,8 +195,14 @@ class YouTubeOutputAnalyzer:
                                             reviewed_channels: List[str],
                                             current_session_collected_urls: List[str],
                                             start_time: float,
-                                            start_datetime: datetime) -> None:
-        """Save detailed results with statistics to JSON file."""
+                                            start_datetime: datetime,
+                                            video_analysis_results: Optional[List[Dict]] = None) -> None:
+        """Save detailed results with statistics to JSON file.
+        
+        Args:
+            video_analysis_results: Optional list of individual video analysis results
+                                  with timing information for each analyzed video
+        """
         filepath = Path(filename)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         
@@ -254,6 +226,11 @@ class YouTubeOutputAnalyzer:
                 'new_channels_found': stat.new_channels_found
             })
         
+        # Sanitize video analysis results to ensure JSON compatibility
+        sanitized_video_analysis_results = []
+        if video_analysis_results:
+            sanitized_video_analysis_results = sanitize_for_json(video_analysis_results)
+        
         detailed_results = {
             'collection_summary': {
                 'videos_collected_current_session': current_session_collected_count,
@@ -275,19 +252,115 @@ class YouTubeOutputAnalyzer:
                     'total_runtime_seconds': round(total_runtime, 2),
                     'total_runtime_formatted': self.format_duration(total_runtime),
                     'collection_efficiency': f"{(current_session_collected_count / max(total_videos_evaluated, 1)) * 100:.1f}%" if total_videos_evaluated > 0 else "0%"
-                }
+                },
+                'video_analysis_timing_summary': self._calculate_timing_summary(video_analysis_results)
             },
             'query_list': query_list,
             'query_statistics': query_stats_dicts,
             'reviewed_channels': reviewed_channels,
             'current_session_collected_urls': current_session_collected_urls,
-            'all_video_urls_in_file': total_video_urls
+            'all_video_urls_in_file': total_video_urls,
+            'video_analysis_results': sanitized_video_analysis_results
         }
         
+        # Sanitize the entire detailed_results to ensure JSON compatibility
+        sanitized_detailed_results = sanitize_for_json(detailed_results)
+        
         with filepath.open('w', encoding='utf-8') as f:
-            json.dump(detailed_results, f, indent=2, ensure_ascii=False)
+            json.dump(sanitized_detailed_results, f, indent=2, ensure_ascii=False, cls=NumpyJSONEncoder)
         
         print(f"✅ Detailed results saved to: {filepath.resolve()}")
+    
+    def _calculate_timing_summary(self, video_analysis_results: Optional[List[Dict]]) -> Dict:
+        """Calculate timing summary statistics from video analysis results."""
+        if not video_analysis_results:
+            return {
+                'total_videos_analyzed': 0,
+                'total_analysis_time': 0.0,
+                'avg_analysis_time_per_video': 0.0,
+                'total_children_detection_time': 0.0,
+                'avg_children_detection_time': 0.0,
+                'min_children_detection_time': 0.0,
+                'max_children_detection_time': 0.0,
+                'videos_with_timing_data': 0
+            }
+        
+        # Filter videos with valid timing data
+        videos_with_timing = [
+            video for video in video_analysis_results 
+            if video.get('total_analysis_time') is not None and video.get('children_detection_time') is not None
+        ]
+        
+        # Filter videos with valid video length data
+        videos_with_length = [
+            video for video in video_analysis_results 
+            if video.get('video_length_seconds') is not None and video.get('video_length_seconds', 0) > 0
+        ]
+        
+        if not videos_with_timing:
+            return {
+                'total_videos_analyzed': len(video_analysis_results),
+                'total_analysis_time': 0.0,
+                'avg_analysis_time_per_video': 0.0,
+                'total_children_detection_time': 0.0,
+                'avg_children_detection_time': 0.0,
+                'min_children_detection_time': 0.0,
+                'max_children_detection_time': 0.0,
+                'videos_with_timing_data': 0,
+                'video_length_statistics': {
+                    'videos_with_length_data': 0,
+                    'total_video_length_seconds': 0.0,
+                    'avg_video_length_seconds': 0.0,
+                    'min_video_length_seconds': 0.0,
+                    'max_video_length_seconds': 0.0,
+                    'total_video_length_formatted': '0:00:00'
+                }
+            }
+        
+        # Calculate timing statistics
+        total_analysis_time = sum(video.get('total_analysis_time', 0) for video in videos_with_timing)
+        total_children_detection_time = sum(video.get('children_detection_time', 0) for video in videos_with_timing)
+        children_detection_times = [video.get('children_detection_time', 0) for video in videos_with_timing if video.get('children_detection_time', 0) > 0]
+        
+        # Calculate video length statistics
+        video_length_stats = {}
+        if videos_with_length:
+            video_lengths = [video.get('video_length_seconds', 0) for video in videos_with_length]
+            total_video_length = sum(video_lengths)
+            hours = int(total_video_length // 3600)
+            minutes = int((total_video_length % 3600) // 60)
+            seconds = int(total_video_length % 60)
+            
+            video_length_stats = {
+                'videos_with_length_data': len(videos_with_length),
+                'total_video_length_seconds': round(total_video_length, 2),
+                'avg_video_length_seconds': round(total_video_length / len(videos_with_length), 2),
+                'min_video_length_seconds': round(min(video_lengths), 2),
+                'max_video_length_seconds': round(max(video_lengths), 2),
+                'total_video_length_formatted': f'{hours}:{minutes:02d}:{seconds:02d}'
+            }
+        else:
+            video_length_stats = {
+                'videos_with_length_data': 0,
+                'total_video_length_seconds': 0.0,
+                'avg_video_length_seconds': 0.0,
+                'min_video_length_seconds': 0.0,
+                'max_video_length_seconds': 0.0,
+                'total_video_length_formatted': '0:00:00'
+            }
+        
+        return {
+            'total_videos_analyzed': len(video_analysis_results),
+            'videos_with_timing_data': len(videos_with_timing),
+            'total_analysis_time': round(total_analysis_time, 2),
+            'avg_analysis_time_per_video': round(total_analysis_time / len(videos_with_timing), 3),
+            'total_children_detection_time': round(total_children_detection_time, 2),
+            'avg_children_detection_time': round(total_children_detection_time / len(videos_with_timing), 3),
+            'min_children_detection_time': round(min(children_detection_times), 3) if children_detection_times else 0.0,
+            'max_children_detection_time': round(max(children_detection_times), 3) if children_detection_times else 0.0,
+            'detection_efficiency_percentage': round((total_children_detection_time / total_analysis_time * 100), 1) if total_analysis_time > 0 else 0.0,
+            'video_length_statistics': video_length_stats
+        }
     
     def save_statistics_to_file(self, 
                               filename: str,
@@ -338,8 +411,11 @@ class YouTubeOutputAnalyzer:
                 'query_list': query_list
             }
             
+            # Sanitize all data to ensure JSON compatibility
+            sanitized_statistics_data = sanitize_for_json(statistics_data)
+            
             with filepath.open('w', encoding='utf-8') as f:
-                json.dump(statistics_data, f, indent=2, ensure_ascii=False)
+                json.dump(sanitized_statistics_data, f, indent=2, ensure_ascii=False, cls=NumpyJSONEncoder)
             
             print(f"✅ Statistics saved to: {filepath.resolve()}")
         except Exception as e:

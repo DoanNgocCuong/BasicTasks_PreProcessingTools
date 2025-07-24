@@ -6,51 +6,7 @@ This module provides comprehensive validation and analysis tools for YouTube URL
 It validates URL formats, detects and reports duplicates, normalizes URLs to standard format,
 and generates detailed statistics and cleaned datasets.
 
-Key Features:
-    - YouTube URL format validation using regex patterns
-    - Duplicate detection and counting across multiple URL formats
-    - URL normalization to standard YouTube format
-    - Comprehensive validation statistics and reporting
-    - Generation of cleaned, deduplicated URL datasets
-    - Support for various YouTube URL formats (youtube.com, youtu.be, m.youtube.com)
-    - Detailed error reporting for invalid URLs
-
-Supported URL Formats:
-    - https://www.youtube.com/watch?v=VIDEO_ID
-    - https://youtu.be/VIDEO_ID  
-    - https://m.youtube.com/watch?v=VIDEO_ID
-
-Output Files:
-    - duplicates_report.txt: Detailed duplicate analysis report
-    - cleaned_video_urls.txt: Deduplicated, normalized URL list
-    - validation_statistics.txt: Comprehensive validation metrics
-
-Use Cases:
-    - Quality assurance for YouTube URL datasets
-    - Data cleaning and preprocessing for video collections
-    - Duplicate detection in large URL collections
-    - URL format standardization and normalization
-    - Dataset integrity verification
-
-Workflow:
-    1. Read URLs from input file
-    2. Validate each URL against YouTube patterns
-    3. Normalize valid URLs to standard format
-    4. Detect duplicates using normalized URLs
-    5. Generate comprehensive reports and statistics
-    6. Output cleaned, deduplicated dataset
-
-Dependencies:
-    - re: For regex pattern matching
-    - pathlib: For file path operations
-    - collections.Counter: For duplicate counting
-
-Usage:
-    python youtube_output_validator.py
-
 Author: Le Hoang Minh
-Created: 2025
-Version: 1.0
 """
 import re
 from pathlib import Path

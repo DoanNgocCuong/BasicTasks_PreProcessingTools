@@ -1,56 +1,75 @@
 # YouTube Children's Voice Crawler
 
-AI-powered system for collecting YouTube videos with Vietnamese children's voices using ML-based audio analysis.
+## Overview
 
-## Setup
+AI-powered crawler that automatically searches, downloads, and analyzes YouTube videos to collect URLs of videos containing Vietnamese children's voices using machine learning models.
+
+## Instructions
 
 ### Prerequisites
 
-- Python 3.8+ (check with `python --version`)
-- Git (for cloning)
-- Internet connection (for model downloads)
+- Python 3.8+
+- Internet connection
+- YouTube Data API v3 key
 
-### 1. Clone and navigate
+### 1. Setup Environment
 
-```bash
-git clone "https://github.com/DoanNgocCuong/BasicTasks_PreProcessingTools.git"
-cd BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice
-```
+**Get YouTube API Key:**
 
-### 2. Install Python dependencies
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create new project or select existing one
+3. Enable "YouTube Data API v3" in APIs & Services
+4. Create credentials → API key
+5. Copy the API key
 
-```bash
+**Configure environment:**
+
+1. Copy the example environment file:
+
+   ```powershell
+   # Windows PowerShell
+   Copy-Item .env.example .env
+
+   # Mac/Linux
+   cp .env.example .env
+   ```
+
+2. Edit `.env` file and replace `your_youtube_api_key_here` with your actual API key:
+
+   ```
+   YOUTUBE_API_KEY=your_actual_api_key_here
+   ```
+
+3. Optional: Adjust other settings in `.env` as needed:
+   - `MAX_WORKERS=4` (parallel processing threads)
+   - `WHISPER_MODEL_SIZE=tiny` (tiny/base/small/medium/large)
+   - `CHILD_THRESHOLD=0.5` (confidence threshold for children's voice)
+   - `DEBUG_MODE=false` (enable detailed logging)
+
+### 2. Install Dependencies
+
+**Python packages:**
+
+```powershell
+# Windows/Mac/Linux
 pip install -r requirements.txt
 ```
 
-### 3. Get YouTube Data API key
-
-- Go to [Google Cloud Console](https://console.cloud.google.com/)
-- Create new project or select existing one
-- Enable "YouTube Data API v3" in APIs & Services
-- Create credentials → API key
-- Copy the API key
-
-### 4. Set environment variable
-
-```bash
-# Windows PowerShell
-$env:YOUTUBE_API_KEY="your_api_key_here"
-
-# Windows Command Prompt
-set YOUTUBE_API_KEY=your_api_key_here
-
-# Linux/Mac
-export YOUTUBE_API_KEY="your_api_key_here"
-```
-
-### 5. Install FFmpeg
+**Install FFmpeg:**
 
 **Windows:**
 
-- Download from [FFmpeg.org](https://ffmpeg.org/download.html)
-- Extract to folder (e.g., `C:\ffmpeg`)
-- Add `C:\ffmpeg\bin` to system PATH
+```powershell
+# Download from https://ffmpeg.org/download.html
+# Extract to C:\ffmpeg and add C:\ffmpeg\bin to system PATH
+```
+
+**Mac:**
+
+```bash
+# Using Homebrew
+brew install ffmpeg
+```
 
 **Linux (Ubuntu/Debian):**
 
@@ -59,109 +78,73 @@ sudo apt update
 sudo apt install ffmpeg
 ```
 
-**Mac:**
+**Linux (CentOS/RHEL):**
 
 ```bash
-brew install ffmpeg
+sudo yum install ffmpeg
+# or for newer versions:
+sudo dnf install ffmpeg
 ```
 
-### 6. Verify installation
+### 3. Verify Setup
 
-```bash
-# Test FFmpeg
+```powershell
+# Windows PowerShell
 ffmpeg -version
-
-# Test environment variable
-echo $YOUTUBE_API_KEY    # Linux/Mac
-echo %YOUTUBE_API_KEY%   # Windows CMD
-$env:YOUTUBE_API_KEY     # Windows PowerShell
-
-# Test Python imports
-python -c "import torch, transformers, whisper; print('ML dependencies OK')"
+Get-Content .env | Select-String "YOUTUBE_API_KEY"
+python -c "import torch, transformers, whisper; print('Dependencies OK')"
 ```
-
-### 7. Create required directories (automatic)
-
-The script will automatically create:
-
-- `youtube_url_outputs/` - For collection results
-- `youtube_audio_outputs/` - For temporary audio files
-
-## Usage
 
 ```bash
-# Main collection (interactive mode)
+# Mac/Linux
+ffmpeg -version
+grep "YOUTUBE_API_KEY" .env
+python -c "import torch, transformers, whisper; print('Dependencies OK')"
+```
+
+### 4. Run the Crawler
+
+```powershell
+# Windows PowerShell
 python youtube_video_crawler.py
-
-# Validate URLs
-python youtube_output_validator.py
-
-# Test audio classifier
-python youtube_audio_classifier.py
 ```
 
-## How It Works
-
-1. **Search**: YouTube API searches with configurable queries
-2. **Download**: Convert videos to WAV using yt-dlp + FFmpeg
-3. **Analyze**: ML models detect children's voice + Vietnamese language
-4. **Explore**: Find similar content in promising channels
-5. **Report**: Generate statistics and cleaned datasets
-
-## Core Components
-
-- `youtube_video_crawler.py` - Main orchestrator
-- `youtube_audio_classifier.py` - ML audio analysis (wav2vec2 + Whisper)
-- `youtube_audio_downloader.py` - YouTube to WAV conversion
-- `youtube_output_analyzer.py` - Statistics and reporting
-- `youtube_output_validator.py` - URL validation and deduplication
-
-## Output Files
-
-```
-youtube_url_outputs/
-├── collected_video_urls.txt           # Final URL list
-├── detailed_collection_results.json   # Complete metadata
-├── query_efficiency_statistics.json   # Performance metrics
-└── backup_TIMESTAMP_*.txt             # Timestamped backups
+```bash
+# Mac/Linux
+python youtube_video_crawler.py
+# or if python3 is required:
+python3 youtube_video_crawler.py
 ```
 
-## Configuration Examples
+**Interactive Configuration:**
 
-**Vietnamese search queries:**
+1. Choose debug mode (y/n)
+2. Set target videos per query (recommended: 10-50)
+3. Enter search queries (examples: "bé giới thiệu bản thân", "trẻ em kể chuyện")
+4. Type "DONE" when finished adding queries
 
-```
-bé giới thiệu bản thân    # Children introducing themselves
-bé tập nói tiếng Việt     # Children learning Vietnamese
-trẻ em kể chuyện          # Children telling stories
-```
+**Advanced Configuration (.env file):**
 
-**Recommended settings:**
+Modify `.env` file to customize behavior:
 
-- Videos per query: 10-50
-- Total target: 50-200
-- Enable debug mode for detailed logging
+- `MAX_WORKERS=4` - Number of parallel processing threads
+- `WHISPER_MODEL_SIZE=tiny` - Language detection model (tiny/base/small/medium/large)
+- `CHILD_THRESHOLD=0.5` - Confidence threshold for children's voice detection
+- `AGE_THRESHOLD=0.3` - Age threshold for classification (0.3 ≈ 30 years)
+- `MAX_AUDIO_DURATION_SECONDS=300` - Skip videos longer than 5 minutes
+- `DEBUG_MODE=true` - Enable detailed logging
+- `AUDIO_QUALITY=medium` - Audio download quality (low/medium/high)
 
-## Key Dependencies
+**Output Files:**
 
-```
-google-api-python-client  # YouTube API
-yt-dlp                   # Video downloading
-ffmpeg-python            # Audio conversion
-torch + transformers     # ML models
-openai-whisper          # Language detection
-```
+- `youtube_url_outputs/TIMESTAMP_multi_query_collected_video_urls.txt` - Final video URLs
+- `youtube_url_outputs/detailed_collection_results.json` - Complete statistics
+- `youtube_url_outputs/query_efficiency_statistics.json` - Performance metrics
 
-## Troubleshooting
+The crawler will automatically:
 
-- **API errors**: Check `echo $YOUTUBE_API_KEY` and Google Console quotas
-- **FFmpeg errors**: Test with `ffmpeg -version`
-- **Model issues**: Use `AudioClassifier.clear_model_cache()`
-
-## Algorithm
-
-1. Load existing URLs (prevent duplicates)
-2. For each query: search → analyze audio → explore channels
-3. Filter: Vietnamese language + children's voice
-4. Track: reviewed channels, statistics, progress
-5. Output: URLs + comprehensive reports
+- Search YouTube using your queries
+- Download and analyze audio from each video
+- Detect Vietnamese language and children's voices using ML
+- Explore channels with promising content
+- Generate comprehensive reports and statistics

@@ -1,0 +1,87 @@
+{
+  "collection_summary": {
+    "videos_collected_current_session": 1,
+    "total_videos_in_file": 7,
+    "total_target_count": 1,
+    "target_videos_per_query": 1,
+    "target_achievement_rate": "100.00%",
+    "total_queries_processed": 1,
+    "reviewed_channels": 1,
+    "total_videos_evaluated": 2,
+    "total_videos_with_children_voice": 1,
+    "total_videos_vietnamese": 2,
+    "total_videos_not_vietnamese": 3,
+    "overall_children_voice_rate": "50.00%",
+    "overall_vietnamese_rate": "40.00%",
+    "runtime_statistics": {
+      "start_time": "2025-07-24T18:14:32.749518",
+      "end_time": "2025-07-24T18:16:53.063984",
+      "total_runtime_seconds": 140.31,
+      "total_runtime_formatted": "2m 20.3s",
+      "collection_efficiency": "50.0%"
+    },
+    "video_analysis_timing_summary": {
+      "total_videos_analyzed": 5,
+      "videos_with_timing_data": 5,
+      "total_analysis_time": 138.96,
+      "avg_analysis_time_per_video": 27.792,
+      "total_children_detection_time": 90.08,
+      "avg_children_detection_time": 18.016,
+      "min_children_detection_time": 4.849,
+      "max_children_detection_time": 35.64,
+      "detection_efficiency_percentage": 64.8,
+      "video_length_statistics": {
+        "videos_with_length_data": 5,
+        "total_video_length_seconds": 313.16,
+        "avg_video_length_seconds": 62.63,
+        "min_video_length_seconds": 24.06,
+        "max_video_length_seconds": 118.15,
+        "total_video_length_formatted": "0:05:13"
+      }
+    }
+  },
+  "query_list": [
+    "bé giới thiệu bản thân"
+  ],
+  "query_statistics": [
+    {
+      "query": "bé giới thiệu bản thân",
+      "videos_collected": 1,
+      "videos_reviewed": 9,
+      "videos_evaluated": 2,
+      "videos_with_children_voice": 1,
+      "videos_vietnamese": 2,
+      "videos_not_vietnamese": 3,
+      "efficiency_rate": 11.11111111111111,
+      "children_voice_rate": 50.0,
+      "vietnamese_rate": 40.0,
+      "new_channels_found": 1
+    }
+  ],
+  "reviewed_channels": [
+    "UCgmEekOh4dJ0Teywt1SOiyw"
+  ],
+  "current_session_collected_urls": [
+    "https://www.youtube.com/watch?v=C6uS2csNBtc"
+  ],
+  "all_video_urls_in_file": [
+    "https://www.youtube.com/watch?v=FcFypeosrJk",
+    "https://www.youtube.com/watch?v=75_yDflzQNw",
+    "https://www.youtube.com/watch?v=zXWkkMQ5NQg",
+    "https://www.youtube.com/watch?v=tjqNk1h0wbY",
+    "https://www.youtube.com/watch?v=14oKiv2ccm4",
+    "https://www.youtube.com/watch?v=vJDW-R0GQx4",
+    "https://www.youtube.com/watch?v=C6uS2csNBtc"
+  ],
+  "video_analysis_results": [
+    {
+      "video_url": "https://www.youtube.com/watch?v=voJjWxi4VXA",
+      "video_title": "Bé 5 tuổi tự giới thiệu về bản thân",
+      "channel_title": "Dược Sỹ Phương Anh ",
+      "channel_id": "UC33z3dLnzABgzAeqOL2Y8KA",
+      "video_type": "main",
+      "query": "bé giới thiệu bản thân",
+      "is_vietnamese": false,
+      "detected_language": "other",
+      "has_children_voice": true,
+      "confidence": 
