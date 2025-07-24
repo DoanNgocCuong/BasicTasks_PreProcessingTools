@@ -142,7 +142,7 @@ class YoutubeAudioDownloader:
         # Convert using ffmpeg
         stream = ffmpeg.input(input_file)
         stream = ffmpeg.output(stream, output_file)
-        ffmpeg.run(stream)
+        ffmpeg.run(stream, quiet=True, overwrite_output=True)
         
         # Clean up intermediate file
         if os.path.exists(input_file):

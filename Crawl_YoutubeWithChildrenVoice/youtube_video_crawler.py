@@ -66,6 +66,7 @@ from dataclasses import dataclass
 from youtube_audio_downloader import Config as AudioConfig, YoutubeAudioDownloader
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
+from youtube_output_validator import YouTubeURLValidator
 
 
 # Configuration constants
@@ -93,7 +94,6 @@ class Config:
     # User input validation
     MIN_TARGET_COUNT = 1
     MAX_RECOMMENDED_PER_QUERY = 100
-    MAX_RECOMMENDED_TOTAL = 500
     
     # Debug and logging
     DEBUG_PREFIX = "🔍 DEBUG: "
@@ -190,17 +190,13 @@ class CollectionReporter:
     def report_configuration(self, target_count_per_query: int, total_target_count: int, queries: List[str]) -> None:
         """Report configuration settings."""
         self.output.print_success(f"Target set to {target_count_per_query} videos per query")
-        self.output.print_success(f"Total target count set to {total_target_count} videos across all queries")
+        self.output.print_success(f"Total target count automatically calculated: {total_target_count} videos ({target_count_per_query} × {len(queries)} queries)")
         self.output.print_enumerated_list(queries, f"Total queries configured: {len(queries)}")
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         self.output.print_info(f"Collection started at: {current_time}")
         
-        # Provide efficiency insight
-        max_possible = target_count_per_query * len(queries)
-        if total_target_count < max_possible:
-            self.output.print_info(f"Note: Total target ({total_target_count}) is less than max possible ({max_possible}). Collection may stop early.")
-        else:
-            self.output.print_info(f"Maximum possible videos: {max_possible} (if all queries reach their target)")
+        # Since total target is now calculated as per-query * num_queries, no efficiency insight needed
+        self.output.print_info(f"Collection will attempt to gather {target_count_per_query} videos for each query")
     
     def report_collection_start(self, target_per_query: int, total_queries: int) -> None:
         """Report collection start."""
@@ -304,6 +300,7 @@ class CollectionReporter:
     def report_collection_completion(self, total_collected: int) -> None:
         """Report completion of entire collection."""
         print(f"\nCollection completed! Videos collected in current session: {total_collected}")
+        self.output.print_info("Proceeding to URL validation...")
     
     def report_file_operations(self, operation: str, filepath: str) -> None:
         """Report file operation results."""
@@ -316,6 +313,22 @@ class CollectionReporter:
     def report_channel_added_count(self, added_count: int) -> None:
         """Report number of videos added from channel."""
         print(f"Added {added_count} similar videos from channel")
+    
+    def report_url_validation_start(self, filename: str) -> None:
+        """Report start of URL validation."""
+        self.output.print_sub_header("🔍 URL VALIDATION")
+        self.output.print_progress(f"Validating URLs in: {filename}")
+    
+    def report_url_validation_completion(self, duplicate_count: int, invalid_count: int) -> None:
+        """Report completion of URL validation."""
+        if duplicate_count == 0 and invalid_count == 0:
+            self.output.print_success("✅ All URLs are valid and unique!")
+        else:
+            if duplicate_count > 0:
+                self.output.print_warning(f"Found {duplicate_count} duplicate URLs")
+            if invalid_count > 0:
+                self.output.print_warning(f"Found {invalid_count} invalid URLs")
+            self.output.print_info("Check validation reports for details")
 
 
 class ErrorReporter:
@@ -391,25 +404,6 @@ class UserInputManager:
                     continue
                 if count > Config.MAX_RECOMMENDED_PER_QUERY:
                     confirm = input(f"⚠️  {count} videos per query is quite high. Continue? (y/n): ").strip().lower()
-                    if confirm not in ['y', 'yes']:
-                        continue
-                return count
-            except ValueError:
-                self.output.print_error("Invalid input. Please enter a valid number.")
-    
-    def get_total_target_count(self) -> int:
-        """Get total target video count from user."""
-        print()  # Add spacing
-        self.output.print_sub_header("🎯 TOTAL TARGET CONFIGURATION")
-        
-        while True:
-            try:
-                count = int(input("Enter the total maximum number of videos to collect across all queries (recommended: 50-200): "))
-                if count <= Config.MIN_TARGET_COUNT - 1:
-                    self.output.print_error("Please enter a positive number")
-                    continue
-                if count > Config.MAX_RECOMMENDED_TOTAL:
-                    confirm = input(f"⚠️  {count} total videos is very high and may take a long time. Continue? (y/n): ").strip().lower()
                     if confirm not in ['y', 'yes']:
                         continue
                 return count
@@ -558,8 +552,10 @@ class YouTubeVideoCrawler:
         self.current_session_collected_urls: List[str] = []
         
         self.target_video_count_per_query = self.input_manager.get_target_count_per_query()
-        self.total_target_count = self.input_manager.get_total_target_count()
         self.query_list = self.input_manager.get_query_list()
+        
+        # Auto-calculate total target count based on per-query target * number of queries
+        self.total_target_count = self.target_video_count_per_query * len(self.query_list)
         
         # Report configuration
         self.reporter.report_configuration(self.target_video_count_per_query, self.total_target_count, self.query_list)
@@ -1130,6 +1126,32 @@ class YouTubeVideoCrawler:
                 f.write(url + '\n')
         
         self.reporter.report_file_operations("Results saved to", str(filepath.resolve()))
+    
+    def validate_collected_urls(self, filename: str) -> None:
+        """
+        Validate the collected URLs using YouTubeURLValidator and remove duplicates in-place.
+        
+        Args:
+            filename (str): Path to the file containing URLs to validate
+        """
+        try:
+            # Report validation start
+            self.reporter.report_url_validation_start(filename)
+            
+            # Initialize validator
+            validator = YouTubeURLValidator()
+            
+            # Validate and clean the file in one step
+            result = validator.validate_and_clean_file(Path(filename))
+            
+            # Report validation completion
+            self.reporter.report_url_validation_completion(
+                result.duplicate_count, 
+                result.invalid_urls
+            )
+            
+        except Exception as e:
+            self.error_reporter.report_file_error("validating URLs", e)
 
 def main():
     """Main function to run the YouTube video searcher."""
@@ -1157,6 +1179,9 @@ def main():
             main_urls_filename = str(Config.DEFAULT_OUTPUT_DIR / f"{timestamp}_multi_query_collected_video_urls.txt")
             
             searcher.save_results(main_urls_filename)
+            
+            # Validate collected URLs as final step
+            searcher.validate_collected_urls(main_urls_filename)
         else:
             output_manager.print_warning("No videos were collected")
             

@@ -60,15 +60,24 @@ from dataclasses import dataclass
 
 
 @dataclass
+class DuplicateInfo:
+    """Data class for duplicate URL information."""
+    url: str
+    normalized_url: str
+    positions: List[int]  # Line positions (0-based) where this URL appears
+    count: int
+
+@dataclass
 class ValidationResult:
     """Data class for validation results."""
     total_urls: int
     unique_urls: int
     duplicate_count: int
     invalid_urls: int
-    duplicates: Dict[str, int]
+    duplicates: Dict[str, int]  # Kept for backward compatibility
     invalid_url_list: List[str]
     valid_urls: Set[str]
+    duplicate_urls: List[DuplicateInfo]  # Detailed duplicate information with positions
 
 
 class Config:
@@ -186,14 +195,20 @@ class YouTubeURLValidator:
         Returns:
             ValidationResult: Validation results
         """
-        # Normalize URLs first
+        # Track normalized URLs with their positions
+        url_positions = {}  # normalized_url -> list of positions
         normalized_urls = []
         invalid_urls = []
         
-        for url in urls:
+        for i, url in enumerate(urls):
             if self.is_valid_youtube_url(url):
                 normalized_url = self.normalize_youtube_url(url)
                 normalized_urls.append(normalized_url)
+                
+                # Track positions for each normalized URL
+                if normalized_url not in url_positions:
+                    url_positions[normalized_url] = []
+                url_positions[normalized_url].append(i)
             else:
                 invalid_urls.append(url)
         
@@ -202,6 +217,18 @@ class YouTubeURLValidator:
         
         # Find duplicates (URLs that appear more than once)
         duplicates = {url: count for url, count in url_counts.items() if count > 1}
+        
+        # Build detailed duplicate information
+        duplicate_urls = []
+        for normalized_url, count in duplicates.items():
+            positions = url_positions[normalized_url]
+            duplicate_info = DuplicateInfo(
+                url=urls[positions[0]],  # Original URL from first occurrence
+                normalized_url=normalized_url,
+                positions=positions,
+                count=count
+            )
+            duplicate_urls.append(duplicate_info)
         
         # Get unique URLs
         unique_urls = set(normalized_urls)
@@ -216,7 +243,8 @@ class YouTubeURLValidator:
             invalid_urls=len(invalid_urls),
             duplicates=duplicates,
             invalid_url_list=invalid_urls,
-            valid_urls=unique_urls
+            valid_urls=unique_urls,
+            duplicate_urls=duplicate_urls
         )
     
     def print_validation_summary(self, result: ValidationResult):
@@ -339,7 +367,7 @@ class YouTubeURLValidator:
         
         if not urls:
             print("❌ No URLs found or file could not be read.")
-            return ValidationResult(0, 0, 0, 0, {}, [], set())
+            return ValidationResult(0, 0, 0, 0, {}, [], set(), [])
         
         print(f"📊 Processing {len(urls)} URLs...")
         result = self.validate_urls(urls)
@@ -359,6 +387,84 @@ class YouTubeURLValidator:
         print(f"   • Statistics: {self.config.validation_stats_file}")
         
         return result
+    
+    def remove_duplicates_from_file(self, duplicate_urls: List[DuplicateInfo], file_path: Path) -> int:
+        """
+        Remove duplicate URLs from file in-place.
+        
+        Args:
+            duplicate_urls (List[DuplicateInfo]): List of duplicate information
+            file_path (Path): Path to the file containing URLs
+            
+        Returns:
+            int: Number of duplicates removed
+        """
+        try:
+            # Read all lines from the file
+            with file_path.open('r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # Collect all positions to remove (keep only the first occurrence of each duplicate)
+            positions_to_remove = set()
+            
+            for duplicate_info in duplicate_urls:
+                # Remove all occurrences except the first one
+                positions_to_remove.update(duplicate_info.positions[1:])
+            
+            # Create new content excluding the duplicate positions
+            new_lines = []
+            for i, line in enumerate(lines):
+                if i not in positions_to_remove:
+                    new_lines.append(line)
+            
+            # Write the cleaned content back to the file
+            with file_path.open('w', encoding='utf-8') as f:
+                f.writelines(new_lines)
+            
+            removed_count = len(positions_to_remove)
+            print(f"✅ Removed {removed_count} duplicate URLs from {file_path}")
+            return removed_count
+            
+        except Exception as e:
+            print(f"❌ Error removing duplicates from file {file_path}: {e}")
+            return 0
+    
+    def validate_only(self, file_path: Path) -> ValidationResult:
+        """
+        Validate URLs from file without side effects (no file creation).
+        
+        Args:
+            file_path (Path): Path to input file
+            
+        Returns:
+            ValidationResult: Validation results
+        """
+        urls = self.read_urls_from_file(file_path)
+        
+        if not urls:
+            return ValidationResult(0, 0, 0, 0, {}, [], set(), [])
+        
+        return self.validate_urls(urls)
+    
+    def validate_and_clean_file(self, file_path: Path) -> ValidationResult:
+        """
+        Validate URLs from file and remove duplicates in-place.
+        
+        Args:
+            file_path (Path): Path to input file
+            
+        Returns:
+            ValidationResult: Validation results (before cleaning)
+        """
+        # First validate to get duplicate information
+        result = self.validate_only(file_path)
+        
+        # Remove duplicates if found
+        if result.duplicate_urls:
+            removed_count = self.remove_duplicates_from_file(result.duplicate_urls, file_path)
+            print(f"🧹 Cleaned file by removing {removed_count} duplicate URLs")
+        
+        return result
 
 
 def main():
@@ -375,15 +481,19 @@ def main():
         print("Please ensure the file exists or provide a different file path.")
         return
     
-    # Validate URLs
-    result = validator.validate_file()
+    # Validate URLs and clean duplicates
+    print("🔍 Validating URLs and cleaning duplicates...")
+    result = validator.validate_and_clean_file(validator.config.default_input_file)
+    
+    # Print summary
+    validator.print_validation_summary(result)
     
     # Final summary
     if result.duplicate_count > 0:
-        print(f"\n⚠️  Found {result.duplicate_count} duplicate URLs!")
-        print(f"   Consider using the cleaned URLs file for deduplication.")
+        print(f"\n🧹 File has been cleaned of {result.duplicate_count} duplicate URLs!")
+        print(f"   Original file now contains only unique URLs.")
     else:
-        print(f"\n✅ No duplicates found! Your URL collection is clean.")
+        print(f"\n✅ No duplicates found! Your URL collection was already clean.")
 
 
 if __name__ == "__main__":
