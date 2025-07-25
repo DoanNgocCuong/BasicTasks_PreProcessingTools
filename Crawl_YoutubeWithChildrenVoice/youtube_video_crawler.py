@@ -13,6 +13,7 @@ Author: Le Hoang Minh
 import requests
 import time
 import threading
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Set
@@ -36,6 +37,7 @@ class Config:
     
     # File names (relative to the script's directory)
     _SCRIPT_DIR = Path(__file__).parent
+    DEFAULT_CONFIG_FILE = str(_SCRIPT_DIR / "crawler_config.json")
     DEFAULT_URLS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/collected_video_urls.txt")
     DEFAULT_REPORT_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/collection_report.txt")
     DEFAULT_DETAILED_RESULTS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/detailed_collection_results.json")
@@ -56,6 +58,132 @@ class Config:
     
     # Default values
     DEFAULT_QUERY = "bé giới thiệu bản thân"
+
+
+@dataclass
+class CrawlerConfig:
+    """Data class for crawler configuration loaded from JSON file."""
+    debug_mode: bool
+    target_videos_per_query: int
+    search_queries: List[str]
+    max_recommended_per_query: int = 100
+    min_target_count: int = 1
+
+
+class ConfigLoader:
+    """Loads configuration from JSON file instead of user input."""
+    
+    def __init__(self, output_manager: "OutputManager", config_file_path: Optional[str] = None):
+        """Initialize with output manager and optional config file path."""
+        self.output = output_manager
+        self.config_file_path = config_file_path or Config.DEFAULT_CONFIG_FILE
+    
+    def load_config(self) -> CrawlerConfig:
+        """
+        Load configuration from JSON file.
+        
+        Returns:
+            CrawlerConfig: Configuration object with all settings
+            
+        Raises:
+            FileNotFoundError: If config file doesn't exist
+            ValueError: If config file is invalid or missing required fields
+        """
+        config_path = Path(self.config_file_path)
+        
+        if not config_path.exists():
+            self.output.print_error(f"Configuration file not found: {self.config_file_path}")
+            self.output.print_info("Creating a default configuration file...")
+            self._create_default_config_file(config_path)
+            self.output.print_success(f"Default configuration created: {self.config_file_path}")
+            self.output.print_info("Please edit the configuration file and run the script again.")
+            raise FileNotFoundError(f"Configuration file created at {self.config_file_path}. Please edit it and run again.")
+        
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            
+            # Validate required fields
+            required_fields = ['debug_mode', 'target_videos_per_query', 'search_queries']
+            missing_fields = [field for field in required_fields if field not in config_data]
+            
+            if missing_fields:
+                raise ValueError(f"Missing required fields in configuration: {', '.join(missing_fields)}")
+            
+            # Validate data types and values
+            if not isinstance(config_data['debug_mode'], bool):
+                raise ValueError("debug_mode must be a boolean (true/false)")
+            
+            if not isinstance(config_data['target_videos_per_query'], int) or config_data['target_videos_per_query'] < 1:
+                raise ValueError("target_videos_per_query must be a positive integer")
+            
+            if not isinstance(config_data['search_queries'], list) or len(config_data['search_queries']) == 0:
+                raise ValueError("search_queries must be a non-empty list of strings")
+            
+            # Validate each query is a non-empty string
+            for i, query in enumerate(config_data['search_queries']):
+                if not isinstance(query, str) or not query.strip():
+                    raise ValueError(f"search_queries[{i}] must be a non-empty string")
+            
+            # Create config object with defaults for optional fields
+            crawler_config = CrawlerConfig(
+                debug_mode=config_data['debug_mode'],
+                target_videos_per_query=config_data['target_videos_per_query'],
+                search_queries=[q.strip() for q in config_data['search_queries']],
+                max_recommended_per_query=config_data.get('max_recommended_per_query', 100),
+                min_target_count=config_data.get('min_target_count', 1)
+            )
+            
+            # Report loaded configuration
+            self._report_loaded_config(crawler_config)
+            
+            return crawler_config
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in configuration file: {e}")
+        except Exception as e:
+            raise ValueError(f"Error loading configuration: {e}")
+    
+    def _create_default_config_file(self, config_path: Path) -> None:
+        """Create a default configuration file."""
+        default_config = {
+            "debug_mode": False,
+            "target_videos_per_query": 20,
+            "search_queries": [
+                "bé giới thiệu bản thân",
+                "bé tập nói tiếng Việt",
+                "trẻ em kể chuyện",
+                "bé hát ca dao",
+                "em bé học nói",
+                "trẻ con nói chuyện",
+                "bé đọc thơ",
+                "con nít kể chuyện"
+            ],
+            "max_recommended_per_query": 100,
+            "min_target_count": 1,
+            "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, and modify search_queries array to change what videos to search for."
+        }
+        
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(default_config, f, indent=2, ensure_ascii=False)
+    
+    def _report_loaded_config(self, config: CrawlerConfig) -> None:
+        """Report the loaded configuration to the user."""
+        self.output.print_header("CONFIGURATION LOADED FROM FILE", 60)
+        self.output.print_success(f"Configuration file: {self.config_file_path}")
+        self.output.print_info(f"Debug mode: {'Enabled' if config.debug_mode else 'Disabled'}")
+        self.output.print_info(f"Target videos per query: {config.target_videos_per_query}")
+        self.output.print_info(f"Total queries: {len(config.search_queries)}")
+        
+        total_target_count = config.target_videos_per_query * len(config.search_queries)
+        self.output.print_info(f"Total target videos: {total_target_count}")
+        
+        self.output.print_enumerated_list(config.search_queries, "Search queries:")
+        
+        if config.target_videos_per_query > config.max_recommended_per_query:
+            self.output.print_warning(f"High target count per query: {config.target_videos_per_query} (recommended max: {config.max_recommended_per_query})")
+        
+        self.output.print_section_divider()
 
 
 @dataclass
@@ -554,30 +682,39 @@ class DebugLogger:
 class YouTubeVideoCrawler:
     """YouTube video searcher for collecting children's voice content."""
     
-    def __init__(self, debug_mode: bool = False) -> None:
+    def __init__(self, config: Optional[CrawlerConfig] = None, config_file_path: Optional[str] = None) -> None:
         """
         Initialize YouTube API searcher using Google's YouTube Data API v3.
         
         Args:
-            debug_mode (bool): Enable debug logging
+            config (CrawlerConfig, optional): Configuration object. If not provided, will load from file.
+            config_file_path (str, optional): Path to configuration file. Uses default if not provided.
         """
         # Initialize output management
         self.output = OutputManager()
         self.reporter = CollectionReporter(self.output)
         self.error_reporter = ErrorReporter(self.output)
-        self.input_manager = UserInputManager(self.output)
+        
+        # Load configuration from file if not provided
+        if config is None:
+            config_loader = ConfigLoader(self.output, config_file_path)
+            config = config_loader.load_config()
+        
+        # Store configuration
+        self.config = config
         
         # Initialize output analyzer
         self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
         
-        self.debug = DebugLogger(enabled=debug_mode)
+        self.debug = DebugLogger(enabled=config.debug_mode)
         self.api_key = self._get_api_key()
         self.base_url = Config.YOUTUBE_API_BASE_URL
         
         # Configure parallel processing from environment config
-        self.max_workers = config.MAX_WORKERS
+        from env_config import config as env_config
+        self.max_workers = env_config.MAX_WORKERS
         
-        if debug_mode:
+        if config.debug_mode:
             self.debug.log(f"Parallel processing configured with max_workers: {self.max_workers}")
         
         # API quota and rate limiting management
@@ -607,8 +744,9 @@ class YouTubeVideoCrawler:
         # Track individual video analysis results with timing for detailed reporting
         self.video_analysis_results: List[Dict] = []
         
-        self.target_video_count_per_query = self.input_manager.get_target_count_per_query()
-        self.query_list = self.input_manager.get_query_list()
+        # Use configuration values instead of user input
+        self.target_video_count_per_query = config.target_videos_per_query
+        self.query_list = config.search_queries
         
         # Auto-calculate total target count based on per-query target * number of queries
         self.total_target_count = self.target_video_count_per_query * len(self.query_list)
@@ -691,6 +829,21 @@ class YouTubeVideoCrawler:
             self.global_video_download_index += 1
             return current_index
         
+    def _cleanup_audio_file(self, audio_file_path: str) -> None:
+        """
+        Delete the audio file after analysis to clean up resources.
+        
+        Args:
+            audio_file_path (str): Path to the audio file to delete
+        """
+        try:
+            if audio_file_path and Path(audio_file_path).exists():
+                Path(audio_file_path).unlink()
+                self.debug.log(f"Cleaned up audio file: {audio_file_path}")
+        except Exception as e:
+            self.debug.log_error("Audio file cleanup", e)
+            # Don't raise exception for cleanup failures as they shouldn't stop the main process
+    
     def analyze_video_audio(self, video: Dict, video_type: str = "main") -> AnalysisResult:
         """
         OPTIMIZED: Download and analyze video audio using combined prediction for maximum efficiency.
@@ -707,6 +860,7 @@ class YouTubeVideoCrawler:
         children_detection_start_time = None
         children_detection_duration = 0.0
         video_duration = None  # Ensure video_duration is always defined
+        wav_file_path = None  # Initialize to handle cleanup in exception cases
         
         try:
             # Convert YouTube video to .wav file once for both analyses
@@ -739,6 +893,8 @@ class YouTubeVideoCrawler:
             children_detection_duration = time.time() - children_detection_start_time
             
             if "error" in combined_result:
+                # Clean up audio file after analysis
+                self._cleanup_audio_file(wav_file_path)
                 total_analysis_time = time.time() - analysis_start_time
                 return AnalysisResult(
                     is_vietnamese=False,
@@ -788,6 +944,9 @@ class YouTubeVideoCrawler:
             # Update timing statistics
             self._update_timing_statistics(total_analysis_time, children_detection_duration)
             
+            # Clean up audio file after successful analysis
+            self._cleanup_audio_file(wav_file_path)
+            
             return AnalysisResult(
                 is_vietnamese=is_vietnamese,
                 detected_language=language_result['detected_language'],
@@ -802,6 +961,11 @@ class YouTubeVideoCrawler:
         except Exception as e:
             total_analysis_time = time.time() - analysis_start_time
             self.error_reporter.report_audio_analysis_error(e)
+            
+            # Clean up audio file even if analysis failed (if it was created)
+            if wav_file_path:
+                self._cleanup_audio_file(wav_file_path)
+            
             return AnalysisResult(
                 is_vietnamese=False,
                 detected_language='unknown',
@@ -1708,14 +1872,13 @@ def main():
     """Main function to run the YouTube video searcher."""
     output_manager = OutputManager()
     error_reporter = ErrorReporter(output_manager)
-    input_manager = UserInputManager(output_manager)
     
     try:
-        # Ask user about debug mode
-        debug_mode = input_manager.get_debug_mode_preference()
+        # Initialize searcher with configuration from file (no user input required)
+        output_manager.print_header("YouTube Video Crawler - Automated Mode", 60)
+        output_manager.print_info("Loading configuration from file...")
         
-        # Initialize searcher (this will check for API key and get user inputs)
-        searcher = YouTubeVideoCrawler(debug_mode=debug_mode)
+        searcher = YouTubeVideoCrawler()
         
         # Collect videos using multiple queries
         video_urls = searcher.collect_videos()
@@ -1736,6 +1899,9 @@ def main():
         else:
             output_manager.print_warning("No videos were collected")
             
+    except FileNotFoundError as e:
+        output_manager.print_error(str(e))
+        output_manager.print_info("Please edit the configuration file and run the script again.")
     except ValueError as e:
         error_reporter.report_configuration_error(e)
     except Exception as e:
