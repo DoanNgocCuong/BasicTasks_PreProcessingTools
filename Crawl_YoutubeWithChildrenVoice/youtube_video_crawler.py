@@ -12,6 +12,7 @@ Author: Le Hoang Minh
 
 import requests
 import time
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Set
@@ -635,6 +636,7 @@ class YouTubeVideoCrawler:
         self.current_video: Optional[Dict] = None
         self.current_video_index = 0
         self.global_video_download_index = 0  # Global index for all video downloads to prevent file overlap
+        self.download_index_lock = threading.Lock()  # Thread-safe lock for index assignment
         self.start_time = time.time()
         self.start_datetime = datetime.now()
         
@@ -676,6 +678,18 @@ class YouTubeVideoCrawler:
         if not hasattr(self, '_shared_classifier_instance'):
             self._shared_classifier_instance = AudioClassifier()
         return self._shared_classifier_instance
+    
+    def _get_next_download_index(self) -> int:
+        """
+        Thread-safe method to get the next download index.
+        
+        Returns:
+            int: Next available download index
+        """
+        with self.download_index_lock:
+            current_index = self.global_video_download_index
+            self.global_video_download_index += 1
+            return current_index
         
     def analyze_video_audio(self, video: Dict, video_type: str = "main") -> AnalysisResult:
         """
@@ -696,11 +710,10 @@ class YouTubeVideoCrawler:
         
         try:
             # Convert YouTube video to .wav file once for both analyses
-            # Use global download index to prevent file overlap
+            # Use thread-safe global download index to prevent file overlap
             # Get both audio file path and video duration
-            wav_file_path, video_duration = self.audio_downloader.download_audio_from_yturl(video['url'], index=self.global_video_download_index)
-            current_download_index = self.global_video_download_index
-            self.global_video_download_index += 1  # Increment for next download
+            current_download_index = self._get_next_download_index()
+            wav_file_path, video_duration = self.audio_downloader.download_audio_from_yturl(video['url'], index=current_download_index)
             
             if not wav_file_path:
                 self.error_reporter.report_audio_download_failure()

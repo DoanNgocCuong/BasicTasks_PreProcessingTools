@@ -149,9 +149,25 @@ class YoutubeAudioDownloader:
         # Get video duration first (without downloading)
         video_duration = self.get_video_duration(url)
         
+        # Ensure output directory exists (thread-safe)
+        os.makedirs(self.config.output_dir, exist_ok=True)
+        
+        # Clean up any existing files with the same index to prevent conflicts
+        m4a_file = self.config.get_output_path(self.config.get_m4a_filename(index))
+        wav_file = self.config.get_output_path(self.config.get_wav_filename(index))
+        part_file = m4a_file + '.part'
+        
+        # Remove existing files that might cause conflicts
+        for file_path in [m4a_file, wav_file, part_file]:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass  # File might be in use by another process
+        
         # Configure output template
         ydl_opts = self.config.ydl_opts.copy()
-        ydl_opts['outtmpl'] = self.config.get_output_path(self.config.get_m4a_filename(index))
+        ydl_opts['outtmpl'] = m4a_file
         
         try:
             # Download audio
@@ -168,6 +184,13 @@ class YoutubeAudioDownloader:
             
         except Exception as e:
             print(f"⚠️ Error downloading audio: {e}")
+            # Clean up any partial files on error
+            for file_path in [m4a_file, wav_file, part_file]:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
             return None, None
     
     def _convert_to_wav_with_duration(self, index):
@@ -183,32 +206,55 @@ class YoutubeAudioDownloader:
         input_file = self.config.get_output_path(self.config.get_m4a_filename(index))
         output_file = self.config.get_output_path(self.config.get_wav_filename(index))
         
+        # Check if input file exists before conversion
+        if not os.path.exists(input_file):
+            print(f"⚠️ Input file not found: {input_file}")
+            return None, None
+        
         try:
+            # Remove output file if it already exists to prevent conflicts
+            if os.path.exists(output_file):
+                try:
+                    os.remove(output_file)
+                except OSError:
+                    pass
+            
             # Convert using ffmpeg
             stream = ffmpeg.input(input_file)
             stream = ffmpeg.output(stream, output_file)
             ffmpeg.run(stream, quiet=True, overwrite_output=True)
             
+            # Verify conversion was successful
+            if not os.path.exists(output_file):
+                print(f"⚠️ Conversion failed: output file not created")
+                return None, None
+            
             # Get audio duration from the converted WAV file
             audio_duration = None
-            if os.path.exists(output_file):
+            try:
                 audio_duration = self.get_audio_length_from_file(output_file)
+            except Exception as duration_error:
+                print(f"⚠️ Warning: Could not get audio duration: {duration_error}")
+                # Continue anyway, duration is not critical
             
             # Clean up intermediate file
             if os.path.exists(input_file):
-                os.remove(input_file)
+                try:
+                    os.remove(input_file)
+                except OSError as cleanup_error:
+                    print(f"⚠️ Warning: Could not remove intermediate file: {cleanup_error}")
             
-            # Return output file path and duration if successful
-            if os.path.exists(output_file):
-                return output_file, audio_duration
-            else:
-                return None, None
+            return output_file, audio_duration
                 
         except Exception as e:
             print(f"⚠️ Error converting to WAV: {e}")
-            # Clean up intermediate file even on error
-            if os.path.exists(input_file):
-                os.remove(input_file)
+            # Clean up both intermediate and output files on error
+            for file_path in [input_file, output_file]:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
             return None, None
     
     def _convert_to_wav(self, index):
