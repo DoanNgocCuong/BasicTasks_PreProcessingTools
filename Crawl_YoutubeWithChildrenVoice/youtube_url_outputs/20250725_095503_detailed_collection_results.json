@@ -1,0 +1,160 @@
+{
+  "collection_summary": {
+    "videos_collected_current_session": 2,
+    "total_videos_in_file": 19,
+    "total_target_count": 2,
+    "target_videos_per_query": 1,
+    "target_achievement_rate": "100.00%",
+    "total_queries_processed": 2,
+    "reviewed_channels": 2,
+    "total_videos_evaluated": 2,
+    "total_videos_with_children_voice": 2,
+    "total_videos_vietnamese": 2,
+    "total_videos_not_vietnamese": 1,
+    "overall_children_voice_rate": "100.00%",
+    "overall_vietnamese_rate": "66.67%",
+    "runtime_statistics": {
+      "start_time": "2025-07-25T09:53:20.400208",
+      "end_time": "2025-07-25T09:55:03.154934",
+      "total_runtime_seconds": 102.75,
+      "total_runtime_formatted": "1m 42.8s",
+      "collection_efficiency": "100.0%"
+    },
+    "video_analysis_timing_summary": {
+      "total_videos_analyzed": 3,
+      "videos_with_timing_data": 3,
+      "total_analysis_time": 99.5,
+      "avg_analysis_time_per_video": 33.168,
+      "total_children_detection_time": 43.5,
+      "avg_children_detection_time": 14.501,
+      "min_children_detection_time": 4.581,
+      "max_children_detection_time": 25.861,
+      "detection_efficiency_percentage": 43.7,
+      "video_length_statistics": {
+        "videos_with_length_data": 3,
+        "total_video_length_seconds": 1337.65,
+        "avg_video_length_seconds": 445.88,
+        "min_video_length_seconds": 266.03,
+        "max_video_length_seconds": 795.65,
+        "total_video_length_formatted": "0:22:17"
+      }
+    }
+  },
+  "query_list": [
+    "bé kể chuyện tiếng việt",
+    "bé nói tiếng việt"
+  ],
+  "query_statistics": [
+    {
+      "query": "bé kể chuyện tiếng việt",
+      "videos_collected": 1,
+      "videos_reviewed": 1,
+      "videos_evaluated": 1,
+      "videos_with_children_voice": 1,
+      "videos_vietnamese": 1,
+      "videos_not_vietnamese": 0,
+      "efficiency_rate": 100.0,
+      "children_voice_rate": 100.0,
+      "vietnamese_rate": 100.0,
+      "new_channels_found": 1
+    },
+    {
+      "query": "bé nói tiếng việt",
+      "videos_collected": 1,
+      "videos_reviewed": 6,
+      "videos_evaluated": 1,
+      "videos_with_children_voice": 1,
+      "videos_vietnamese": 1,
+      "videos_not_vietnamese": 1,
+      "efficiency_rate": 16.666666666666664,
+      "children_voice_rate": 100.0,
+      "vietnamese_rate": 50.0,
+      "new_channels_found": 2
+    }
+  ],
+  "reviewed_channels": [
+    "UC6eq3sR4CtbvGdmInchzWUA",
+    "UCGcJDcl6ybo3-4XJ_ZmGF4Q"
+  ],
+  "current_session_collected_urls": [
+    "https://www.youtube.com/watch?v=k1FG3GtDYao",
+    "https://www.youtube.com/watch?v=hKID1mkjBJg"
+  ],
+  "all_video_urls_in_file": [
+    "https://www.youtube.com/watch?v=FcFypeosrJk",
+    "https://www.youtube.com/watch?v=75_yDflzQNw",
+    "https://www.youtube.com/watch?v=zXWkkMQ5NQg",
+    "https://www.youtube.com/watch?v=tjqNk1h0wbY",
+    "https://www.youtube.com/watch?v=14oKiv2ccm4",
+    "https://www.youtube.com/watch?v=vJDW-R0GQx4",
+    "https://www.youtube.com/watch?v=C6uS2csNBtc",
+    "https://www.youtube.com/watch?v=AvEAhUXba70",
+    "https://www.youtube.com/watch?v=rGqovzmffgM",
+    "https://www.youtube.com/watch?v=HA60EzAmFlM",
+    "https://www.youtube.com/watch?v=NFpQv8Zo9HU",
+    "https://www.youtube.com/watch?v=S0gy9NgJKy0",
+    "https://www.youtube.com/watch?v=JQ52Nr4ma24",
+    "https://www.youtube.com/watch?v=tuvO4c6YmUI",
+    "https://www.youtube.com/watch?v=pvIGJJ10Sro",
+    "https://www.youtube.com/watch?v=FxX5pTGW2dQ",
+    "https://www.youtube.com/watch?v=b1RkDetY2yk",
+    "https://www.youtube.com/watch?v=k1FG3GtDYao",
+    "https://www.youtube.com/watch?v=hKID1mkjBJg"
+  ],
+  "video_analysis_results": [
+    {
+      "video_url": "https://www.youtube.com/watch?v=k1FG3GtDYao",
+      "video_title": "Truyện Thỏ Con Không Vâng Lời - Chuyện Kể Bé Nghe  [Full HD]",
+      "channel_title": "Kênh Thiếu Nhi - BHMEDIA",
+      "channel_id": "UC6eq3sR4CtbvGdmInchzWUA",
+      "video_type": "main",
+      "query": "bé kể chuyện tiếng việt",
+      "is_vietnamese": true,
+      "detected_language": "vi",
+      "has_children_voice": true,
+      "confidence": 0.2552166283130646,
+      "total_analysis_time": 38.81679081916809,
+      "children_detection_time": 13.061786890029907,
+      "video_length_seconds": 275.975667,
+      "was_collected": true,
+      "analysis_error": null,
+      "timestamp": "2025-07-25T09:54:00.028653"
+    },
+    {
+      "video_url": "https://www.youtube.com/watch?v=vnQHuiuetKM",
+      "video_title": "Dạy bé tập nói con vật tiếng việt | bé học nói sớm qua các loài động vật | dạy trẻ thông minh sớm",
+      "channel_title": "DẠY TRẺ THÔNG MINH SỚM",
+      "channel_id": "UCGcJDcl6ybo3-4XJ_ZmGF4Q",
+      "video_type": "main",
+      "query": "bé nói tiếng việt",
+      "is_vietnamese": false,
+      "detected_language": "other",
+      "has_children_voice": true,
+      "confidence": 0.213550865650177,
+      "total_analysis_time": 43.31524038314819,
+      "children_detection_time": 25.86055326461792,
+      "video_length_seconds": 795.649875,
+      "was_collected": false,
+      "analysis_error": null,
+      "timestamp": "2025-07-25T09:54:45.049818"
+    },
+    {
+      "video_url": "https://www.youtube.com/watch?v=hKID1mkjBJg",
+      "video_title": "Dạy bé tập nói tiếng Việt | em học đọc các loại rau củ quả | Dạy trẻ thông minh sớm",
+      "channel_title": "DẠY TRẺ THÔNG MINH SỚM",
+      "channel_id": "UCGcJDcl6ybo3-4XJ_ZmGF4Q",
+      "video_type": "main",
+      "query": "bé nói tiếng việt",
+      "is_vietnamese": true,
+      "detected_language": "vi",
+      "has_children_voice": true,
+      "confidence": 0.2999672293663025,
+      "total_analysis_time": 17.372395992279053,
+      "children_detection_time": 4.5806884765625,
+      "video_length_seconds": 266.025917,
+      "was_collected": true,
+      "analysis_error": null,
+      "timestamp": "2025-07-25T09:55:02.423347"
+    }
+  ]
+}
