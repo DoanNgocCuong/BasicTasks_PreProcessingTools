@@ -1,0 +1,213 @@
+=== FINAL COLLECTION REPORT FOR VIETNAMESE CHILDREN'S VOICE VIDEOS ===
+Report generated: 2025-07-28 00:47:49
+
+=== OVERALL STATISTICS ===
+Videos collected in current session: 757
+Total videos in file (including existing): 837
+Total target count: 25000
+Target per query: 250
+Target achievement: 3.03%
+Total videos evaluated: 1364
+Total videos with children's voice: 784
+Total videos in Vietnamese: 1364
+Total videos not in Vietnamese: 1399
+Overall children's voice rate: 57.48%
+Overall Vietnamese rate: 49.37%
+Total queries processed: 100
+Total channels reviewed: 89
+
+=== DETAILED STATISTICS BY QUERY ===
+Query: "trẻ em Việt Nam nói chuyện"
+  - Videos collected: 121
+  - Videos reviewed: 352
+  - Videos evaluated: 164
+  - Videos with children's voice: 122
+  - Videos in Vietnamese: 164
+  - Videos not in Vietnamese: 178
+  - Efficiency rate: 34.38%
+  - Children's voice rate: 74.39%
+  - Vietnamese rate: 47.95%
+  - New channels found: 10
+
+Query: "bé tập nói tiếng Việt"
+  - Videos collected: 120
+  - Videos reviewed: 321
+  - Videos evaluated: 174
+  - Videos with children's voice: 126
+  - Videos in Vietnamese: 174
+  - Videos not in Vietnamese: 133
+  - Efficiency rate: 37.38%
+  - Children's voice rate: 72.41%
+  - Vietnamese rate: 56.68%
+  - New channels found: 16
+
+Query: "video trẻ em kể chuyện tiếng Việt"
+  - Videos collected: 17
+  - Videos reviewed: 197
+  - Videos evaluated: 39
+  - Videos with children's voice: 19
+  - Videos in Vietnamese: 39
+  - Videos not in Vietnamese: 154
+  - Efficiency rate: 8.63%
+  - Children's voice rate: 48.72%
+  - Vietnamese rate: 20.21%
+  - New channels found: 19
+
+Query: "phim hoạt hình tiếng Việt có trẻ em nói"
+  - Videos collected: 12
+  - Videos reviewed: 105
+  - Videos evaluated: 20
+  - Videos with children's voice: 13
+  - Videos in Vietnamese: 20
+  - Videos not in Vietnamese: 80
+  - Efficiency rate: 11.43%
+  - Children's voice rate: 65.00%
+  - Vietnamese rate: 20.00%
+  - New channels found: 22
+
+Query: "trẻ em Việt Nam vui chơi nói chuyện"
+  - Videos collected: 85
+  - Videos reviewed: 237
+  - Videos evaluated: 162
+  - Videos with children's voice: 86
+  - Videos in Vietnamese: 162
+  - Videos not in Vietnamese: 68
+  - Efficiency rate: 35.86%
+  - Children's voice rate: 53.09%
+  - Vietnamese rate: 70.43%
+  - New channels found: 31
+
+Query: "bé học tiếng Việt qua video"
+  - Videos collected: 34
+  - Videos reviewed: 187
+  - Videos evaluated: 46
+  - Videos with children's voice: 37
+  - Videos in Vietnamese: 46
+  - Videos not in Vietnamese: 123
+  - Efficiency rate: 18.18%
+  - Children's voice rate: 80.43%
+  - Vietnamese rate: 27.22%
+  - New channels found: 34
+
+Query: "trẻ em Việt Nam giao tiếp"
+  - Videos collected: 55
+  - Videos reviewed: 298
+  - Videos evaluated: 126
+  - Videos with children's voice: 57
+  - Videos in Vietnamese: 126
+  - Videos not in Vietnamese: 165
+  - Efficiency rate: 18.46%
+  - Children's voice rate: 45.24%
+  - Vietnamese rate: 43.30%
+  - New channels found: 42
+
+Query: "video thiếu nhi tiếng Việt có lời thoại"
+  - Videos collected: 28
+  - Videos reviewed: 118
+  - Videos evaluated: 33
+  - Videos with children's voice: 28
+  - Videos in Vietnamese: 33
+  - Videos not in Vietnamese: 82
+  - Efficiency rate: 23.73%
+  - Children's voice rate: 84.85%
+  - Vietnamese rate: 28.70%
+  - New channels found: 51
+
+Query: "chương trình giáo dục tiếng Việt cho trẻ"
+  - Videos collected: 20
+  - Videos reviewed: 147
+  - Videos evaluated: 41
+  - Videos with children's voice: 24
+  - Videos in Vietnamese: 41
+  - Videos not in Vietnamese: 90
+  - Efficiency rate: 13.61%
+  - Children's voice rate: 58.54%
+  - Vietnamese rate: 31.30%
+  - New channels found: 54
+
+Query: "bé học tiếng Việt cơ bản"
+  - Videos collected: 46
+  - Videos reviewed: 148
+  - Videos evaluated: 57
+  - Videos with children's voice: 48
+  - Videos in Vietnamese: 57
+  - Videos not in Vietnamese: 77
+  - Efficiency rate: 31.08%
+  - Children's voice rate: 84.21%
+  - Vietnamese rate: 42.54%
+  - New channels found: 56
+
+Query: "trẻ em Việt Nam chia sẻ"
+  - Videos collected: 125
+  - Videos reviewed: 405
+  - Videos evaluated: 249
+  - Videos with children's voice: 125
+  - Videos in Vietnamese: 249
+  - Videos not in Vietnamese: 149
+  - Efficiency rate: 30.86%
+  - Children's voice rate: 50.20%
+  - Vietnamese rate: 62.56%
+  - New channels found: 66
+
+Query: "video trẻ em Việt Nam hàng ngày"
+  - Videos collected: 40
+  - Videos reviewed: 193
+  - Videos evaluated: 141
+  - Videos with children's voice: 42
+  - Videos in Vietnamese: 141
+  - Videos not in Vietnamese: 39
+  - Efficiency rate: 20.73%
+  - Children's voice rate: 29.79%
+  - Vietnamese rate: 78.33%
+  - New channels found: 72
+
+Query: "bé nói chuyện với bố mẹ tiếng Việt"
+  - Videos collected: 6
+  - Videos reviewed: 60
+  - Videos evaluated: 17
+  - Videos with children's voice: 8
+  - Videos in Vietnamese: 17
+  - Videos not in Vietnamese: 25
+  - Efficiency rate: 10.00%
+  - Children's voice rate: 47.06%
+  - Vietnamese rate: 40.48%
+  - New channels found: 75
+
+Query: "trẻ em Việt Nam đối thoại tự nhiên"
+  - Videos collected: 45
+  - Videos reviewed: 101
+  - Videos evaluated: 77
+  - Videos with children's voice: 45
+  - Videos in Vietnamese: 77
+  - Videos not in Vietnamese: 18
+  - Efficiency rate: 44.55%
+  - Children's voice rate: 58.44%
+  - Vietnamese rate: 81.05%
+  - New channels found: 86
+
+Query: "video trẻ em Việt Nam tự giới thiệu"
+  - Videos collected: 3
+  - Videos reviewed: 40
+  - Videos evaluated: 18
+  - Videos with children's voice: 4
+  - Videos in Vietnamese: 18
+  - Videos not in Vietnamese: 18
+  - Efficiency rate: 7.50%
+  - Children's voice rate: 22.22%
+  - Vietnamese rate: 50.00%
+  - New channels found: 89
+
+=== QUERY PERFORMANCE ANALYSIS ===
+Most efficient query: "trẻ em Việt Nam đối thoại tự nhiên" (44.55%)
+Least efficient query: "video trẻ em Việt Nam tự giới thiệu" (7.50%)
+Best children's voice rate: "video thiếu nhi tiếng Việt có lời thoại" (84.85%)
+Best Vietnamese rate: "trẻ em Việt Nam đối thoại tự nhiên" (81.05%)
+
+=== RECOMMENDATIONS ===
+- Prioritize using query: "trẻ em Việt Nam đối thoại tự nhiên" for high efficiency
+- Consider improving or replacing query: "video trẻ em Việt Nam tự giới thiệu"
+- Query "video thiếu nhi tiếng Việt có lời thoại" provides best quality results
+- Query "trẻ em Việt Nam đối thoại tự nhiên" has highest Vietnamese content rate
+- Language detection helps improve collection accuracy
+
+=== END OF REPORT ===

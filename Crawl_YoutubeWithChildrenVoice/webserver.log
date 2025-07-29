@@ -1,0 +1,113 @@
+nohup: ignoring input
+42.113.61.113 - - [27/Jul/2025 13:29:53] "GET / HTTP/1.1" 200 -
+42.113.61.113 - - [27/Jul/2025 13:29:54] code 404, message File not found
+42.113.61.113 - - [27/Jul/2025 13:29:54] "GET /favicon.ico HTTP/1.1" 404 -
+42.113.61.113 - - [27/Jul/2025 13:29:58] "GET /crawler_output.log HTTP/1.1" 200 -
+42.113.61.113 - - [27/Jul/2025 13:30:17] "GET /crawler_output.log HTTP/1.1" 200 -
+64.233.172.45 - - [27/Jul/2025 13:32:19] "GET / HTTP/1.1" 200 -
+64.233.172.46 - - [27/Jul/2025 13:32:21] "GET / HTTP/1.1" 200 -
+64.233.172.32 - - [27/Jul/2025 13:32:23] "GET / HTTP/1.1" 200 -
+64.233.172.46 - - [27/Jul/2025 13:32:24] "GET / HTTP/1.1" 200 -
+64.233.172.32 - - [27/Jul/2025 13:32:25] "GET / HTTP/1.1" 200 -
+66.102.7.192 - - [27/Jul/2025 13:32:26] "GET / HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:21] "GET / HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:21] code 404, message File not found
+117.5.217.37 - - [27/Jul/2025 15:04:21] "GET /favicon.ico HTTP/1.1" 404 -
+117.5.217.37 - - [27/Jul/2025 15:04:28] "GET /youtube_url_outputs/ HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:31] "GET /youtube_url_outputs/20250725_115123_query_efficiency_statistics.json HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:35] "GET / HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:36] "GET /youtube_url_outputs/ HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:43] "GET /youtube_url_outputs/collected_video_urls.txt HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:51] "GET /youtube_url_outputs/ HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:04:59] "GET /youtube_url_outputs/ HTTP/1.1" 200 -
+117.5.217.37 - - [27/Jul/2025 15:05:01] "GET /youtube_video_crawler.py HTTP/1.1" 200 -
+3.134.148.59 - - [27/Jul/2025 16:31:04] "GET / HTTP/1.1" 200 -
+3.134.148.59 - - [27/Jul/2025 16:33:10] "GET / HTTP/1.1" 200 -
+3.134.148.59 - - [27/Jul/2025 16:35:02] code 400, message Bad HTTP/0.9 request type ("\\x16\\x03\\x01\\x00{\\x01\\x00\\x00w\\x03\\x03\\x93ìç(\\x9fÀKÖú_¿íÒ8&§\\x17Dð³áí\\x13\\x08&(\\x9b'\\x96\\x1b\\x9c\\x10\\x00\\x00\\x1aÀ/À+À\\x11À\\x07À\\x13À")
+3.134.148.59 - - [27/Jul/2025 16:35:02] "\x16\x03\x01\x00{\x01\x00\x00w\x03\x03\x93ìç(\x9fÀKÖú_¿íÒ8&§\x17Dð³áí\x13\x08&(\x9b'\x96\x1b\x9c\x10\x00\x00\x1aÀ/À+À\x11À\x07À\x13À\x09À\x14À" 400 -
+3.134.148.59 - - [27/Jul/2025 16:36:27] code 400, message Bad request syntax ('SSH-2.0-Go')
+3.134.148.59 - - [27/Jul/2025 16:36:27] "SSH-2.0-Go" 400 -
+3.134.148.59 - - [27/Jul/2025 16:37:57] code 400, message Bad request version ('À\\x14À')
+3.134.148.59 - - [27/Jul/2025 16:37:57] "\x16\x03\x01\x00{\x01\x00\x00w\x03\x03w?\x1bÎ\x0b¯Ç¼Ì¥ú«ö\x92M\x82\x1duþmGì\x88ÿ½ñÅ[\x97Eöø\x00\x00\x1aÀ/À+À\x11À\x07À\x13À\x09À\x14À" 400 -
+180.214.239.13 - - [28/Jul/2025 11:10:55] code 400, message Bad request syntax ('\\x03\\x00\\x00\\x13\\x0eà\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x08\\x00\\x03\\x00\\x00\\x00')
+180.214.239.13 - - [28/Jul/2025 11:10:55] "\x03\x00\x00\x13\x0eà\x00\x00\x00\x00\x00\x01\x00\x08\x00\x03\x00\x00\x00" 400 -
+210.245.52.184 - - [28/Jul/2025 11:37:44] "GET / HTTP/1.1" 200 -
+210.245.52.184 - - [28/Jul/2025 11:37:45] code 404, message File not found
+210.245.52.184 - - [28/Jul/2025 11:37:45] "GET /favicon.ico HTTP/1.1" 404 -
+210.245.52.184 - - [28/Jul/2025 11:37:53] "GET /youtube_url_outputs/ HTTP/1.1" 200 -
+210.245.52.184 - - [28/Jul/2025 11:37:57] "GET /youtube_url_outputs/collected_video_urls.txt HTTP/1.1" 200 -
+210.245.52.184 - - [28/Jul/2025 11:38:03] "GET /youtube_url_outputs/20250728_004749_collection_report.txt HTTP/1.1" 200 -
+210.245.52.184 - - [28/Jul/2025 11:42:18] "GET / HTTP/1.1" 200 -
+210.245.52.184 - - [28/Jul/2025 11:42:23] "GET /webserver.log HTTP/1.1" 200 -
+210.245.52.184 - - [28/Jul/2025 11:45:07] "GET /youtube_url_outputs/ HTTP/1.1" 200 -
+3.134.148.59 - - [28/Jul/2025 16:22:02] "GET / HTTP/1.1" 200 -
+3.134.148.59 - - [28/Jul/2025 16:22:45] code 400, message Bad HTTP/0.9 request type ('\\x16\\x03\\x01\\x00{\\x01\\x00\\x00w\\x03\\x03[:¨sÇiyOI\\x12¹L\\x19uÁ?õ\\x86ðC\\x06@;,\\x06h\\x9dþ0\\x9e\\x1b\\x18\\x00\\x00\\x1aÀ/À+À\\x11À\\x07À\\x13À')
+3.134.148.59 - - [28/Jul/2025 16:22:45] "\x16\x03\x01\x00{\x01\x00\x00w\x03\x03[:¨sÇiyOI\x12¹L\x19uÁ?õ\x86ðC\x06@;,\x06h\x9dþ0\x9e\x1b\x18\x00\x00\x1aÀ/À+À\x11À\x07À\x13À\x09À\x14À" 400 -
+3.134.148.59 - - [28/Jul/2025 16:22:45] "GET / HTTP/1.1" 200 -
+3.130.96.91 - - [28/Jul/2025 16:52:00] "GET / HTTP/1.1" 200 -
+3.130.96.91 - - [28/Jul/2025 16:54:50] "GET / HTTP/1.1" 200 -
+3.130.96.91 - - [28/Jul/2025 16:56:07] code 400, message Bad request version ('À\\x14À')
+3.130.96.91 - - [28/Jul/2025 16:56:07] "\x16\x03\x01\x00{\x01\x00\x00w\x03\x03['üEj\x80"ñ¸Ã¼ý?ÀÁ¯eÇzoHíÒlÁÊÙ9È\x11$\x0d\x00\x00\x1aÀ/À+À\x11À\x07À\x13À\x09À\x14À" 400 -
+3.130.96.91 - - [28/Jul/2025 16:57:46] code 400, message Bad request syntax ('SSH-2.0-Go')
+3.130.96.91 - - [28/Jul/2025 16:57:46] "SSH-2.0-Go" 400 -
+----------------------------------------
+Exception occurred during processing of request from ('162.142.125.218', 56516)
+Traceback (most recent call last):
+  File "/home/ubuntu/miniconda3/lib/python3.13/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 1317, in finish_request
+    self.RequestHandlerClass(request, client_address, self,
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                             directory=args.directory)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 672, in __init__
+    super().__init__(*args, **kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 436, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 404, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/socket.py", line 719, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('162.142.125.218', 45516)
+Traceback (most recent call last):
+  File "/home/ubuntu/miniconda3/lib/python3.13/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 1317, in finish_request
+    self.RequestHandlerClass(request, client_address, self,
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                             directory=args.directory)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 672, in __init__
+    super().__init__(*args, **kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 436, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/http/server.py", line 404, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/home/ubuntu/miniconda3/lib/python3.13/socket.py", line 719, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+210.245.52.184 - - [29/Jul/2025 08:35:55] "GET / HTTP/1.1" 200 -
+210.245.52.184 - - [29/Jul/2025 08:35:56] code 404, message File not found
+210.245.52.184 - - [29/Jul/2025 08:35:56] "GET /favicon.ico HTTP/1.1" 404 -
+210.245.52.184 - - [29/Jul/2025 08:35:59] "GET /youtube_url_outputs/ HTTP/1.1" 200 -
+210.245.52.184 - - [29/Jul/2025 08:36:02] "GET /youtube_url_outputs/20250728_004749_collection_report.txt HTTP/1.1" 200 -
