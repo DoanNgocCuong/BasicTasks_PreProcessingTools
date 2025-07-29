@@ -14,6 +14,8 @@ import requests
 import time
 import threading
 import json
+import re
+import googleapiclient.discovery
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Set
@@ -493,8 +495,7 @@ class ErrorReporter:
         print("📊 Current Progress:")
         print(f"   • Videos collected: {current_collected}")
         print(f"   • Target goal: {total_target}")
-        completion_rate = (current_collected / total_target * 100) if total_target > 0 else 0
-        print(f"   • Completion rate: {completion_rate:.1f}%")
+        print(f"   • Completion rate: {current_collected / total_target * 100:.1f}%")
         print("")
         print("💡 Solutions:")
         print("   1. Wait until tomorrow (quota resets at midnight Pacific Time)")
@@ -729,6 +730,10 @@ class YouTubeVideoCrawler:
         audio_config = AudioConfig()
         self.audio_downloader = YoutubeAudioDownloader(audio_config)
         
+        # Initialize YouTube Data API service for enhanced metadata retrieval
+        self.youtube_service = None
+        self._init_youtube_data_api()
+        
         # Global variables for multiple query processing
         self.reviewed_channels: List[str] = []
         self.total_video_urls: List[str] = []
@@ -787,6 +792,95 @@ class YouTubeVideoCrawler:
         except ValueError as e:
             self.error_reporter.report_configuration_error(e)
             raise
+    
+    def _init_youtube_data_api(self) -> None:
+        """Initialize YouTube Data API service for enhanced metadata retrieval."""
+        try:
+            self.youtube_service = googleapiclient.discovery.build(
+                "youtube", "v3", developerKey=self.api_key
+            )
+            print("✅ YouTube Data API service initialized for enhanced metadata retrieval")
+            self.api_mode = "data_api"
+        except Exception as e:
+            print(f"⚠️ Could not initialize YouTube Data API service: {e}")
+            print("⚠️ Falling back to web scraping methods")
+            self.youtube_service = None
+            self.api_mode = "web_scraping"
+    
+    def get_video_metadata_via_api(self, video_ids: List[str]) -> Dict[str, Dict]:
+        """
+        Get video metadata using YouTube Data API for enhanced efficiency.
+        
+        Args:
+            video_ids (List[str]): List of video IDs to get metadata for
+            
+        Returns:
+            Dict[str, Dict]: Mapping of video_id to metadata dict
+        """
+        if not self.youtube_service or not video_ids:
+            return {}
+        
+        try:
+            # YouTube Data API allows up to 50 video IDs per request
+            batch_size = 50
+            all_metadata = {}
+            
+            for i in range(0, len(video_ids), batch_size):
+                batch_ids = video_ids[i:i + batch_size]
+                
+                request = self.youtube_service.videos().list(
+                    part="snippet,contentDetails,statistics",
+                    id=",".join(batch_ids)
+                )
+                response = request.execute()
+                
+                for item in response.get('items', []):
+                    video_id = item['id']
+                    snippet = item['snippet']
+                    content_details = item['contentDetails']
+                    statistics = item['statistics']
+                    
+                    # Parse duration from ISO 8601 format
+                    duration_iso = content_details['duration']
+                    duration_seconds = self._parse_iso_duration(duration_iso)
+                    
+                    all_metadata[video_id] = {
+                        'video_id': video_id,
+                        'title': snippet['title'],
+                        'description': snippet['description'],
+                        'channel_id': snippet['channelId'],
+                        'channel_title': snippet['channelTitle'],
+                        'published_at': snippet['publishedAt'],
+                        'duration_seconds': duration_seconds,
+                        'view_count': int(statistics.get('viewCount', 0)),
+                        'like_count': int(statistics.get('likeCount', 0)),
+                        'comment_count': int(statistics.get('commentCount', 0)),
+                        'thumbnail_url': snippet.get('thumbnails', {}).get('high', {}).get('url', ''),
+                        'metadata_source': 'youtube_data_api'
+                    }
+                
+                self.api_requests_made += 1
+                print(f"📡 Retrieved metadata for {len(batch_ids)} videos via YouTube Data API")
+                
+                # Rate limiting
+                time.sleep(self.min_request_interval)
+            
+            return all_metadata
+            
+        except Exception as e:
+            print(f"⚠️ YouTube Data API metadata request failed: {e}")
+            return {}
+    
+    def _parse_iso_duration(self, duration_iso: str) -> Optional[float]:
+        """Parse ISO 8601 duration (PT4M13S) to seconds."""
+        import re
+        match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration_iso)
+        if match:
+            hours = int(match.group(1) or 0)
+            minutes = int(match.group(2) or 0)
+            seconds = int(match.group(3) or 0)
+            return float(hours * 3600 + minutes * 60 + seconds)
+        return None
     
     def _load_existing_urls(self) -> None:
         """Load existing URLs from file to prevent duplicates."""
@@ -1636,6 +1730,7 @@ class YouTubeVideoCrawler:
         """Create QueryStatistics object from query statistics dictionary."""
         efficiency_rate = (query_stats['videos_collected'] / query_stats['videos_reviewed'] * 100) if query_stats['videos_reviewed'] > 0 else 0
         children_voice_rate = (query_stats['videos_with_children_voice'] / query_stats['videos_evaluated'] * 100) if query_stats['videos_evaluated'] > 0 else 0
+       
         vietnamese_rate = (query_stats['videos_vietnamese'] / (query_stats['videos_vietnamese'] + query_stats['videos_not_vietnamese']) * 100) if (query_stats['videos_vietnamese'] + query_stats['videos_not_vietnamese']) > 0 else 0
         
         return QueryStatistics(
@@ -1866,18 +1961,20 @@ class YouTubeVideoCrawler:
             )
             
         except Exception as e:
-            self.error_reporter.report_file_error("validating URLs", e)
+              self.error_reporter.report_file_error("validating URLs", e)
 
 def main():
     """Main function to run the YouTube video searcher."""
+    # Initialize output manager and error reporter
     output_manager = OutputManager()
     error_reporter = ErrorReporter(output_manager)
-    
+
     try:
-        # Initialize searcher with configuration from file (no user input required)
-        output_manager.print_header("YouTube Video Crawler - Automated Mode", 60)
+        # Log initial information
+        print("YouTube Video Crawler - Automated Mode")
         output_manager.print_info("Loading configuration from file...")
-        
+
+        # Initialize searcher with configuration from file (no user input required)
         searcher = YouTubeVideoCrawler()
         
         # Collect videos using multiple queries
@@ -1898,14 +1995,14 @@ def main():
             searcher.validate_collected_urls(main_urls_filename)
         else:
             output_manager.print_warning("No videos were collected")
-            
-    except FileNotFoundError as e:
-        output_manager.print_error(str(e))
-        output_manager.print_info("Please edit the configuration file and run the script again.")
-    except ValueError as e:
-        error_reporter.report_configuration_error(e)
+        
+        # Log completion information
+                
     except Exception as e:
         error_reporter.report_unexpected_error(e)
 
+    # Final message
+    print("✅ YouTube Video Crawler execution completed")
+    
 if __name__ == "__main__":
     main()
