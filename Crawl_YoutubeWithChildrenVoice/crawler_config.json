@@ -105,5 +105,6 @@
   ],
   "max_recommended_per_query": 500,
   "min_target_count": 1,
-  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, and modify search_queries array to change what videos to search for."
+  "download_method": "api_assisted",
+  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, and set download_method to 'api_assisted' (recommended) or 'yt_dlp_only'."
 }

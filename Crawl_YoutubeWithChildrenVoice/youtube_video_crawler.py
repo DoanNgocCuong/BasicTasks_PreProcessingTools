@@ -70,6 +70,7 @@ class CrawlerConfig:
     search_queries: List[str]
     max_recommended_per_query: int = 100
     min_target_count: int = 1
+    download_method: str = "api_assisted"
 
 
 class ConfigLoader:
@@ -960,8 +961,13 @@ class YouTubeVideoCrawler:
             # Convert YouTube video to .wav file once for both analyses
             # Use thread-safe global download index to prevent file overlap
             # Get both audio file path and video duration
+            # Use configured download method to bypass bot detection
             current_download_index = self._get_next_download_index()
-            wav_file_path, video_duration = self.audio_downloader.download_audio_from_yturl(video['url'], index=current_download_index)
+            
+            if self.config.download_method == "api_assisted":
+                wav_file_path, video_duration = self.audio_downloader.download_audio_via_api(video['url'], index=current_download_index)
+            else:
+                wav_file_path, video_duration = self.audio_downloader.download_audio_from_yturl(video['url'], index=current_download_index)
             
             if not wav_file_path:
                 self.error_reporter.report_audio_download_failure()

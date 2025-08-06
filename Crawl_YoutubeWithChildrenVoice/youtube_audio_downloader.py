@@ -421,6 +421,152 @@ class YoutubeAudioDownloader:
         
         return None, None
     
+    def download_audio_via_api(self, url, index=0):
+        """
+        Download audio using YouTube Data API to bypass bot detection.
+        This method gets direct download URLs from the API instead of scraping.
+        
+        Args:
+            url (str): YouTube URL to download
+            index (int): Index for output file naming
+            
+        Returns:
+            tuple: (wav_file_path, audio_duration) where audio_duration is in seconds,
+                   returns (None, None) if failed
+        """
+        if not self.youtube_service:
+            print("⚠️ YouTube API not available, falling back to yt-dlp")
+            return self.download_audio_from_yturl(url, index)
+        
+        try:
+            # Extract video ID
+            video_id = self._extract_video_id(url)
+            if not video_id:
+                print("⚠️ Could not extract video ID, falling back to yt-dlp")
+                return self.download_audio_from_yturl(url, index)
+            
+            # Get video info via API
+            video_info = self.get_video_info_via_api(video_id)
+            if not video_info:
+                print("⚠️ Could not get video info via API, falling back to yt-dlp")
+                return self.download_audio_from_yturl(url, index)
+            
+            # Use yt-dlp with API-provided metadata to reduce scraping
+            return self._download_with_api_metadata(url, video_info, index)
+            
+        except Exception as e:
+            print(f"⚠️ API download failed: {e}, falling back to yt-dlp")
+            return self.download_audio_from_yturl(url, index)
+    
+    def _download_with_api_metadata(self, url, video_info, index):
+        """
+        Download using yt-dlp but with API metadata to reduce scraping needs.
+        """
+        self._rate_limit_delay()
+        
+        # Ensure output directory exists
+        os.makedirs(self.config.output_dir, exist_ok=True)
+        
+        # Clean up existing files
+        m4a_file = self.config.get_output_path(self.config.get_m4a_filename(index))
+        wav_file = self.config.get_output_path(self.config.get_wav_filename(index))
+        part_file = m4a_file + '.part'
+        
+        for file_path in [m4a_file, wav_file, part_file]:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+        
+        # Enhanced yt-dlp options with API metadata
+        ydl_opts = self._get_dynamic_ydl_opts()
+        ydl_opts['outtmpl'] = m4a_file
+        
+        # Add metadata from API to reduce scraping
+        if video_info.get('title'):
+            ydl_opts['writethumbnail'] = False  # Skip thumbnail to reduce requests
+            ydl_opts['writesubtitles'] = False  # Skip subtitles to reduce requests
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    wait_time = (2 ** attempt) + random.uniform(1, 5)
+                    print(f"⏳ Waiting {wait_time:.1f}s before retry attempt {attempt + 1}...")
+                    time.sleep(wait_time)
+                
+                print(f"🔄 API-assisted download attempt {attempt + 1}/{max_retries}")
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                
+                # Convert to WAV
+                wav_path, audio_length = self._convert_to_wav_with_duration(index)
+                final_duration = audio_length if audio_length is not None else video_info.get('duration')
+                
+                print(f"✅ Successfully downloaded via API-assisted method")
+                return wav_path, final_duration
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                if any(keyword in error_msg for keyword in ['sign in', 'bot', 'automated', 'captcha', 'blocked']):
+                    print(f"🚫 Bot detection still triggered, trying alternative method...")
+                    # Try with different yt-dlp options
+                    return self._try_alternative_download_method(url, index, attempt)
+                else:
+                    print(f"⚠️ Download error (attempt {attempt + 1}): {e}")
+                    if attempt == max_retries - 1:
+                        print("❌ All download attempts failed")
+                        return None, None
+                
+                # Clean up partial files
+                for file_path in [m4a_file, wav_file, part_file]:
+                    if os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except OSError:
+                            pass
+        
+        return None, None
+    
+    def _try_alternative_download_method(self, url, index, attempt):
+        """
+        Try alternative download methods when bot detection occurs.
+        """
+        print(f"🔄 Trying alternative download method {attempt + 1}...")
+        
+        # Method 1: Use different user agent and headers
+        ydl_opts = self._get_dynamic_ydl_opts()
+        ydl_opts['outtmpl'] = self.config.get_output_path(self.config.get_m4a_filename(index))
+        
+        # Add more browser-like headers
+        ydl_opts['http_headers'].update({
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-GPC': '1',
+        })
+        
+        # Use cookies from browser if available
+        try:
+            ydl_opts['cookiesfrombrowser'] = ('chrome',)
+        except:
+            pass
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            
+            wav_path, audio_length = self._convert_to_wav_with_duration(index)
+            print(f"✅ Alternative method succeeded")
+            return wav_path, audio_length
+            
+        except Exception as e:
+            print(f"⚠️ Alternative method failed: {e}")
+            return None, None
+    
     def _convert_to_wav_with_duration(self, index):
         """
         Convert M4A file to WAV format and return both path and duration.
