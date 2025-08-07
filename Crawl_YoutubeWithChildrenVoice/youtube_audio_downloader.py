@@ -75,12 +75,17 @@ class Config:
 class YoutubeAudioDownloader:
     """Class to handle YouTube audio downloading and conversion."""
     
-    def __init__(self, config):
+    def __init__(self, config, cookies_file=None, cookies_from_browser=None):
         self.config = config
         self.last_request_time = 0
         self.request_count = 0
         self.youtube_api_key = None
         self.youtube_service = None
+        
+        # Cookie settings
+        self.cookies_file = cookies_file
+        self.cookies_from_browser = cookies_from_browser
+        
         # Try to initialize YouTube Data API
         self._init_youtube_api()
     
@@ -127,7 +132,7 @@ class YoutubeAudioDownloader:
         self.request_count += 1
     
     def _get_dynamic_ydl_opts(self):
-        """Get yt-dlp options with dynamic user agent rotation"""
+        """Get yt-dlp options with dynamic user agent rotation and cookie support"""
         user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -138,6 +143,15 @@ class YoutubeAudioDownloader:
         
         opts = self.config.ydl_opts.copy()
         opts['user_agent'] = random.choice(user_agents)
+        
+        # Add cookie support
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            opts['cookiefile'] = self.cookies_file
+            print(f"🍪 Using cookies from file: {self.cookies_file}")
+        elif self.cookies_from_browser:
+            opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
+            print(f"🍪 Using cookies from browser: {self.cookies_from_browser}")
+        
         return opts
     
     def _extract_video_id(self, url):
@@ -233,6 +247,12 @@ class YoutubeAudioDownloader:
             'fragment_retries': 5,
         }
         
+        # Add cookie support
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            ydl_opts['cookiefile'] = self.cookies_file
+        elif self.cookies_from_browser:
+            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
+        
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -291,6 +311,12 @@ class YoutubeAudioDownloader:
             ]),
             'sleep_interval': random.uniform(1, 3),
         }
+        
+        # Add cookie support
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            ydl_opts['cookiefile'] = self.cookies_file
+        elif self.cookies_from_browser:
+            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
         
         max_retries = 3
         for attempt in range(max_retries):
@@ -549,11 +575,17 @@ class YoutubeAudioDownloader:
             'Sec-GPC': '1',
         })
         
-        # Use cookies from browser if available
-        try:
-            ydl_opts['cookiesfrombrowser'] = ('chrome',)
-        except:
-            pass
+        # Use cookies from instance settings or fallback to browser
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            ydl_opts['cookiefile'] = self.cookies_file
+        elif self.cookies_from_browser:
+            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
+        else:
+            # Fallback to chrome cookies if no other option
+            try:
+                ydl_opts['cookiesfrombrowser'] = ('chrome',)
+            except:
+                pass
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -644,6 +676,54 @@ class YoutubeAudioDownloader:
         wav_path, _ = self._convert_to_wav_with_duration(index)
         return wav_path
 
+    def set_cookies_from_file(self, cookies_file_path):
+        """
+        Set cookies from a Netscape format cookies file.
+        
+        Args:
+            cookies_file_path (str): Path to the cookies file
+        """
+        if os.path.exists(cookies_file_path):
+            self.cookies_file = cookies_file_path
+            self.cookies_from_browser = None
+            print(f"🍪 Cookies set from file: {cookies_file_path}")
+        else:
+            print(f"⚠️ Cookies file not found: {cookies_file_path}")
+    
+    def set_cookies_from_browser(self, browser_name):
+        """
+        Set cookies from a browser.
+        
+        Args:
+            browser_name (str): Browser name ('chrome', 'firefox', 'safari', 'edge', 'opera', 'brave')
+        """
+        supported_browsers = ['chrome', 'firefox', 'safari', 'edge', 'opera', 'brave']
+        if browser_name.lower() in supported_browsers:
+            self.cookies_from_browser = browser_name.lower()
+            self.cookies_file = None
+            print(f"🍪 Cookies set from browser: {browser_name}")
+        else:
+            print(f"⚠️ Unsupported browser: {browser_name}. Supported: {', '.join(supported_browsers)}")
+    
+    def clear_cookies(self):
+        """Clear all cookie settings."""
+        self.cookies_file = None
+        self.cookies_from_browser = None
+        print("🍪 Cookies cleared")
+    
+    def get_cookie_status(self):
+        """
+        Get current cookie configuration status.
+        
+        Returns:
+            dict: Cookie configuration information
+        """
+        return {
+            'cookies_file': self.cookies_file,
+            'cookies_from_browser': self.cookies_from_browser,
+            'cookies_file_exists': os.path.exists(self.cookies_file) if self.cookies_file else False
+        }
+
 
     def test_video_duration_extraction(self, url):
         """
@@ -683,15 +763,53 @@ class YoutubeAudioDownloader:
 def main():
     """Main function to handle command line interface."""
     config = Config()
-    downloader = YoutubeAudioDownloader(config)
     
     args = sys.argv[1:]
     
+    # Parse cookie-related arguments
+    cookies_file = None
+    cookies_browser = None
+    
+    # Check for cookie arguments
+    if '--cookies-file' in args:
+        try:
+            cookie_index = args.index('--cookies-file')
+            if cookie_index + 1 < len(args):
+                cookies_file = args[cookie_index + 1]
+                # Remove the argument and its value
+                args.pop(cookie_index)  # Remove --cookies-file
+                args.pop(cookie_index)  # Remove the file path
+        except (ValueError, IndexError):
+            print("⚠️ Error: --cookies-file requires a file path")
+            exit(1)
+    
+    if '--cookies-browser' in args:
+        try:
+            browser_index = args.index('--cookies-browser')
+            if browser_index + 1 < len(args):
+                cookies_browser = args[browser_index + 1]
+                # Remove the argument and its value
+                args.pop(browser_index)  # Remove --cookies-browser
+                args.pop(browser_index)  # Remove the browser name
+        except (ValueError, IndexError):
+            print("⚠️ Error: --cookies-browser requires a browser name")
+            exit(1)
+    
+    # Initialize downloader with cookie settings
+    downloader = YoutubeAudioDownloader(config, cookies_file, cookies_browser)
+    
     if len(args) > 2:
         print("Too many arguments.")
-        print("Usage: python youtube_audio_downloader.py <optional link> [--test-duration]")
-        print("If a link is given it will automatically convert it to .wav. Otherwise a prompt will be shown")
-        print("Use --test-duration to test video duration extraction without downloading")
+        print("Usage: python youtube_audio_downloader.py [options] <optional link> [--test-duration]")
+        print("Options:")
+        print("  --cookies-file <path>     Use cookies from Netscape format file")
+        print("  --cookies-browser <name>  Use cookies from browser (chrome, firefox, safari, edge, opera, brave)")
+        print("  --test-duration          Test video duration extraction without downloading")
+        print("")
+        print("Examples:")
+        print("  python youtube_audio_downloader.py --cookies-file cookies.txt https://youtube.com/watch?v=...")
+        print("  python youtube_audio_downloader.py --cookies-browser chrome https://youtube.com/watch?v=...")
+        print("  python youtube_audio_downloader.py --cookies-browser firefox --test-duration https://youtube.com/watch?v=...")
         exit()
     
     # Check for test duration flag
@@ -699,6 +817,11 @@ def main():
     if "--test-duration" in args:
         test_duration = True
         args.remove("--test-duration")
+    
+    # Show cookie status
+    cookie_status = downloader.get_cookie_status()
+    if cookie_status['cookies_file'] or cookie_status['cookies_from_browser']:
+        print(f"🍪 Cookie configuration: {cookie_status}")
     
     if len(args) == 0:
         url = input("Enter Youtube URL: ")

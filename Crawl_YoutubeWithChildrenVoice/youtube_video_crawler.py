@@ -18,7 +18,7 @@ import re
 import googleapiclient.discovery
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Union, Set
+from typing import List, Dict, Optional, Union, Set, Any
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from youtube_audio_downloader import Config as AudioConfig, YoutubeAudioDownloader
@@ -71,6 +71,7 @@ class CrawlerConfig:
     max_recommended_per_query: int = 100
     min_target_count: int = 1
     download_method: str = "api_assisted"
+    cookie_settings: Optional[Dict[str, Any]] = None
 
 
 class ConfigLoader:
@@ -134,7 +135,8 @@ class ConfigLoader:
                 target_videos_per_query=config_data['target_videos_per_query'],
                 search_queries=[q.strip() for q in config_data['search_queries']],
                 max_recommended_per_query=config_data.get('max_recommended_per_query', 100),
-                min_target_count=config_data.get('min_target_count', 1)
+                min_target_count=config_data.get('min_target_count', 1),
+                cookie_settings=config_data.get('cookie_settings', None)
             )
             
             # Report loaded configuration
@@ -729,7 +731,18 @@ class YouTubeVideoCrawler:
         
         # Initialize audio downloader
         audio_config = AudioConfig()
-        self.audio_downloader = YoutubeAudioDownloader(audio_config)
+        
+        # Configure cookie settings for the downloader
+        cookies_file = None
+        cookies_browser = None
+        
+        if config.cookie_settings and config.cookie_settings.get('enabled', False):
+            if config.cookie_settings.get('method') == 'file':
+                cookies_file = config.cookie_settings.get('cookies_file_path', 'cookies.txt')
+            elif config.cookie_settings.get('method') == 'browser':
+                cookies_browser = config.cookie_settings.get('browser_name', 'chrome')
+        
+        self.audio_downloader = YoutubeAudioDownloader(audio_config, cookies_file, cookies_browser)
         
         # Initialize YouTube Data API service for enhanced metadata retrieval
         self.youtube_service = None

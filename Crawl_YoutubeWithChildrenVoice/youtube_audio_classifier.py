@@ -630,13 +630,28 @@ def _read_urls_from_file(file_path: Path) -> list:
 
 
 def _initialize_components():
-    """Initialize classifier and downloader components"""
+    """Initialize classifier and downloader components with optional cookie support"""
     if Config is None or YoutubeAudioDownloader is None:
         raise ImportError("YouTube downloader not available. Please ensure youtube_audio_downloader.py is present.")
     
     classifier = AudioClassifier()
     config = Config()
-    downloader = YoutubeAudioDownloader(config)
+    
+    # Check for cookie settings from environment or command line
+    cookies_file = None
+    cookies_browser = None
+    
+    # Check environment variables first
+    cookies_file = os.getenv('YOUTUBE_COOKIES_FILE')
+    cookies_browser = os.getenv('YOUTUBE_COOKIES_BROWSER')
+    
+    # Check for cookies.txt file in current directory if no environment variable
+    if not cookies_file and not cookies_browser:
+        if os.path.exists('cookies.txt'):
+            cookies_file = 'cookies.txt'
+            print("🍪 Found cookies.txt file, using it for YouTube access")
+    
+    downloader = YoutubeAudioDownloader(config, cookies_file, cookies_browser)
     
     return classifier, downloader
 
@@ -778,7 +793,52 @@ def test_audio_classifier():
         print("The audio does not contain a child's voice.")
 
 def main():
-    """Main function with interactive menu"""
+    """Main function with interactive menu and command line support"""
+    import sys
+    
+    # Check for command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--help" or sys.argv[1] == "-h":
+            print("YouTube Children Voice Classifier")
+            print("=" * 40)
+            print("Usage:")
+            print("  python youtube_audio_classifier.py [options]")
+            print("")
+            print("Options:")
+            print("  --cookies-file <path>     Use cookies from Netscape format file")
+            print("  --cookies-browser <name>  Use cookies from browser (chrome, firefox, safari, edge, opera, brave)")
+            print("  --help, -h               Show this help message")
+            print("")
+            print("Environment Variables:")
+            print("  YOUTUBE_COOKIES_FILE     Path to cookies file")
+            print("  YOUTUBE_COOKIES_BROWSER  Browser name for cookies")
+            print("")
+            print("Examples:")
+            print("  python youtube_audio_classifier.py --cookies-browser chrome")
+            print("  python youtube_audio_classifier.py --cookies-file cookies.txt")
+            return
+        
+        # Parse cookie arguments
+        cookies_file = None
+        cookies_browser = None
+        
+        i = 1
+        while i < len(sys.argv):
+            if sys.argv[i] == "--cookies-file" and i + 1 < len(sys.argv):
+                cookies_file = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == "--cookies-browser" and i + 1 < len(sys.argv):
+                cookies_browser = sys.argv[i + 1]
+                i += 2
+            else:
+                i += 1
+        
+        # Set environment variables for the downloader
+        if cookies_file:
+            os.environ['YOUTUBE_COOKIES_FILE'] = cookies_file
+        if cookies_browser:
+            os.environ['YOUTUBE_COOKIES_BROWSER'] = cookies_browser
+    
     print("YouTube Children Voice Classifier")
     print("=" * 40)
     print("Choose an option:")

@@ -1,5 +1,5 @@
 {
-  "debug_mode": false,
+  "debug_mode": true,
   "target_videos_per_query": 250,
   "search_queries": [
     "trẻ em Việt Nam nói chuyện",
@@ -106,5 +106,12 @@
   "max_recommended_per_query": 500,
   "min_target_count": 1,
   "download_method": "api_assisted",
-  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, and set download_method to 'api_assisted' (recommended) or 'yt_dlp_only'."
+  "cookie_settings": {
+    "enabled": true,
+    "method": "file",
+    "browser_name": "chrome",
+    "cookies_file_path": "cookies.txt",
+    "description": "Cookie configuration for YouTube access. Set enabled to true to use cookies. Method can be 'browser' (uses browser cookies) or 'file' (uses cookies.txt file). For browser method, specify browser_name (chrome, firefox, safari, edge, opera, brave). For file method, specify cookies_file_path."
+  },
+  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, set download_method to 'api_assisted' (recommended) or 'yt_dlp_only', and configure cookie_settings for enhanced access to YouTube content."
 }
