@@ -44,9 +44,9 @@ class Config:
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
             },
-            # Rate limiting
-            'sleep_interval': 2,  # Sleep 2 seconds between downloads
-            'max_sleep_interval': 5,
+            # Rate limiting - much longer intervals to prevent detection
+            'sleep_interval': 8,  # Sleep 8 seconds between downloads (increased from 2)
+            'max_sleep_interval': 15,  # Increased from 5
             # Retry settings
             'retries': 3,
             'fragment_retries': 3,
@@ -88,6 +88,9 @@ class YoutubeAudioDownloader:
         
         # Try to initialize YouTube Data API
         self._init_youtube_api()
+        
+        # Check cookie availability
+        self._ensure_cookies_available()
     
     def _init_youtube_api(self):
         """Initialize YouTube Data API if available."""
@@ -110,26 +113,78 @@ class YoutubeAudioDownloader:
             print(f"⚠️ Could not initialize YouTube Data API: {e}")
             self.youtube_service = None
     
+    def _reset_request_counter(self):
+        """Reset request counter to get fresh delays when issues are detected"""
+        print("🔄 Resetting request counter for fresh delays")
+        self.request_count = 0
+        self.last_request_time = time.time()
+    
+    def _should_add_extra_delay(self):
+        """Check if we should add extra delays based on recent activity"""
+        if self.request_count > 15:
+            return True
+        elif self.request_count > 10:
+            return random.random() < 0.7  # 70% chance
+        elif self.request_count > 5:
+            return random.random() < 0.5  # 50% chance
+        return False
+    
+    def _add_random_delay(self, min_delay=2, max_delay=8):
+        """Add a random delay to simulate human behavior and prevent detection"""
+        delay = random.uniform(min_delay, max_delay)
+        print(f"⏳ Adding random delay: {delay:.1f}s")
+        time.sleep(delay)
+    
     def _rate_limit_delay(self):
-        """Implement intelligent rate limiting"""
+        """Implement intelligent rate limiting with extended delays to prevent detection"""
         current_time = time.time()
         time_since_last = current_time - self.last_request_time
         
-        # Increase delay based on request count
-        if self.request_count > 10:
-            min_delay = 5 + random.uniform(1, 3)
+        # Significantly increase delays to prevent detection completely
+        if self.request_count > 20:
+            min_delay = 15 + random.uniform(5, 10)  # 20-25 seconds
+        elif self.request_count > 15:
+            min_delay = 12 + random.uniform(3, 8)   # 15-20 seconds
+        elif self.request_count > 10:
+            min_delay = 10 + random.uniform(2, 5)   # 12-15 seconds
         elif self.request_count > 5:
-            min_delay = 3 + random.uniform(0.5, 2)
+            min_delay = 8 + random.uniform(1, 3)    # 9-11 seconds
         else:
-            min_delay = 1 + random.uniform(0.2, 1)
+            min_delay = 5 + random.uniform(1, 2)    # 6-7 seconds
         
         if time_since_last < min_delay:
             sleep_time = min_delay - time_since_last
             print(f"⏳ Rate limiting: sleeping for {sleep_time:.1f} seconds...")
             time.sleep(sleep_time)
         
+        # Add additional random delay for extra protection
+        self._add_random_delay(1, 3)
+        
+        # Add extra delay if we've been very active
+        if self._should_add_extra_delay():
+            extra_delay = random.uniform(5, 10)
+            print(f"⏳ Adding extra delay due to high activity: {extra_delay:.1f}s")
+            time.sleep(extra_delay)
+        
         self.last_request_time = time.time()
         self.request_count += 1
+    
+    def _add_anti_detection_headers(self, ydl_opts):
+        """Add additional anti-detection headers to prevent bot detection"""
+        if 'http_headers' not in ydl_opts:
+            ydl_opts['http_headers'] = {}
+        
+        # Add more browser-like headers
+        ydl_opts['http_headers'].update({
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-GPC': '1',
+            'Cache-Control': 'max-age=0',
+            'TE': 'trailers',
+        })
+        
+        return ydl_opts
     
     def _get_dynamic_ydl_opts(self):
         """Get yt-dlp options with dynamic user agent rotation and cookie support"""
@@ -144,6 +199,13 @@ class YoutubeAudioDownloader:
         opts = self.config.ydl_opts.copy()
         opts['user_agent'] = random.choice(user_agents)
         
+        # Add additional anti-detection measures
+        opts['sleep_interval'] = random.uniform(8, 15)  # Random sleep between 8-15 seconds
+        opts['max_sleep_interval'] = 20  # Maximum sleep interval
+        
+        # Add anti-detection headers
+        opts = self._add_anti_detection_headers(opts)
+        
         # Add cookie support
         if self.cookies_file and os.path.exists(self.cookies_file):
             opts['cookiefile'] = self.cookies_file
@@ -153,6 +215,50 @@ class YoutubeAudioDownloader:
             print(f"🍪 Using cookies from browser: {self.cookies_from_browser}")
         
         return opts
+    
+    def _ensure_cookies_available(self):
+        """Ensure cookies are available and log status for debugging"""
+        cookie_status = self.get_cookie_status()
+        if not cookie_status['cookies_file_exists'] and not cookie_status['cookies_from_browser']:
+            print("⚠️ Warning: No cookies configured - this may trigger bot detection")
+            print("💡 Consider setting cookies using --cookies-file or --cookies-browser")
+        else:
+            print(f"✅ Cookies configured: {cookie_status}")
+        return cookie_status
+    
+    def _validate_cookies(self):
+        """Validate that cookies are properly configured and accessible"""
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            try:
+                file_size = os.path.getsize(self.cookies_file)
+                if file_size < 100:  # Cookies file should be at least 100 bytes
+                    print(f"⚠️ Warning: Cookies file seems too small ({file_size} bytes)")
+                    return False
+                print(f"🍪 Cookie file size: {file_size} characters")
+                return True
+            except OSError:
+                print("⚠️ Warning: Could not read cookies file")
+                return False
+        elif self.cookies_from_browser:
+            print(f"🍪 Using cookies from browser: {self.cookies_from_browser}")
+            return True
+        else:
+            print("⚠️ Warning: No cookies configured")
+            return False
+    
+    def _apply_cookies_to_opts(self, ydl_opts):
+        """Consistently apply cookies to yt-dlp options to prevent detection"""
+        # Validate cookies before applying
+        if not self._validate_cookies():
+            print("⚠️ Cookie validation failed - proceeding without cookies (may trigger detection)")
+            return ydl_opts
+        
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            ydl_opts['cookiefile'] = self.cookies_file
+        elif self.cookies_from_browser:
+            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
+        
+        return ydl_opts
     
     def _extract_video_id(self, url):
         """Extract video ID from YouTube URL."""
@@ -242,16 +348,13 @@ class YoutubeAudioDownloader:
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
             ]),
-            'sleep_interval': random.uniform(1, 3),
+            'sleep_interval': random.uniform(3, 8),  # Increased sleep interval
             'retries': 5,
             'fragment_retries': 5,
         }
         
-        # Add cookie support
-        if self.cookies_file and os.path.exists(self.cookies_file):
-            ydl_opts['cookiefile'] = self.cookies_file
-        elif self.cookies_from_browser:
-            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
+        # Apply cookies consistently
+        ydl_opts = self._apply_cookies_to_opts(ydl_opts)
         
         max_retries = 3
         for attempt in range(max_retries):
@@ -276,7 +379,7 @@ class YoutubeAudioDownloader:
                     print(f"⚠️ Error getting video info after {max_retries} attempts: {e}")
                     return None
                 else:
-                    wait_time = (attempt + 1) * 3 + random.uniform(1, 3)
+                    wait_time = (5 ** (attempt + 1)) + random.uniform(10, 20)  # Much longer waits: 35-45s, 135-145s, 635-645s
                     print(f"⚠️ Attempt {attempt + 1} failed, retrying in {wait_time:.1f}s: {e}")
                     time.sleep(wait_time)
 
@@ -309,14 +412,11 @@ class YoutubeAudioDownloader:
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
             ]),
-            'sleep_interval': random.uniform(1, 3),
+            'sleep_interval': random.uniform(3, 8),  # Increased sleep interval
         }
         
-        # Add cookie support
-        if self.cookies_file and os.path.exists(self.cookies_file):
-            ydl_opts['cookiefile'] = self.cookies_file
-        elif self.cookies_from_browser:
-            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
+        # Apply cookies consistently
+        ydl_opts = self._apply_cookies_to_opts(ydl_opts)
         
         max_retries = 3
         for attempt in range(max_retries):
@@ -332,7 +432,7 @@ class YoutubeAudioDownloader:
                     print(f"⚠️ Error getting video duration after {max_retries} attempts: {e}")
                     return None
                 else:
-                    wait_time = (attempt + 1) * 2 + random.uniform(0.5, 2)
+                    wait_time = (5 ** (attempt + 1)) + random.uniform(10, 20)  # Much longer waits: 35-45s, 135-145s, 635-645s
                     print(f"⚠️ Duration attempt {attempt + 1} failed, retrying in {wait_time:.1f}s")
                     time.sleep(wait_time)
     
@@ -389,6 +489,7 @@ class YoutubeAudioDownloader:
         
         # Configure dynamic options with anti-detection
         ydl_opts = self._get_dynamic_ydl_opts()
+        ydl_opts = self._apply_cookies_to_opts(ydl_opts) # Apply cookies here
         ydl_opts['outtmpl'] = m4a_file
         
         max_retries = 3
@@ -396,7 +497,7 @@ class YoutubeAudioDownloader:
             try:
                 # Add exponential backoff between retries
                 if attempt > 0:
-                    wait_time = (2 ** attempt) + random.uniform(1, 5)
+                    wait_time = (5 ** attempt) + random.uniform(10, 20)  # Much longer waits: 35-45s, 135-145s, 635-645s
                     print(f"⏳ Waiting {wait_time:.1f}s before retry attempt {attempt + 1}...")
                     time.sleep(wait_time)
                 
@@ -426,11 +527,11 @@ class YoutubeAudioDownloader:
                         return None, None
                     else:
                         # Longer wait for bot detection
-                        wait_time = 30 + random.uniform(10, 30)
+                        wait_time = 60 + random.uniform(30, 60)  # 90-120 seconds
                         print(f"⏳ Bot detected, waiting {wait_time:.1f}s before retry...")
                         time.sleep(wait_time)
                         # Reset request counter to get fresh delays
-                        self.request_count = 0
+                        self._reset_request_counter()
                 else:
                     print(f"⚠️ Download error (attempt {attempt + 1}): {e}")
                     if attempt == max_retries - 1:
@@ -507,6 +608,7 @@ class YoutubeAudioDownloader:
         
         # Enhanced yt-dlp options with API metadata
         ydl_opts = self._get_dynamic_ydl_opts()
+        ydl_opts = self._apply_cookies_to_opts(ydl_opts) # Apply cookies here
         ydl_opts['outtmpl'] = m4a_file
         
         # Add metadata from API to reduce scraping
@@ -518,7 +620,7 @@ class YoutubeAudioDownloader:
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    wait_time = (2 ** attempt) + random.uniform(1, 5)
+                    wait_time = (5 ** attempt) + random.uniform(10, 20)  # Much longer waits: 35-45s, 135-145s, 635-645s
                     print(f"⏳ Waiting {wait_time:.1f}s before retry attempt {attempt + 1}...")
                     time.sleep(wait_time)
                 
@@ -565,6 +667,7 @@ class YoutubeAudioDownloader:
         
         # Method 1: Use different user agent and headers
         ydl_opts = self._get_dynamic_ydl_opts()
+        ydl_opts = self._apply_cookies_to_opts(ydl_opts) # Apply cookies here
         ydl_opts['outtmpl'] = self.config.get_output_path(self.config.get_m4a_filename(index))
         
         # Add more browser-like headers
@@ -718,10 +821,18 @@ class YoutubeAudioDownloader:
         Returns:
             dict: Cookie configuration information
         """
+        cookie_file_size = 0
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            try:
+                cookie_file_size = os.path.getsize(self.cookies_file)
+            except OSError:
+                pass
+        
         return {
             'cookies_file': self.cookies_file,
             'cookies_from_browser': self.cookies_from_browser,
-            'cookies_file_exists': os.path.exists(self.cookies_file) if self.cookies_file else False
+            'cookies_file_exists': os.path.exists(self.cookies_file) if self.cookies_file else False,
+            'cookies_file_size': cookie_file_size
         }
 
 
