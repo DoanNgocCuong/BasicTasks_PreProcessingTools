@@ -319,13 +319,35 @@ class AudioClassifier:
         """Clear cached model instances to free memory"""
         if cls._shared_classifier is not None:
             print("🗑️ Clearing audio classifier cache...")
+            # Clear CUDA cache if available
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
             cls._shared_classifier = None
             print("✅ Audio classifier cache cleared")
         
         if cls._shared_whisper_model is not None:
             print("🗑️ Clearing Whisper model cache...")
+            # Clear CUDA cache if available
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
             cls._shared_whisper_model = None
             print("✅ Whisper model cache cleared")
+            
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+    @classmethod
+    def clear_cuda_memory(cls):
+        """Explicitly clear CUDA memory"""
+        if torch.cuda.is_available():
+            print("🧹 Clearing CUDA memory...")
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+            print(f"✅ CUDA memory cleared. Available: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
 
     def is_child_audio(self, audio_path: str) -> Optional[bool]:
         """
@@ -403,6 +425,10 @@ class AudioClassifier:
         try:
             whisper_model = self._get_whisper_model()
             
+            # Clear CUDA cache before processing
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             # Load audio and detect language
             audio = whisper.load_audio(audio_path)
             audio = whisper.pad_or_trim(audio)
@@ -410,25 +436,50 @@ class AudioClassifier:
             # Make log-Mel spectrogram and move to the same device as the model
             mel = whisper.log_mel_spectrogram(audio).to(whisper_model.device)
             
-            # Detect the spoken language
-            _, probs = whisper_model.detect_language(mel)
-            
-            # Ensure probs is a dict (as expected by whisper)
-            if isinstance(probs, list) and len(probs) > 0 and isinstance(probs[0], dict):
-                probs = probs[0]
-            
-            if not isinstance(probs, dict):
-                print("Language detection failed: probs is not a dict")
-                return None
-            
-            detected_language, confidence = max(probs.items(), key=lambda x: x[1])
-            print(f"  Language detection: {detected_language} (confidence: {confidence:.3f})")
-            
-            # Return True if Vietnamese is detected with reasonable confidence
-            return detected_language == "vi" and confidence > 0.1
+            # Detect the spoken language with proper error handling
+            with torch.no_grad():
+                try:
+                    _, probs = whisper_model.detect_language(mel)
+                    
+                    # Ensure probs is a dict (as expected by whisper)
+                    if isinstance(probs, list) and len(probs) > 0 and isinstance(probs[0], dict):
+                        probs = probs[0]
+                    
+                    if not isinstance(probs, dict):
+                        print("⚠️ Language detection failed: probs is not a dict")
+                        return None
+                    
+                    if not probs:
+                        print("⚠️ Language detection failed: empty probabilities")
+                        return None
+                    
+                    detected_language, confidence = max(probs.items(), key=lambda x: x[1])
+                    print(f"  Detected language: {detected_language} (confidence: {confidence:.3f})")
+                    
+                    # Clean up GPU memory
+                    del mel
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
+                    # Return True if Vietnamese is detected with reasonable confidence
+                    return detected_language == "vi" and confidence > 0.1
+                    
+                except torch.cuda.OutOfMemoryError as e:
+                    print(f"⚠️ CUDA out of memory during language detection: {e}")
+                    # Clear all cached memory and try again
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                    # Return unknown instead of crashing
+                    print("  Detected language: unknown (CUDA memory error)")
+                    return None
             
         except Exception as e:
-            print(f"Language detection error: {e}")
+            print(f"⚠️ Language detection error: {e}")
+            print("  Detected language: unknown")
+            # Clean up on any error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return None
     
     def _load_audio_once(self, audio_path: str):
@@ -459,7 +510,7 @@ class AudioClassifier:
             return None
 
     def _predict_age_from_audio_data(self, audio_data):
-        """Predict age/gender from pre-loaded audio data"""
+        """Predict age/gender from pre-loaded audio data with memory management"""
         if audio_data is None:
             return None, None, None, "error"
         
@@ -467,65 +518,113 @@ class AudioClassifier:
             speech_array = audio_data["age_audio"]
             sampling_rate = audio_data["sample_rate"]
             
+            # Clear GPU cache before processing
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             # Process audio
             inputs = self.classifier.processor(speech_array, sampling_rate=sampling_rate)
             input_values = inputs['input_values'][0]
             input_values = input_values.reshape(1, -1)
             input_values = torch.from_numpy(input_values).to(self.classifier.device)
             
-            # Prediction
+            # Prediction with gradient disabled and memory management
             with torch.no_grad():
-                hidden_states, age_logits, gender_probs = self.classifier.model(input_values)
-                
-                # Age prediction (0-1 scale, 0=0 years, 1=100 years)
-                age_normalized = float(age_logits.squeeze())
-                age_years = age_normalized * 100  # Convert to years
-                
-                # Gender prediction probabilities [female, male, child]
-                gender_probs = gender_probs.squeeze().cpu().numpy()
-                
-                return age_normalized, age_years, gender_probs, "success"
-                
+                try:
+                    hidden_states, age_logits, gender_probs = self.classifier.model(input_values)
+                    
+                    # Age prediction (0-1 scale, 0=0 years, 1=100 years)
+                    age_normalized = float(age_logits.squeeze())
+                    age_years = age_normalized * 100  # Convert to years
+                    
+                    # Gender prediction probabilities [female, male, child]
+                    gender_probs = gender_probs.squeeze().cpu().numpy()
+                    
+                    # Clear intermediate tensors
+                    del input_values, hidden_states, age_logits
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
+                    return age_normalized, age_years, gender_probs, "success"
+                    
+                except torch.cuda.OutOfMemoryError as e:
+                    print(f"⚠️ CUDA out of memory during prediction: {e}")
+                    # Clear all cached memory
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                    return None, None, None, "cuda_error"
+                    
         except Exception as e:
             logger.error(f"Error predicting from audio data: {e}")
+            # Clean up on any error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return None, None, None, "error"
 
     def _detect_language_from_audio_data(self, audio_data):
-        """Detect language from pre-loaded audio data"""
+        """Detect language from pre-loaded audio data with better error handling"""
         if audio_data is None:
+            print("⚠️ No audio data provided for language detection")
             return None
         
         try:
             whisper_model = self._get_whisper_model()
             whisper_audio = audio_data["whisper_audio"]
             
+            # Clear GPU cache if using CUDA
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             # Make log-Mel spectrogram and move to the same device as the model
             mel = whisper.log_mel_spectrogram(whisper_audio).to(whisper_model.device)
             
             # Detect the spoken language
-            _, probs = whisper_model.detect_language(mel)
-            
-            # Ensure probs is a dict (as expected by whisper)
-            if isinstance(probs, list) and len(probs) > 0 and isinstance(probs[0], dict):
-                probs = probs[0]
-            
-            if not isinstance(probs, dict):
-                print("Language detection failed: probs is not a dict")
-                return None
-            
-            detected_language, confidence = max(probs.items(), key=lambda x: x[1])
-            print(f"  Language detection: {detected_language} (confidence: {confidence:.3f})")
-            
-            # Return True if Vietnamese is detected with reasonable confidence
-            return detected_language == "vi" and confidence > 0.1
+            with torch.no_grad():
+                try:
+                    _, probs = whisper_model.detect_language(mel)
+                    
+                    # Ensure probs is a dict (as expected by whisper)
+                    if isinstance(probs, list) and len(probs) > 0 and isinstance(probs[0], dict):
+                        probs = probs[0]
+                    
+                    if not isinstance(probs, dict):
+                        print("⚠️ Language detection failed: probs is not a dict")
+                        return None
+                    
+                    if not probs:
+                        print("⚠️ Language detection failed: empty probabilities")
+                        return None
+                    
+                    detected_language, confidence = max(probs.items(), key=lambda x: x[1])
+                    print(f"  Language detection: {detected_language} (confidence: {confidence:.3f})")
+                    
+                    # Clear GPU memory after processing
+                    del mel
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
+                    # Return True if Vietnamese is detected with reasonable confidence
+                    return detected_language == "vi" and confidence > 0.1
+                    
+                except torch.cuda.OutOfMemoryError as e:
+                    print(f"⚠️ CUDA out of memory during language detection: {e}")
+                    # Clear all cached memory
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                    return None
             
         except Exception as e:
-            print(f"Language detection error: {e}")
+            print(f"⚠️ Language detection error: {e}")
+            # Clean up on any error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return None
 
     def get_combined_prediction(self, audio_path: str) -> dict:
         """
-        Get combined prediction with shared audio loading (OPTIMIZED VERSION)
+        Get combined prediction with shared audio loading and improved memory management
         
         Args:
             audio_path (str): Path to the .wav audio file.
@@ -539,13 +638,23 @@ class AudioClassifier:
             if audio_data is None:
                 return {"error": "Failed to load audio file"}
             
+            # Get language detection first (less memory intensive)
+            is_vietnamese = self._detect_language_from_audio_data(audio_data)
+            
             # Get age/gender prediction from shared audio data
             age_norm, age_years, gender_probs, status = self._predict_age_from_audio_data(audio_data)
-            if status == "error":
-                return {"error": "Failed to process audio for age detection"}
             
-            # Get language detection from shared audio data
-            is_vietnamese = self._detect_language_from_audio_data(audio_data)
+            if status == "cuda_error":
+                return {
+                    "error": "CUDA out of memory during processing",
+                    "is_vietnamese": is_vietnamese,
+                    "suggestion": "Try reducing batch size or using CPU processing"
+                }
+            elif status == "error":
+                return {
+                    "error": "Failed to process audio for age detection", 
+                    "is_vietnamese": is_vietnamese
+                }
             
             # Classify age group
             final_label, confidence = self.classifier.classify_age_group(age_norm, gender_probs)
@@ -565,6 +674,9 @@ class AudioClassifier:
             }
             
         except Exception as e:
+            # Final cleanup
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return {"error": f"An error occurred: {e}"}
 
     def get_detailed_prediction(self, audio_path: str) -> dict:

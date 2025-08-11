@@ -17,6 +17,7 @@ import os
 import json
 import time
 import random
+import shutil
 import googleapiclient.discovery
 from urllib.parse import urlparse, parse_qs
 
@@ -702,6 +703,38 @@ class YoutubeAudioDownloader:
             print(f"⚠️ Alternative method failed: {e}")
             return None, None
     
+    def _find_ffmpeg_executable(self):
+        """Find FFmpeg executable in system PATH or common locations."""
+        # Try to find ffmpeg in PATH first
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path:
+            return ffmpeg_path
+        
+        # Common FFmpeg locations on Windows
+        common_paths = [
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+            os.path.join(os.path.dirname(sys.executable), "ffmpeg.exe"),  # Python Scripts directory
+            os.path.join(os.path.dirname(sys.executable), "Scripts", "ffmpeg.exe"),  # Python Scripts/Scripts directory
+        ]
+        
+        # Check if any of the common paths exist
+        for path in common_paths:
+            if os.path.isfile(path):
+                return path
+        
+        # Try to use subprocess to test if ffmpeg is available
+        try:
+            import subprocess
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                return 'ffmpeg'  # Available in PATH but shutil.which didn't find it
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            pass
+        
+        return None
+    
     def _convert_to_wav_with_duration(self, index):
         """
         Convert M4A file to WAV format and return both path and duration.
@@ -728,10 +761,37 @@ class YoutubeAudioDownloader:
                 except OSError:
                     pass
             
-            # Convert using ffmpeg
-            stream = ffmpeg.input(input_file)
-            stream = ffmpeg.output(stream, output_file)
-            ffmpeg.run(stream, quiet=True, overwrite_output=True)
+            # Find FFmpeg executable
+            ffmpeg_path = self._find_ffmpeg_executable()
+            if not ffmpeg_path:
+                print("⚠️ FFmpeg not found in system PATH or common locations.")
+                print("💡 Please install FFmpeg:")
+                print("   1. Download from: https://ffmpeg.org/download.html")
+                print("   2. Extract to C:\\ffmpeg\\ ")
+                print("   3. Add C:\\ffmpeg\\bin to your system PATH")
+                print("   4. Restart your terminal/IDE")
+                return None, None
+            
+            print(f"🔧 Using FFmpeg from: {ffmpeg_path}")
+            
+            # Try multiple conversion methods
+            conversion_methods = [
+                self._convert_with_ffmpeg_python,
+                self._convert_with_subprocess,
+                self._convert_with_basic_command
+            ]
+            
+            for method in conversion_methods:
+                try:
+                    success = method(input_file, output_file, ffmpeg_path)
+                    if success:
+                        break
+                except Exception as e:
+                    print(f"⚠️ Conversion method failed: {e}")
+                    continue
+            else:
+                print("❌ All conversion methods failed")
+                return None, None
             
             # Verify conversion was successful
             if not os.path.exists(output_file):
@@ -753,6 +813,7 @@ class YoutubeAudioDownloader:
                 except OSError as cleanup_error:
                     print(f"⚠️ Warning: Could not remove intermediate file: {cleanup_error}")
             
+            print(f"✅ Audio successfully converted to WAV")
             return output_file, audio_duration
                 
         except Exception as e:
@@ -765,6 +826,32 @@ class YoutubeAudioDownloader:
                     except OSError:
                         pass
             return None, None
+    
+    def _convert_with_ffmpeg_python(self, input_file, output_file, ffmpeg_path):
+        """Convert using ffmpeg-python library."""
+        try:
+            stream = ffmpeg.input(input_file)
+            stream = ffmpeg.output(stream, output_file)
+            ffmpeg.run(stream, cmd=ffmpeg_path, quiet=True, overwrite_output=True)
+            return True
+        except Exception:
+            # Try without explicit cmd parameter
+            stream = ffmpeg.input(input_file)
+            stream = ffmpeg.output(stream, output_file)
+            ffmpeg.run(stream, quiet=True, overwrite_output=True)
+            return True
+    
+    def _convert_with_subprocess(self, input_file, output_file, ffmpeg_path):
+        """Convert using subprocess directly."""
+        import subprocess
+        cmd = [ffmpeg_path, '-i', input_file, '-y', output_file]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        return result.returncode == 0
+    
+    def _convert_with_basic_command(self, input_file, output_file, ffmpeg_path):
+        """Convert using basic os.system command."""
+        cmd = f'"{ffmpeg_path}" -i "{input_file}" -y "{output_file}"'
+        return os.system(cmd) == 0
     
     def _convert_to_wav(self, index):
         """
