@@ -1122,9 +1122,9 @@ class YouTubeVideoCrawler:
             else:
                 # Skip language detection, only perform children's voice detection
                 # This assumes all videos are in the target language (Vietnamese)
-                print("⚠️  Language detection disabled - assuming all videos are Vietnamese")
+                print("⚠️  Language detection disabled - assuming video is Vietnamese")
                 children_detection_start_time = time.time()
-                children_voice_result = classifier.predict_age_group(wav_file_path)
+                children_voice_result = classifier.is_child_audio(wav_file_path)
                 children_detection_duration = time.time() - children_detection_start_time
                 
                 # Create combined result with bypassed language detection
