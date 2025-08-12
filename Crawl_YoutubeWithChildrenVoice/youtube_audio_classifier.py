@@ -116,16 +116,42 @@ class BaseAudioClassifier:
         logger.info(f"Child threshold: {self.child_threshold}")
         logger.info(f"Age threshold: {self.age_threshold}")
         
-        # Load model and processor
+        # Clear CUDA cache before loading models
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        # Load model and processor with memory optimizations
         try:
             logger.info("Loading model...")
             self.processor = Wav2Vec2Processor.from_pretrained(model_name)
+            
+            # Load model with optimized settings
             self.model = AgeGenderModel.from_pretrained(model_name)
             self.model = self.model.to(self.device)
+            
+            # Enable memory-efficient mode
             self.model.eval()
+            if torch.cuda.is_available():
+                # Enable gradient checkpointing for memory efficiency
+                if hasattr(self.model, 'gradient_checkpointing_enable'):
+                    self.model.gradient_checkpointing_enable()
+                    
+                # Try to compile model for better memory usage (PyTorch 2.0+) - but handle triton errors
+                if hasattr(torch, 'compile'):
+                    try:
+                        self.model = torch.compile(self.model, mode='reduce-overhead', backend='aot_eager')
+                        logger.info("Model compiled for better performance")
+                    except Exception as compile_e:
+                        logger.warning(f"Could not compile model (triton issue): {compile_e}")
+                        # Continue without compilation - this is not critical
+                        pass
+                        
             logger.info("Model loaded successfully!")
         except Exception as e:
             logger.error(f"Error loading model: {e}")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             raise
         
         # Labels: [female, male, child]
@@ -156,6 +182,11 @@ class BaseAudioClassifier:
         """
         Predict age and gender for audio file
         """
+        # Clear CUDA cache before processing
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
         speech_array, sampling_rate = self.preprocess_audio(audio_path)
         if speech_array is None:
             return None, None, None, "error"
@@ -165,23 +196,39 @@ class BaseAudioClassifier:
             inputs = self.processor(speech_array, sampling_rate=sampling_rate)
             input_values = inputs['input_values'][0]
             input_values = input_values.reshape(1, -1)
-            input_values = torch.from_numpy(input_values).to(self.device)
             
-            # Prediction
+            # Move to device with memory optimization
+            input_values = torch.from_numpy(input_values)
+            if torch.cuda.is_available():
+                # Use non_blocking for better memory efficiency
+                input_values = input_values.to(self.device, non_blocking=True)
+            else:
+                input_values = input_values.to(self.device)
+            
+            # Prediction with memory efficiency
             with torch.no_grad():
-                hidden_states, age_logits, gender_probs = self.model(input_values)
-                
-                # Age prediction (0-1 scale, 0=0 years, 1=100 years)
-                age_normalized = float(age_logits.squeeze())
-                age_years = age_normalized * 100  # Convert to years
-                
-                # Gender prediction probabilities [female, male, child]
-                gender_probs = gender_probs.squeeze().cpu().numpy()
-                
-                return age_normalized, age_years, gender_probs, "success"
+                with torch.cuda.amp.autocast() if torch.cuda.is_available() else torch.no_grad():
+                    hidden_states, age_logits, gender_probs = self.model(input_values)
+                    
+                    # Age prediction (0-1 scale, 0=0 years, 1=100 years)
+                    age_normalized = float(age_logits.squeeze().cpu())
+                    age_years = age_normalized * 100  # Convert to years
+                    
+                    # Gender prediction probabilities [female, male, child]
+                    gender_probs = gender_probs.squeeze().cpu().numpy()
+                    
+                    # Clear intermediate tensors
+                    del input_values, hidden_states, age_logits
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
+                    return age_normalized, age_years, gender_probs, "success"
                 
         except Exception as e:
             logger.error(f"Error predicting for {audio_path}: {e}")
+            # Clear cache on error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return None, None, None, "error"
     
     def classify_age_group(self, age_normalized, gender_probs):
@@ -554,6 +601,19 @@ class AudioClassifier:
                         torch.cuda.empty_cache()
                         torch.cuda.synchronize()
                     return None, None, None, "cuda_error"
+                except Exception as model_e:
+                    # Handle Triton and other model-specific errors
+                    error_msg = str(model_e)
+                    if "triton" in error_msg.lower():
+                        print(f"⚠️ Triton compilation error (non-critical): {model_e}")
+                        print("  Continuing without model compilation optimization...")
+                    else:
+                        print(f"⚠️ Model inference error: {model_e}")
+                    
+                    # Clean up and continue
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    return None, None, None, "model_error"
                     
         except Exception as e:
             logger.error(f"Error predicting from audio data: {e}")
@@ -663,15 +723,36 @@ class AudioClassifier:
             age_norm, age_years, gender_probs, status = self._predict_age_from_audio_data(audio_data)
             
             if status == "cuda_error":
+                print("  ⚠️ CUDA memory error in age detection - continuing with language detection only")
                 return {
-                    "error": "CUDA out of memory during processing",
+                    "age_normalized": None,
+                    "age_years": None,
+                    "gender_probabilities": {
+                        "female": None,
+                        "male": None,
+                        "child": None
+                    },
+                    "final_label": "unknown",  # Can't determine age due to CUDA error
+                    "confidence": 0.0,
+                    "is_child": None,
                     "is_vietnamese": is_vietnamese,
-                    "suggestion": "Try reducing batch size or using CPU processing"
+                    "age_detection_failed": "cuda_error"
                 }
-            elif status == "error":
+            elif status == "error" or status == "model_error":
+                print("  ⚠️ Age detection failed - continuing with language detection only") 
                 return {
-                    "error": "Failed to process audio for age detection", 
-                    "is_vietnamese": is_vietnamese
+                    "age_normalized": None,
+                    "age_years": None,
+                    "gender_probabilities": {
+                        "female": None,
+                        "male": None,
+                        "child": None
+                    },
+                    "final_label": "unknown",  # Can't determine age due to error
+                    "confidence": 0.0,
+                    "is_child": None,
+                    "is_vietnamese": is_vietnamese,
+                    "age_detection_failed": status
                 }
             
             # Classify age group

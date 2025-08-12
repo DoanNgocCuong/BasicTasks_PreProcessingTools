@@ -15,6 +15,8 @@ import time
 import threading
 import json
 import re
+import os
+import torch
 import googleapiclient.discovery
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +28,14 @@ from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
 from youtube_output_validator import YouTubeURLValidator
 from env_config import config
+
+# Set CUDA memory optimization environment variables
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+if torch.cuda.is_available():
+    # Enable memory-efficient attention and other optimizations
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 
 # Configuration constants
@@ -922,6 +932,11 @@ class YouTubeVideoCrawler:
             AudioClassifier: Shared classifier instance with cached models
         """
         if not hasattr(self, '_shared_classifier_instance'):
+            # Clear CUDA cache before creating classifier
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
             self._shared_classifier_instance = AudioClassifier()
         return self._shared_classifier_instance
     
@@ -952,6 +967,30 @@ class YouTubeVideoCrawler:
             self.debug.log_error("Audio file cleanup", e)
             # Don't raise exception for cleanup failures as they shouldn't stop the main process
     
+    def _force_memory_cleanup(self) -> None:
+        """
+        Force comprehensive memory cleanup including CUDA cache and garbage collection.
+        """
+        try:
+            import gc
+            
+            # Force garbage collection
+            gc.collect()
+            
+            # Clear CUDA cache if available
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                # Reset peak memory stats
+                torch.cuda.reset_peak_memory_stats()
+                
+                current_memory = torch.cuda.memory_allocated() / 1024**3  # GB
+                max_memory = torch.cuda.max_memory_allocated() / 1024**3  # GB
+                self.debug.log(f"CUDA Memory - Current: {current_memory:.2f}GB, Peak: {max_memory:.2f}GB")
+                
+        except Exception as e:
+            self.debug.log_error("Memory cleanup", e)
+    
     def analyze_video_audio(self, video: Dict, video_type: str = "main") -> AnalysisResult:
         """
         OPTIMIZED: Download and analyze video audio using combined prediction for maximum efficiency.
@@ -969,6 +1008,59 @@ class YouTubeVideoCrawler:
         children_detection_duration = 0.0
         video_duration = None  # Ensure video_duration is always defined
         wav_file_path = None  # Initialize to handle cleanup in exception cases
+        
+        # Check video duration limit before any processing (skip if too long)
+        # Use configured duration limit from environment
+        try:
+            MAX_VIDEO_DURATION_SECONDS = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+        except:
+            MAX_VIDEO_DURATION_SECONDS = 300  # Default 5 minutes limit
+            
+        try:
+            # Get video duration from metadata if available
+            if 'duration' in video and video['duration']:
+                # Duration might be in ISO 8601 format (PT1M30S) or seconds
+                duration_str = video['duration']
+                if isinstance(duration_str, str) and duration_str.startswith('PT'):
+                    # Parse ISO 8601 duration (PT1M30S = 1 minute 30 seconds)
+                    import re
+                    time_pattern = re.compile(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?')
+                    match = time_pattern.match(duration_str)
+                    if match:
+                        hours = int(match.group(1) or 0)
+                        minutes = int(match.group(2) or 0)  
+                        seconds = int(match.group(3) or 0)
+                        total_seconds = hours * 3600 + minutes * 60 + seconds
+                        
+                        if total_seconds > MAX_VIDEO_DURATION_SECONDS:
+                            print(f"⏭️  Skipping long video ({total_seconds//60}m {total_seconds%60}s > {MAX_VIDEO_DURATION_SECONDS//60}m): {video.get('title', 'Unknown')[:50]}...")
+                            return AnalysisResult(
+                                is_vietnamese=False,
+                                detected_language='skipped_too_long',
+                                has_children_voice=None,
+                                confidence=0,
+                                error=f"Video too long: {total_seconds}s > {MAX_VIDEO_DURATION_SECONDS}s",
+                                total_analysis_time=time.time() - analysis_start_time,
+                                children_detection_time=0.0,
+                                video_length_seconds=total_seconds
+                            )
+                elif isinstance(duration_str, (int, float)):
+                    # Duration already in seconds
+                    if duration_str > MAX_VIDEO_DURATION_SECONDS:
+                        print(f"⏭️  Skipping long video ({int(duration_str//60)}m {int(duration_str%60)}s > {MAX_VIDEO_DURATION_SECONDS//60}m): {video.get('title', 'Unknown')[:50]}...")
+                        return AnalysisResult(
+                            is_vietnamese=False,
+                            detected_language='skipped_too_long',
+                            has_children_voice=None,
+                            confidence=0,
+                            error=f"Video too long: {duration_str}s > {MAX_VIDEO_DURATION_SECONDS}s",
+                            total_analysis_time=time.time() - analysis_start_time,
+                            children_detection_time=0.0,
+                            video_length_seconds=duration_str
+                        )
+        except Exception as duration_check_error:
+            # If duration check fails, continue with processing
+            print(f"⚠️  Could not check video duration: {duration_check_error}")
         
         try:
             # Convert YouTube video to .wav file once for both analyses
@@ -998,6 +1090,12 @@ class YouTubeVideoCrawler:
             # OPTIMIZED: Use shared classifier instance and combined prediction
             classifier = self._get_shared_classifier()
             
+            # Clear GPU memory before prediction to avoid fragmentation
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            
             # OPTIMIZED: Get both language and children's voice detection in one call
             # This loads audio only ONCE instead of twice (40-50% performance gain)
             # Time the children's voice detection portion specifically
@@ -1005,8 +1103,13 @@ class YouTubeVideoCrawler:
             combined_result = classifier.get_combined_prediction(wav_file_path)
             children_detection_duration = time.time() - children_detection_start_time
             
-            if "error" in combined_result:
-                # Clean up audio file after analysis
+            # Clear GPU memory after prediction
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Check for critical errors (not age detection failures)
+            if "error" in combined_result and "age_detection_failed" not in combined_result:
+                # Critical error - language detection failed
                 self._cleanup_audio_file(wav_file_path)
                 total_analysis_time = time.time() - analysis_start_time
                 return AnalysisResult(
@@ -1024,6 +1127,17 @@ class YouTubeVideoCrawler:
             is_vietnamese = combined_result.get('is_vietnamese', False)
             children_voice_result = combined_result.get('is_child', None)
             confidence = combined_result.get('confidence', 0.0)
+            
+            # Handle age detection failures gracefully
+            if "age_detection_failed" in combined_result:
+                print(f"  ⚠️ Age detection failed ({combined_result['age_detection_failed']}) but language detection succeeded")
+                print(f"  Vietnamese detected: {is_vietnamese}")
+                
+                # For Vietnamese content with failed age detection, we can still proceed
+                # but mark children_voice as unknown
+                if is_vietnamese:
+                    children_voice_result = None  # Unknown due to age detection failure
+                    confidence = 0.5  # Moderate confidence since language detection worked
             
             # Calculate total analysis time
             total_analysis_time = time.time() - analysis_start_time
@@ -1060,6 +1174,9 @@ class YouTubeVideoCrawler:
             # Clean up audio file after successful analysis
             self._cleanup_audio_file(wav_file_path)
             
+            # Force memory cleanup after analysis
+            self._force_memory_cleanup()
+            
             return AnalysisResult(
                 is_vietnamese=is_vietnamese,
                 detected_language=language_result['detected_language'],
@@ -1078,6 +1195,9 @@ class YouTubeVideoCrawler:
             # Clean up audio file even if analysis failed (if it was created)
             if wav_file_path:
                 self._cleanup_audio_file(wav_file_path)
+            
+            # Force memory cleanup on error
+            self._force_memory_cleanup()
             
             return AnalysisResult(
                 is_vietnamese=False,
@@ -1304,14 +1424,14 @@ class YouTubeVideoCrawler:
 
     def search_videos_by_query(self, query: str, max_results: int = 50) -> List[Dict]:
         """
-        Search videos on YouTube using the given query.
+        Search videos on YouTube using the given query with duration metadata.
         
         Args:
             query (str): Search query
             max_results (int): Maximum number of results to return
             
         Returns:
-            List[Dict]: List of video information dictionaries
+            List[Dict]: List of video information dictionaries including duration
         """
         if self.api_quota_exceeded:
             self.debug.log("Skipping video search - API quota exceeded")
@@ -1333,9 +1453,36 @@ class YouTubeVideoCrawler:
         
         videos = []
         items = data.get('items', [])
+        video_ids = []
+        
+        # First pass: extract basic video info and collect video IDs
         for item in items:
             video_info = self._extract_video_info(item)
             videos.append(video_info)
+            video_ids.append(video_info['video_id'])
+        
+        # Second pass: get detailed metadata including duration for all videos at once
+        if video_ids and self.youtube_service:
+            try:
+                metadata = self.get_video_metadata_via_api(video_ids)
+                # Merge duration data into video info
+                for video in videos:
+                    video_id = video['video_id']
+                    if video_id in metadata:
+                        video['duration'] = metadata[video_id]['duration_seconds']
+                        video['duration_iso'] = f"PT{int(metadata[video_id]['duration_seconds'] // 60)}M{int(metadata[video_id]['duration_seconds'] % 60)}S"
+                    else:
+                        video['duration'] = None  # Duration unknown
+            except Exception as e:
+                print(f"⚠️ Could not retrieve duration metadata: {e}")
+                # Continue without duration data
+                for video in videos:
+                    video['duration'] = None
+        else:
+            # No YouTube service available, mark duration as unknown
+            for video in videos:
+                video['duration'] = None
+        
         self.debug.log_final_count(len(videos))
         return videos
 
@@ -1356,7 +1503,7 @@ class YouTubeVideoCrawler:
     
     def get_channel_videos(self, channel_id: str, query: str = "", max_results: int = 50) -> List[Dict]:
         """
-        Get videos from a specific channel, optionally filtered by search query.
+        Get videos from a specific channel with duration metadata, optionally filtered by search query.
         
         Args:
             channel_id (str): YouTube channel ID
@@ -1364,7 +1511,7 @@ class YouTubeVideoCrawler:
             max_results (int): Maximum number of results to return
             
         Returns:
-            List[Dict]: List of video information dictionaries
+            List[Dict]: List of video information dictionaries including duration
         """
         if self.api_quota_exceeded:
             self.debug.log("Skipping channel search - API quota exceeded")
@@ -1395,10 +1542,36 @@ class YouTubeVideoCrawler:
         
         videos = []
         items = data.get('items', [])
+        video_ids = []
+        
+        # First pass: extract basic video info and collect video IDs
         for item in items:
             video_info = self._extract_video_info(item)
             videos.append(video_info)
+            video_ids.append(video_info['video_id'])
             self.debug.log_video_added(video_info['title'])
+        
+        # Second pass: get detailed metadata including duration for all videos at once
+        if video_ids and self.youtube_service:
+            try:
+                metadata = self.get_video_metadata_via_api(video_ids)
+                # Merge duration data into video info
+                for video in videos:
+                    video_id = video['video_id']
+                    if video_id in metadata:
+                        video['duration'] = metadata[video_id]['duration_seconds']
+                        video['duration_iso'] = f"PT{int(metadata[video_id]['duration_seconds'] // 60)}M{int(metadata[video_id]['duration_seconds'] % 60)}S"
+                    else:
+                        video['duration'] = None  # Duration unknown
+            except Exception as e:
+                print(f"⚠️ Could not retrieve channel video duration metadata: {e}")
+                # Continue without duration data
+                for video in videos:
+                    video['duration'] = None
+        else:
+            # No YouTube service available, mark duration as unknown
+            for video in videos:
+                video['duration'] = None
         
         self.debug.log_final_count(len(videos))
         return videos
@@ -1417,6 +1590,15 @@ class YouTubeVideoCrawler:
         # Check for duplicate URLs
         if video['url'] in self.collected_url_set:
             self.reporter.report_duplicate_skip()
+            return False
+        
+        # Additional duration check as fallback (in case pre-filter missed it)
+        max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+        if video.get('duration') and video['duration'] > max_duration:
+            duration_minutes = int(video['duration'] // 60)
+            duration_seconds = int(video['duration'] % 60)
+            max_minutes = int(max_duration // 60)
+            print(f"⏭️  FALLBACK FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {video['title'][:50]}...")
             return False
         
         # Analyze video audio (language detection + children's voice detection)
@@ -1671,8 +1853,26 @@ class YouTubeVideoCrawler:
         if similar_video['url'] in self.collected_url_set:
             return False
         
+        # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
+        max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+        if similar_video.get('duration') and similar_video['duration'] > max_duration:
+            duration_minutes = int(similar_video['duration'] // 60)
+            duration_seconds = int(similar_video['duration'] % 60)
+            max_minutes = int(max_duration // 60)
+            print(f"⏭️  PRE-FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
+            return False
+        
         # Count similar video as reviewed since we're processing it
         query_stats['videos_reviewed'] += 1
+        
+        # Additional duration check as fallback (in case pre-filter missed it)
+        max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+        if similar_video.get('duration') and similar_video['duration'] > max_duration:
+            duration_minutes = int(similar_video['duration'] // 60)
+            duration_seconds = int(similar_video['duration'] % 60)
+            max_minutes = int(max_duration // 60)
+            print(f"⏭️  FALLBACK FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
+            return False
         
         # OPTIMIZED: Analyze similar video audio using combined prediction
         print(f"Analyzing similar video: {similar_video['title']}")
@@ -1832,6 +2032,16 @@ class YouTubeVideoCrawler:
                 
                 # Set current video index for debugging
                 self.current_video_index = video_index_current
+                
+                # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
+                max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+                if current_video_processing.get('duration') and current_video_processing['duration'] > max_duration:
+                    duration_minutes = int(current_video_processing['duration'] // 60)
+                    duration_seconds = int(current_video_processing['duration'] % 60)
+                    max_minutes = int(max_duration // 60)
+                    print(f"⏭️  PRE-FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {current_video_processing['title'][:50]}...")
+                    video_index_current += 1
+                    continue
                 
                 # Process the video
                 video_added = self._process_main_video(current_video_processing, query_stats)
