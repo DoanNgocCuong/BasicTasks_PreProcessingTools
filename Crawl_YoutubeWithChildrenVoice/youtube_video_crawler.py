@@ -68,6 +68,9 @@ class Config:
     # Debug and logging
     DEBUG_PREFIX = "🔍 DEBUG: "
     
+    # Language detection control
+    ENABLE_LANGUAGE_DETECTION = True  # Set to False to skip language detection and process all videos
+    
     # Default values
     DEFAULT_QUERY = "bé giới thiệu bản thân"
 
@@ -82,6 +85,7 @@ class CrawlerConfig:
     min_target_count: int = 1
     download_method: str = "api_assisted"
     cookie_settings: Optional[Dict[str, Any]] = None
+    enable_language_detection: bool = True
 
 
 class ConfigLoader:
@@ -146,7 +150,8 @@ class ConfigLoader:
                 search_queries=[q.strip() for q in config_data['search_queries']],
                 max_recommended_per_query=config_data.get('max_recommended_per_query', 100),
                 min_target_count=config_data.get('min_target_count', 1),
-                cookie_settings=config_data.get('cookie_settings', None)
+                cookie_settings=config_data.get('cookie_settings', None),
+                enable_language_detection=config_data.get('enable_language_detection', True)
             )
             
             # Report loaded configuration
@@ -176,7 +181,8 @@ class ConfigLoader:
             ],
             "max_recommended_per_query": 100,
             "min_target_count": 1,
-            "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, and modify search_queries array to change what videos to search for."
+            "enable_language_detection": True,
+            "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, and set enable_language_detection to false to disable language filtering and assume all videos are in Vietnamese."
         }
         
         with open(config_path, 'w', encoding='utf-8') as f:
@@ -187,6 +193,7 @@ class ConfigLoader:
         self.output.print_header("CONFIGURATION LOADED FROM FILE", 60)
         self.output.print_success(f"Configuration file: {self.config_file_path}")
         self.output.print_info(f"Debug mode: {'Enabled' if config.debug_mode else 'Disabled'}")
+        self.output.print_info(f"Language detection: {'Enabled' if config.enable_language_detection else 'Disabled (assuming all videos are Vietnamese)'}")
         self.output.print_info(f"Target videos per query: {config.target_videos_per_query}")
         self.output.print_info(f"Total queries: {len(config.search_queries)}")
         
@@ -197,6 +204,10 @@ class ConfigLoader:
         
         if config.target_videos_per_query > config.max_recommended_per_query:
             self.output.print_warning(f"High target count per query: {config.target_videos_per_query} (recommended max: {config.max_recommended_per_query})")
+        
+        if not config.enable_language_detection:
+            self.output.print_warning("⚠️  Language detection is disabled - all videos will be assumed to be Vietnamese")
+            self.output.print_info("This will skip language filtering and may include non-Vietnamese content")
         
         self.output.print_section_divider()
 
@@ -717,6 +728,9 @@ class YouTubeVideoCrawler:
         # Store configuration
         self.config = config
         
+        # Override class constant with configuration value
+        Config.ENABLE_LANGUAGE_DETECTION = config.enable_language_detection
+        
         # Initialize output analyzer
         self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
         
@@ -1096,12 +1110,30 @@ class YouTubeVideoCrawler:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             
-            # OPTIMIZED: Get both language and children's voice detection in one call
-            # This loads audio only ONCE instead of twice (40-50% performance gain)
-            # Time the children's voice detection portion specifically
-            children_detection_start_time = time.time()
-            combined_result = classifier.get_combined_prediction(wav_file_path)
-            children_detection_duration = time.time() - children_detection_start_time
+            # Check if language detection is enabled (controlled by Config.ENABLE_LANGUAGE_DETECTION)
+            # When disabled, all videos are assumed to be Vietnamese and only children's voice detection is performed
+            if Config.ENABLE_LANGUAGE_DETECTION:
+                # OPTIMIZED: Get both language and children's voice detection in one call
+                # This loads audio only ONCE instead of twice (40-50% performance gain)
+                # Time the children's voice detection portion specifically
+                children_detection_start_time = time.time()
+                combined_result = classifier.get_combined_prediction(wav_file_path)
+                children_detection_duration = time.time() - children_detection_start_time
+            else:
+                # Skip language detection, only perform children's voice detection
+                # This assumes all videos are in the target language (Vietnamese)
+                print("⚠️  Language detection disabled - assuming all videos are Vietnamese")
+                children_detection_start_time = time.time()
+                children_voice_result = classifier.predict_age_group(wav_file_path)
+                children_detection_duration = time.time() - children_detection_start_time
+                
+                # Create combined result with bypassed language detection
+                combined_result = {
+                    'is_vietnamese': True,  # Assume all videos are Vietnamese
+                    'detected_language': 'vi',  # Vietnamese
+                    'is_child': children_voice_result,
+                    'confidence': 1.0 if children_voice_result is not None else 0.0
+                }
             
             # Clear GPU memory after prediction
             if torch.cuda.is_available():
@@ -1628,17 +1660,24 @@ class YouTubeVideoCrawler:
         }
         self.video_analysis_results.append(video_analysis_record)
         
-        # Check language result first
-        if not analysis_result.is_vietnamese:
-            print(f"✗ Video is not in Vietnamese - Skipping: {video['title']}")
-            if analysis_result.detected_language:
-                print(f"  Detected language: {analysis_result.detected_language}")
-            query_stats['videos_not_vietnamese'] += 1
-            self.total_videos_not_vietnamese += 1
-            self.reporter.report_language_result(False, analysis_result.detected_language)
-            return False
+        # Check language result first (only if language detection is enabled)
+        if Config.ENABLE_LANGUAGE_DETECTION:
+            if not analysis_result.is_vietnamese:
+                print(f"✗ Video is not in Vietnamese - Skipping: {video['title']}")
+                if analysis_result.detected_language:
+                    print(f"  Detected language: {analysis_result.detected_language}")
+                query_stats['videos_not_vietnamese'] += 1
+                self.total_videos_not_vietnamese += 1
+                self.reporter.report_language_result(False, analysis_result.detected_language)
+                return False
+            else:
+                print("✓ Video is in Vietnamese - Proceeding to evaluate")
+                query_stats['videos_vietnamese'] += 1
+                self.total_videos_vietnamese += 1
+                self.reporter.report_language_result(True)
         else:
-            print("✓ Video is in Vietnamese - Proceeding to evaluate")
+            # Language detection disabled - assume all videos are Vietnamese
+            print("⚠️  Language detection disabled - assuming video is Vietnamese")
             query_stats['videos_vietnamese'] += 1
             self.total_videos_vietnamese += 1
             self.reporter.report_language_result(True)
@@ -1724,15 +1763,22 @@ class YouTubeVideoCrawler:
             print(f"Analyzing similar video: {similar_video['title']}")
             similar_analysis_result = self.analyze_video_audio(similar_video, video_type="similar")
             
-            # Check language result first
-            if not similar_analysis_result.is_vietnamese:
-                print("✗ Similar video is not in Vietnamese - Skipping")
-                query_stats['videos_not_vietnamese'] += 1
-                self.total_videos_not_vietnamese += 1
-                self.reporter.report_similar_video_language_result(False)
-                continue
+            # Check language result first (only if language detection is enabled)
+            if Config.ENABLE_LANGUAGE_DETECTION:
+                if not similar_analysis_result.is_vietnamese:
+                    print("✗ Similar video is not in Vietnamese - Skipping")
+                    query_stats['videos_not_vietnamese'] += 1
+                    self.total_videos_not_vietnamese += 1
+                    self.reporter.report_similar_video_language_result(False)
+                    continue
+                else:
+                    print("✓ Similar video is in Vietnamese - Proceeding to evaluate")
+                    query_stats['videos_vietnamese'] += 1
+                    self.total_videos_vietnamese += 1
+                    self.reporter.report_similar_video_language_result(True)
             else:
-                print("✓ Similar video is in Vietnamese - Proceeding to evaluate")
+                # Language detection disabled - assume all videos are Vietnamese
+                print("⚠️  Language detection disabled - assuming similar video is Vietnamese")
                 query_stats['videos_vietnamese'] += 1
                 self.total_videos_vietnamese += 1
                 self.reporter.report_similar_video_language_result(True)
@@ -1899,15 +1945,22 @@ class YouTubeVideoCrawler:
         }
         self.video_analysis_results.append(video_analysis_record)
         
-        # Check language result first
-        if not similar_analysis_result.is_vietnamese:
-            print("✗ Similar video is not in Vietnamese - Skipping")
-            query_stats['videos_not_vietnamese'] += 1
-            self.total_videos_not_vietnamese += 1
-            self.reporter.report_similar_video_language_result(False)
-            return False
+        # Check language result first (only if language detection is enabled)
+        if Config.ENABLE_LANGUAGE_DETECTION:
+            if not similar_analysis_result.is_vietnamese:
+                print("✗ Similar video is not in Vietnamese - Skipping")
+                query_stats['videos_not_vietnamese'] += 1
+                self.total_videos_not_vietnamese += 1
+                self.reporter.report_similar_video_language_result(False)
+                return False
+            else:
+                print("✓ Similar video is in Vietnamese - Proceeding to evaluate")
+                query_stats['videos_vietnamese'] += 1
+                self.total_videos_vietnamese += 1
+                self.reporter.report_similar_video_language_result(True)
         else:
-            print("✓ Similar video is in Vietnamese - Proceeding to evaluate")
+            # Language detection disabled - assume all videos are Vietnamese
+            print("⚠️  Language detection disabled - assuming similar video is Vietnamese")
             query_stats['videos_vietnamese'] += 1
             self.total_videos_vietnamese += 1
             self.reporter.report_similar_video_language_result(True)
