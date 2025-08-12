@@ -641,7 +641,25 @@ class AudioClassifier:
             # Get language detection first (less memory intensive)
             is_vietnamese = self._detect_language_from_audio_data(audio_data)
             
-            # Get age/gender prediction from shared audio data
+            # Skip age detection if not Vietnamese - performance optimization
+            if not is_vietnamese:
+                print("  ⏩ Skipping age detection - not Vietnamese")
+                return {
+                    "age_normalized": None,
+                    "age_years": None,
+                    "gender_probabilities": {
+                        "female": None,
+                        "male": None,
+                        "child": None
+                    },
+                    "final_label": "adult",  # Default to adult for non-Vietnamese
+                    "confidence": 0.0,
+                    "is_child": False,
+                    "is_vietnamese": False,
+                    "skipped_age_detection": True
+                }
+            
+            # Get age/gender prediction from shared audio data (only for Vietnamese)
             age_norm, age_years, gender_probs, status = self._predict_age_from_audio_data(audio_data)
             
             if status == "cuda_error":
@@ -838,6 +856,12 @@ def _process_single_url(url: str, index: int, classifier, downloader) -> str:
         
         is_child = prediction_result.get("is_child", False)
         is_vietnamese = prediction_result.get("is_vietnamese", False)
+        was_skipped = prediction_result.get("skipped_age_detection", False)
+        
+        # Handle case where age detection was skipped for non-Vietnamese audio
+        if was_skipped:
+            print(f"  [{index+1}] ⏩ SKIPPED - Not Vietnamese audio, classified as non-child")
+            return "non_children"
         
         if is_child:
             status = "✓ CHILD voice detected"
