@@ -105,10 +105,18 @@ class BaseAudioClassifier:
             self.model_name = model_name or config.WAV2VEC2_MODEL
             self.child_threshold = child_threshold if child_threshold is not None else config.CHILD_THRESHOLD
             self.age_threshold = age_threshold if age_threshold is not None else config.AGE_THRESHOLD
+            print(f"🔧 Using environment configuration:")
+            print(f"  Model: {self.model_name}")
+            print(f"  Child threshold: {self.child_threshold}")  
+            print(f"  Age threshold: {self.age_threshold}")
         else:
-            self.model_name = model_name or "audeering/wav2vec2-large-robust-24-ft-age-gender"
+            self.model_name = model_name or "audeering/wav2vec2-base-robust-ft-age-gender"
             self.child_threshold = child_threshold if child_threshold is not None else 0.5
             self.age_threshold = age_threshold if age_threshold is not None else 0.3
+            print(f"⚠️ Environment configuration not available, using defaults:")
+            print(f"  Model: {self.model_name}")
+            print(f"  Child threshold: {self.child_threshold}")
+            print(f"  Age threshold: {self.age_threshold}")
             
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {self.device}")
@@ -124,10 +132,10 @@ class BaseAudioClassifier:
         # Load model and processor with memory optimizations
         try:
             logger.info("Loading model...")
-            self.processor = Wav2Vec2Processor.from_pretrained(model_name)
+            self.processor = Wav2Vec2Processor.from_pretrained(self.model_name)
             
             # Load model with optimized settings
-            self.model = AgeGenderModel.from_pretrained(model_name)
+            self.model = AgeGenderModel.from_pretrained(self.model_name)
             self.model = self.model.to(self.device)
             
             # Enable memory-efficient mode
@@ -334,16 +342,26 @@ class AudioClassifier:
     _shared_classifier = None
     _shared_whisper_model = None
     
-    def __init__(self, model_name="audeering/wav2vec2-large-robust-24-ft-age-gender", 
-                 child_threshold=0.5, age_threshold=0.3):
+    def __init__(self, model_name=None, child_threshold=None, age_threshold=None):
         """
         Initialize classifier with model and confidence thresholds
 
         Args:
-            model_name: Name of the model on Hugging Face
-            child_threshold: Probability threshold for classifying as child
-            age_threshold: Age threshold for classifying as child (0.3 ~ 30 years)
+            model_name: Name of the model on Hugging Face (uses env config if None)
+            child_threshold: Probability threshold for classifying as child (uses env config if None)
+            age_threshold: Age threshold for classifying as child (uses env config if None)
         """
+        # Use environment configuration if parameters are None
+        if USE_ENV_CONFIG and config is not None:
+            model_name = model_name or config.WAV2VEC2_MODEL
+            child_threshold = child_threshold if child_threshold is not None else config.CHILD_THRESHOLD
+            age_threshold = age_threshold if age_threshold is not None else config.AGE_THRESHOLD
+        else:
+            # Fallback defaults if env config not available
+            model_name = model_name or "audeering/wav2vec2-base-robust-ft-age-gender"
+            child_threshold = child_threshold if child_threshold is not None else 0.5
+            age_threshold = age_threshold if age_threshold is not None else 0.3
+            
         self.classifier = self._get_or_create_classifier(model_name, child_threshold, age_threshold)
     
     def _get_or_create_classifier(self, model_name, child_threshold, age_threshold):

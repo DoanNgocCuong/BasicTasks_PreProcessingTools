@@ -27,9 +27,49 @@ Version: 1.0
 import os
 from pathlib import Path
 from typing import Union, Optional, Any, TypeVar
-from dotenv import load_dotenv
+
+# Try to import dotenv, fallback to manual .env parsing if not available
+try:
+    from dotenv import load_dotenv
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+    print("⚠️ python-dotenv not available, using manual .env parsing")
 
 T = TypeVar('T', str, int, float, bool)
+
+
+def manual_load_dotenv(env_file_path: str) -> None:
+    """Manual .env file parsing when python-dotenv is not available"""
+    if not Path(env_file_path).exists():
+        return
+    
+    print(f"📋 Manually parsing .env file: {env_file_path}")
+    try:
+        with open(env_file_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Parse KEY=VALUE format
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Remove quotes if present
+                    if (value.startswith('"') and value.endswith('"')) or \
+                       (value.startswith("'") and value.endswith("'")):
+                        value = value[1:-1]
+                    
+                    # Set environment variable
+                    os.environ[key] = value
+                    print(f"  Set {key}={value}")
+                    
+    except Exception as e:
+        print(f"⚠️ Error parsing .env file: {e}")
 
 
 class EnvironmentConfig:
@@ -48,8 +88,12 @@ class EnvironmentConfig:
         
         # Load .env file if it exists
         if Path(env_file).exists():
-            load_dotenv(env_file)
-            print(f"✅ Loaded environment variables from: {env_file}")
+            if DOTENV_AVAILABLE:
+                load_dotenv(env_file)
+                print(f"✅ Loaded environment variables from: {env_file}")
+            else:
+                manual_load_dotenv(env_file)
+                print(f"✅ Manually loaded environment variables from: {env_file}")
         else:
             print(f"⚠️ No .env file found at: {env_file}")
             print("Using system environment variables only")
