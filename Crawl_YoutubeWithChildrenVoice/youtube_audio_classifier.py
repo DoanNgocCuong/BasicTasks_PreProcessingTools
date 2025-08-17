@@ -110,7 +110,7 @@ class BaseAudioClassifier:
             print(f"  Child threshold: {self.child_threshold}")  
             print(f"  Age threshold: {self.age_threshold}")
         else:
-            self.model_name = model_name or "audeering/wav2vec2-base-robust-ft-age-gender"
+            self.model_name = model_name or "audeering/wav2vec2-large-robust-6-ft-age-gender"
             self.child_threshold = child_threshold if child_threshold is not None else 0.5
             self.age_threshold = age_threshold if age_threshold is not None else 0.3
             print(f"⚠️ Environment configuration not available, using defaults:")
@@ -132,10 +132,14 @@ class BaseAudioClassifier:
         # Load model and processor with memory optimizations
         try:
             logger.info("Loading model...")
+            print(f"🔍 DEBUG: Attempting to load model: {self.model_name}")
             self.processor = Wav2Vec2Processor.from_pretrained(self.model_name)
+            print("✅ DEBUG: Processor loaded successfully")
             
             # Load model with optimized settings
+            print(f"🔍 DEBUG: Loading actual model: {self.model_name}")
             self.model = AgeGenderModel.from_pretrained(self.model_name)
+            print("✅ DEBUG: Model loaded successfully")
             self.model = self.model.to(self.device)
             
             # Enable memory-efficient mode
@@ -358,7 +362,7 @@ class AudioClassifier:
             age_threshold = age_threshold if age_threshold is not None else config.AGE_THRESHOLD
         else:
             # Fallback defaults if env config not available
-            model_name = model_name or "audeering/wav2vec2-base-robust-ft-age-gender"
+            model_name = model_name or "audeering/wav2vec2-large-robust-6-ft-age-gender"
             child_threshold = child_threshold if child_threshold is not None else 0.5
             age_threshold = age_threshold if age_threshold is not None else 0.3
             

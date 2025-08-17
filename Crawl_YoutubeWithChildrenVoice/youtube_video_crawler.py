@@ -68,9 +68,6 @@ class Config:
     # Debug and logging
     DEBUG_PREFIX = "🔍 DEBUG: "
     
-    # Language detection control
-    ENABLE_LANGUAGE_DETECTION = True  # Set to False to skip language detection and process all videos
-    
     # Default values
     DEFAULT_QUERY = "bé giới thiệu bản thân"
 
@@ -729,9 +726,6 @@ class YouTubeVideoCrawler:
         # Store configuration
         self.config = config
         
-        # Use instance attribute for language detection control (do not override class constant)
-        # Config.ENABLE_LANGUAGE_DETECTION = config.enable_language_detection
-        
         # Initialize output analyzer
         self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
         
@@ -1015,7 +1009,7 @@ class YouTubeVideoCrawler:
         # Check video duration limit before any processing (skip if too long)
         # Use configured duration limit from environment
         try:
-            MAX_VIDEO_DURATION_SECONDS = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+            MAX_VIDEO_DURATION_SECONDS = config.MAX_AUDIO_DURATION_SECONDS
         except:
             MAX_VIDEO_DURATION_SECONDS = 300  # Default 5 minutes limit
             
@@ -1094,6 +1088,12 @@ class YouTubeVideoCrawler:
                     video_length_seconds=video_duration
                 )
             
+            # Debug: Print the audio file path being passed to classifier
+            print(f"🔍 DEBUG: Audio file path for analysis: {wav_file_path}")
+            print(f"🔍 DEBUG: File exists: {Path(wav_file_path).exists()}")
+            if Path(wav_file_path).exists():
+                print(f"🔍 DEBUG: File size: {Path(wav_file_path).stat().st_size} bytes")
+            
             # OPTIMIZED: Use shared classifier instance and combined prediction
             classifier = self._get_shared_classifier()
             
@@ -1103,9 +1103,9 @@ class YouTubeVideoCrawler:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             
-            # Check if language detection is enabled (controlled by Config.ENABLE_LANGUAGE_DETECTION)
+            # Check if language detection is enabled (controlled by self.config.enable_language_detection)
             # When disabled, all videos are assumed to be Vietnamese and only children's voice detection is performed
-            if Config.ENABLE_LANGUAGE_DETECTION:
+            if self.config.enable_language_detection:
                 # OPTIMIZED: Get both language and children's voice detection in one call
                 # This loads audio only ONCE instead of twice (40-50% performance gain)
                 # Time the children's voice detection portion specifically
@@ -1618,7 +1618,7 @@ class YouTubeVideoCrawler:
             return False
         
         # Additional duration check as fallback (in case pre-filter missed it)
-        max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+        max_duration = config.MAX_AUDIO_DURATION_SECONDS
         if video.get('duration') and video['duration'] > max_duration:
             duration_minutes = int(video['duration'] // 60)
             duration_seconds = int(video['duration'] % 60)
@@ -1654,7 +1654,7 @@ class YouTubeVideoCrawler:
         self.video_analysis_results.append(video_analysis_record)
         
         # Check language result first (only if language detection is enabled)
-        if Config.ENABLE_LANGUAGE_DETECTION:
+        if self.config.enable_language_detection:
             if not analysis_result.is_vietnamese:
                 print(f"✗ Video is not in Vietnamese - Skipping: {video['title']}")
                 if analysis_result.detected_language:
@@ -1757,7 +1757,7 @@ class YouTubeVideoCrawler:
             similar_analysis_result = self.analyze_video_audio(similar_video, video_type="similar")
             
             # Check language result first (only if language detection is enabled)
-            if Config.ENABLE_LANGUAGE_DETECTION:
+            if self.config.enable_language_detection:
                 if not similar_analysis_result.is_vietnamese:
                     print("✗ Similar video is not in Vietnamese - Skipping")
                     query_stats['videos_not_vietnamese'] += 1
@@ -1893,7 +1893,7 @@ class YouTubeVideoCrawler:
             return False
         
         # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
-        max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+        max_duration = config.MAX_AUDIO_DURATION_SECONDS
         if similar_video.get('duration') and similar_video['duration'] > max_duration:
             duration_minutes = int(similar_video['duration'] // 60)
             duration_seconds = int(similar_video['duration'] % 60)
@@ -1905,7 +1905,7 @@ class YouTubeVideoCrawler:
         query_stats['videos_reviewed'] += 1
         
         # Additional duration check as fallback (in case pre-filter missed it)
-        max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+        max_duration = config.MAX_AUDIO_DURATION_SECONDS
         if similar_video.get('duration') and similar_video['duration'] > max_duration:
             duration_minutes = int(similar_video['duration'] // 60)
             duration_seconds = int(similar_video['duration'] % 60)
@@ -1939,7 +1939,7 @@ class YouTubeVideoCrawler:
         self.video_analysis_results.append(video_analysis_record)
         
         # Check language result first (only if language detection is enabled)
-        if Config.ENABLE_LANGUAGE_DETECTION:
+        if self.config.enable_language_detection:
             if not similar_analysis_result.is_vietnamese:
                 print("✗ Similar video is not in Vietnamese - Skipping")
                 query_stats['videos_not_vietnamese'] += 1
@@ -2080,7 +2080,7 @@ class YouTubeVideoCrawler:
                 self.current_video_index = video_index_current
                 
                 # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
-                max_duration = getattr(config, 'MAX_AUDIO_DURATION_SECONDS', 300)
+                max_duration = config.MAX_AUDIO_DURATION_SECONDS
                 if current_video_processing.get('duration') and current_video_processing['duration'] > max_duration:
                     duration_minutes = int(current_video_processing['duration'] // 60)
                     duration_seconds = int(current_video_processing['duration'] % 60)
