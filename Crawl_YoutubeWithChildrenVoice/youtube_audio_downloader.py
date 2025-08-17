@@ -12,6 +12,7 @@ Author: Le Hoang Minh
 from __future__ import unicode_literals
 import yt_dlp
 import ffmpeg
+import subprocess
 import sys
 import os
 import json
@@ -25,25 +26,36 @@ from urllib.parse import urlparse, parse_qs
 class Config:
     """Configuration class to store paths and settings."""
     
-    def __init__(self):
+    def __init__(self, user_agent=None):
         # Determine the parent directory of the script
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         # Store audio in youtube_audio_outputs relative to the parent directory
         self.output_dir = os.path.join(self.base_dir, 'youtube_audio_outputs')
         
+        # Use provided user agent or load from crawler config
+        if user_agent:
+            default_user_agent = user_agent
+        else:
+            user_agent_settings = self._load_user_agent_settings()
+            default_user_agent = user_agent_settings.get('default_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0')
+        
         # Enhanced Audio format settings with anti-detection
         self.ydl_opts = {
             'format': 'bestaudio/best',
             # Add user agent rotation
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'user_agent': default_user_agent,
             # Add headers to mimic browser behavior
             'http_headers': {
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br, zstd',
                 'DNT': '1',
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
             },
             # Rate limiting - much longer intervals to prevent detection
             'sleep_interval': 8,  # Sleep 8 seconds between downloads (increased from 2)
@@ -59,6 +71,26 @@ class Config:
         
         # Ensure the output directory exists
         os.makedirs(self.output_dir, exist_ok=True)
+    
+    def _load_user_agent_settings(self):
+        """Load user agent settings from crawler_config.json"""
+        try:
+            config_file = os.path.join(self.base_dir, 'crawler_config.json')
+            if os.path.exists(config_file):
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                    return config_data.get('user_agent_settings', {})
+            else:
+                print(f"⚠️ crawler_config.json not found, using default user agents")
+                return {}
+        except Exception as e:
+            print(f"⚠️ Error loading user agent settings from crawler_config.json: {e}")
+            return {}
+    
+    def _get_chrome_version(self):
+        """Extract Chrome version from user agent settings"""
+        user_agent_settings = self._load_user_agent_settings()
+        return user_agent_settings.get('chrome_version', '139')
     
     def get_output_path(self, filename):
         """Get the full path for an output file."""
@@ -175,27 +207,59 @@ class YoutubeAudioDownloader:
         if 'http_headers' not in ydl_opts:
             ydl_opts['http_headers'] = {}
         
+        # Get Chrome version from config
+        chrome_version = self.config._get_chrome_version()
+        
         # Add more browser-like headers
         ydl_opts['http_headers'].update({
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua': f'"Google Chrome";v="{chrome_version}", "Chromium";v="{chrome_version}", "Not_A Brand";v="24"',
             'Sec-Ch-Ua-Mobile': '?0',
             'Sec-Ch-Ua-Platform': '"Windows"',
             'Sec-GPC': '1',
             'Cache-Control': 'max-age=0',
             'TE': 'trailers',
+            'Priority': 'u=0, i',
         })
         
         return ydl_opts
     
+    def _generate_user_agent_variations(self, base_user_agent):
+        """Generate user agent variations based on the config settings"""
+        # Load user agents from config first
+        user_agent_settings = self.config._load_user_agent_settings()
+        rotation_user_agents = user_agent_settings.get('rotation_user_agents')
+        
+        if rotation_user_agents:
+            # Use user agents from config
+            return rotation_user_agents
+        
+        # Fallback: Extract Chrome version from base user agent and generate variations
+        import re
+        chrome_match = re.search(r'Chrome/(\d+\.\d+\.\d+\.\d+)', base_user_agent)
+        if chrome_match:
+            chrome_version = chrome_match.group(1)
+        else:
+            chrome_version = "139.0.0.0"  # fallback
+        
+        # Generate variations for different platforms using the same Chrome version
+        variations = [
+            f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36',
+            f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36',
+            f'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36',
+            # Add a couple Firefox variations as well for diversity
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0'
+        ]
+        
+        return variations
+    
     def _get_dynamic_ydl_opts(self):
         """Get yt-dlp options with dynamic user agent rotation and cookie support"""
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0'
-        ]
+        # Get base user agent from config and create variations
+        base_user_agent = self.config.ydl_opts['user_agent']
+        
+        # Create user agent variations based on the base one
+        user_agents = self._generate_user_agent_variations(base_user_agent)
         
         opts = self.config.ydl_opts.copy()
         opts['user_agent'] = random.choice(user_agents)
@@ -536,8 +600,9 @@ class YoutubeAudioDownloader:
                 else:
                     print(f"⚠️ Download error (attempt {attempt + 1}): {e}")
                     if attempt == max_retries - 1:
-                        print("❌ All download attempts failed")
-                        return None, None
+                        print("❌ All yt-dlp attempts failed, trying ffmpeg fallback...")
+                        # Try ffmpeg as final fallback
+                        return self.download_audio_via_ffmpeg(url, index)
                 
                 # Clean up any partial files on error
                 for file_path in [m4a_file, wav_file, part_file]:
@@ -547,7 +612,9 @@ class YoutubeAudioDownloader:
                         except OSError:
                             pass
         
-        return None, None
+        # If we get here, all yt-dlp attempts failed, try ffmpeg fallback
+        print("❌ All yt-dlp methods exhausted, trying ffmpeg fallback as last resort...")
+        return self.download_audio_via_ffmpeg(url, index)
     
     def download_audio_via_api(self, url, index=0):
         """
@@ -647,8 +714,9 @@ class YoutubeAudioDownloader:
                 else:
                     print(f"⚠️ Download error (attempt {attempt + 1}): {e}")
                     if attempt == max_retries - 1:
-                        print("❌ All download attempts failed")
-                        return None, None
+                        print("❌ All yt-dlp attempts failed, trying ffmpeg fallback...")
+                        # Try ffmpeg as final fallback
+                        return self.download_audio_via_ffmpeg(url, index)
                 
                 # Clean up partial files
                 for file_path in [m4a_file, wav_file, part_file]:
@@ -658,7 +726,9 @@ class YoutubeAudioDownloader:
                         except OSError:
                             pass
         
-        return None, None
+        # If we get here, all yt-dlp attempts failed, try ffmpeg fallback
+        print("❌ All yt-dlp methods exhausted, trying ffmpeg fallback as last resort...")
+        return self.download_audio_via_ffmpeg(url, index)
     
     def _try_alternative_download_method(self, url, index, attempt):
         """
@@ -700,8 +770,9 @@ class YoutubeAudioDownloader:
             return wav_path, audio_length
             
         except Exception as e:
-            print(f"⚠️ Alternative method failed: {e}")
-            return None, None
+            print(f"⚠️ Alternative yt-dlp method failed: {e}")
+            print("🔄 Trying ffmpeg fallback as final alternative...")
+            return self.download_audio_via_ffmpeg(url, index)
     
     def _find_ffmpeg_executable(self):
         """Find FFmpeg executable in system PATH or common locations."""
@@ -895,6 +966,135 @@ class YoutubeAudioDownloader:
         else:
             print(f"⚠️ Unsupported browser: {browser_name}. Supported: {', '.join(supported_browsers)}")
     
+    def download_audio_via_ffmpeg(self, url, index=0):
+        """
+        Download and convert YouTube audio using ffmpeg directly.
+        This method uses yt-dlp only to get the direct stream URL, then uses ffmpeg for downloading.
+        
+        Args:
+            url (str): YouTube video URL
+            index (int): Index for unique filename generation
+            
+        Returns:
+            tuple: (wav_file_path, duration) or (None, None) if failed
+        """
+        print("🔧 ============================================")
+        print("🔧 FFMPEG FALLBACK METHOD ACTIVATED")
+        print("🔧 yt-dlp has failed, trying direct ffmpeg approach")
+        print("🔧 ============================================")
+        print(f"🎵 Starting ffmpeg-based download for video {index}")
+        
+        # Generate unique output filename
+        timestamp = int(time.time() * 1000)  # Millisecond timestamp
+        process_id = os.getpid()
+        wav_file = os.path.join(self.base_dir, f"youtube_audio_{index}_{timestamp}_{process_id}.wav")
+        
+        try:
+            # Step 1: Get direct stream URL using yt-dlp
+            print("📡 Getting direct stream URL...")
+            
+            # Build yt-dlp command to extract URL only
+            cmd_get_url = [
+                "yt-dlp", 
+                "--get-url", 
+                "-f", "bestaudio/best",
+                "--user-agent", self.ydl_opts.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0')
+            ]
+            
+            # Add cookies if configured
+            if self.cookies_file and os.path.exists(self.cookies_file):
+                cmd_get_url.extend(["--cookies", self.cookies_file])
+            elif self.cookies_from_browser:
+                cmd_get_url.extend(["--cookies-from-browser", self.cookies_from_browser])
+            
+            cmd_get_url.append(url)
+            
+            # Execute yt-dlp to get direct URL
+            result = subprocess.run(cmd_get_url, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode != 0:
+                error_msg = result.stderr.strip()
+                print(f"❌ Failed to get stream URL: {error_msg}")
+                return None, None
+            
+            direct_url = result.stdout.strip()
+            if not direct_url:
+                print("❌ No stream URL returned")
+                return None, None
+                
+            print(f"✅ Got direct stream URL: {direct_url[:100]}...")
+            
+            # Step 2: Use ffmpeg to download and convert
+            print("🎵 Downloading and converting with ffmpeg...")
+            
+            # Build ffmpeg command
+            cmd_ffmpeg = [
+                "ffmpeg",
+                "-i", direct_url,
+                "-vn",  # No video
+                "-acodec", "pcm_s16le",  # Convert to WAV PCM
+                "-ar", "16000",  # 16kHz sample rate
+                "-ac", "1",  # Mono
+                "-t", "300",  # Limit to 5 minutes max
+                "-y",  # Overwrite existing file
+                wav_file
+            ]
+            
+            # Add user agent to ffmpeg
+            cmd_ffmpeg = [
+                "ffmpeg",
+                "-user_agent", self.ydl_opts.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0'),
+                "-i", direct_url,
+                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", "-t", "300", "-y",
+                wav_file
+            ]
+            
+            # Execute ffmpeg
+            result = subprocess.run(cmd_ffmpeg, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode != 0:
+                error_msg = result.stderr.strip()
+                print(f"❌ ffmpeg failed: {error_msg}")
+                return None, None
+            
+            # Verify file was created
+            if not os.path.exists(wav_file):
+                print("❌ WAV file was not created")
+                return None, None
+            
+            # Get audio duration
+            audio_duration = None
+            try:
+                audio_duration = self.get_audio_length_from_file(wav_file)
+                if audio_duration:
+                    minutes = int(audio_duration // 60)
+                    seconds = int(audio_duration % 60)
+                    print(f"📏 Audio duration: {minutes}:{seconds:02d}")
+            except Exception as duration_error:
+                print(f"⚠️ Could not get audio duration: {duration_error}")
+            
+            print("🎉 ============================================")
+            print("🎉 FFMPEG FALLBACK METHOD SUCCESSFUL!")
+            print("🎉 Downloaded when yt-dlp failed")
+            print("🎉 ============================================")
+            print(f"✅ Successfully downloaded via ffmpeg method: {wav_file}")
+            return wav_file, audio_duration
+            
+        except subprocess.TimeoutExpired:
+            print("❌ Download timeout (ffmpeg method)")
+            return None, None
+        except Exception as e:
+            print(f"❌ ffmpeg download error: {e}")
+            return None, None
+        finally:
+            # Clean up on error
+            if os.path.exists(wav_file) and (not hasattr(self, '_last_successful_file') or self._last_successful_file != wav_file):
+                try:
+                    # Only remove if the download wasn't successful
+                    if not os.path.exists(wav_file) or os.path.getsize(wav_file) == 0:
+                        os.remove(wav_file)
+                except OSError:
+                    pass
     def clear_cookies(self):
         """Clear all cookie settings."""
         self.cookies_file = None

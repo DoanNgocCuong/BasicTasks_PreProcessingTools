@@ -86,6 +86,7 @@ class CrawlerConfig:
     download_method: str = "api_assisted"
     cookie_settings: Optional[Dict[str, Any]] = None
     enable_language_detection: bool = True
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
 
 
 class ConfigLoader:
@@ -753,8 +754,8 @@ class YouTubeVideoCrawler:
         self.max_retries = 3
         self.retry_delays = [1, 2, 4]  # Exponential backoff delays in seconds
         
-        # Initialize audio downloader
-        audio_config = AudioConfig()
+        # Initialize audio downloader with user agent from config
+        audio_config = AudioConfig(user_agent=config.user_agent)
         
         # Configure cookie settings for the downloader
         cookies_file = None
