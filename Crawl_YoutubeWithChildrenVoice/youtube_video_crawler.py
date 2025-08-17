@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Union, Set, Any
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from youtube_audio_downloader import Config as AudioConfig, YoutubeAudioDownloader
+from youtube_audio_downloader_alternative import YouTubeAudioDownloaderAlternative
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
 from youtube_output_validator import YouTubeURLValidator
@@ -729,8 +729,8 @@ class YouTubeVideoCrawler:
         # Store configuration
         self.config = config
         
-        # Override class constant with configuration value
-        Config.ENABLE_LANGUAGE_DETECTION = config.enable_language_detection
+        # Use instance attribute for language detection control (do not override class constant)
+        # Config.ENABLE_LANGUAGE_DETECTION = config.enable_language_detection
         
         # Initialize output analyzer
         self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
@@ -754,20 +754,8 @@ class YouTubeVideoCrawler:
         self.max_retries = 3
         self.retry_delays = [1, 2, 4]  # Exponential backoff delays in seconds
         
-        # Initialize audio downloader with user agent from config
-        audio_config = AudioConfig(user_agent=config.user_agent)
-        
-        # Configure cookie settings for the downloader
-        cookies_file = None
-        cookies_browser = None
-        
-        if config.cookie_settings and config.cookie_settings.get('enabled', False):
-            if config.cookie_settings.get('method') == 'file':
-                cookies_file = config.cookie_settings.get('cookies_file_path', 'cookies.txt')
-            elif config.cookie_settings.get('method') == 'browser':
-                cookies_browser = config.cookie_settings.get('browser_name', 'chrome')
-        
-        self.audio_downloader = YoutubeAudioDownloader(audio_config, cookies_file, cookies_browser)
+        # Initialize alternative audio downloader (using pytube instead of yt-dlp)
+        self.audio_downloader = YouTubeAudioDownloaderAlternative(output_dir="youtube_audio_outputs")
         
         # Initialize YouTube Data API service for enhanced metadata retrieval
         self.youtube_service = None
@@ -1081,13 +1069,17 @@ class YouTubeVideoCrawler:
             # Convert YouTube video to .wav file once for both analyses
             # Use thread-safe global download index to prevent file overlap
             # Get both audio file path and video duration
-            # Use configured download method to bypass bot detection
+            # Use alternative downloader (pytube) to bypass bot detection
             current_download_index = self._get_next_download_index()
             
-            if self.config.download_method == "api_assisted":
-                wav_file_path, video_duration = self.audio_downloader.download_audio_via_api(video['url'], index=current_download_index)
+            # Use the alternative downloader's main method
+            result = self.audio_downloader.download_audio_pytube(video['url'], index=current_download_index)
+            
+            if result:
+                wav_file_path, video_duration = result
             else:
-                wav_file_path, video_duration = self.audio_downloader.download_audio_from_yturl(video['url'], index=current_download_index)
+                wav_file_path = None
+                video_duration = None
             
             if not wav_file_path:
                 self.error_reporter.report_audio_download_failure()
