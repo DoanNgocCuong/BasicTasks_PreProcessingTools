@@ -1,0 +1,249 @@
+=== FINAL COLLECTION REPORT FOR VIETNAMESE CHILDREN'S VOICE VIDEOS ===
+Report generated: 2025-09-11 22:49:19
+
+=== OVERALL STATISTICS ===
+Videos collected in current session: 422
+Total videos in file (including existing): 5746
+Total target count: 52000
+Target per query: 250
+Target achievement: 0.81%
+Total videos evaluated: 1663
+Total videos with children's voice: 422
+Total videos in Vietnamese: 1663
+Total videos not in Vietnamese: 0
+Overall children's voice rate: 25.38%
+Overall Vietnamese rate: 100.00%
+Total queries processed: 208
+Total channels reviewed: 72
+
+=== DETAILED STATISTICS BY QUERY ===
+Query: "trẻ Việt Nam"
+  - Videos collected: 0
+  - Videos reviewed: 50
+  - Videos evaluated: 0
+  - Videos with children's voice: 0
+  - Videos in Vietnamese: 0
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 0.00%
+  - Children's voice rate: 0.00%
+  - Vietnamese rate: 0.00%
+  - New channels found: 0
+
+Query: "bé Việt Nam"
+  - Videos collected: 38
+  - Videos reviewed: 138
+  - Videos evaluated: 112
+  - Videos with children's voice: 38
+  - Videos in Vietnamese: 112
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 27.54%
+  - Children's voice rate: 33.93%
+  - Vietnamese rate: 100.00%
+  - New channels found: 4
+
+Query: "em Việt Nam"
+  - Videos collected: 2
+  - Videos reviewed: 55
+  - Videos evaluated: 35
+  - Videos with children's voice: 2
+  - Videos in Vietnamese: 35
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 3.64%
+  - Children's voice rate: 5.71%
+  - Vietnamese rate: 100.00%
+  - New channels found: 5
+
+Query: "bé cấp 1"
+  - Videos collected: 20
+  - Videos reviewed: 155
+  - Videos evaluated: 149
+  - Videos with children's voice: 20
+  - Videos in Vietnamese: 149
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 12.90%
+  - Children's voice rate: 13.42%
+  - Vietnamese rate: 100.00%
+  - New channels found: 9
+
+Query: "bé 5 tuổi"
+  - Videos collected: 11
+  - Videos reviewed: 70
+  - Videos evaluated: 50
+  - Videos with children's voice: 11
+  - Videos in Vietnamese: 50
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 15.71%
+  - Children's voice rate: 22.00%
+  - Vietnamese rate: 100.00%
+  - New channels found: 10
+
+Query: "bé 6 tuổi"
+  - Videos collected: 7
+  - Videos reviewed: 114
+  - Videos evaluated: 93
+  - Videos with children's voice: 7
+  - Videos in Vietnamese: 93
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 6.14%
+  - Children's voice rate: 7.53%
+  - Vietnamese rate: 100.00%
+  - New channels found: 14
+
+Query: "bé 7 tuổi"
+  - Videos collected: 12
+  - Videos reviewed: 73
+  - Videos evaluated: 60
+  - Videos with children's voice: 12
+  - Videos in Vietnamese: 60
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 16.44%
+  - Children's voice rate: 20.00%
+  - Vietnamese rate: 100.00%
+  - New channels found: 17
+
+Query: "bé 8 tuổi"
+  - Videos collected: 0
+  - Videos reviewed: 50
+  - Videos evaluated: 25
+  - Videos with children's voice: 0
+  - Videos in Vietnamese: 25
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 0.00%
+  - Children's voice rate: 0.00%
+  - Vietnamese rate: 100.00%
+  - New channels found: 17
+
+Query: "bé 9 tuổi"
+  - Videos collected: 34
+  - Videos reviewed: 190
+  - Videos evaluated: 173
+  - Videos with children's voice: 34
+  - Videos in Vietnamese: 173
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 17.89%
+  - Children's voice rate: 19.65%
+  - Vietnamese rate: 100.00%
+  - New channels found: 20
+
+Query: "bé 10 tuổi"
+  - Videos collected: 9
+  - Videos reviewed: 108
+  - Videos evaluated: 98
+  - Videos with children's voice: 9
+  - Videos in Vietnamese: 98
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 8.33%
+  - Children's voice rate: 9.18%
+  - Vietnamese rate: 100.00%
+  - New channels found: 23
+
+Query: "trẻ em nói"
+  - Videos collected: 42
+  - Videos reviewed: 111
+  - Videos evaluated: 80
+  - Videos with children's voice: 42
+  - Videos in Vietnamese: 80
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 37.84%
+  - Children's voice rate: 52.50%
+  - Vietnamese rate: 100.00%
+  - New channels found: 25
+
+Query: "trẻ em chia sẻ"
+  - Videos collected: 47
+  - Videos reviewed: 189
+  - Videos evaluated: 182
+  - Videos with children's voice: 47
+  - Videos in Vietnamese: 182
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 24.87%
+  - Children's voice rate: 25.82%
+  - Vietnamese rate: 100.00%
+  - New channels found: 32
+
+Query: "bé chia sẻ"
+  - Videos collected: 97
+  - Videos reviewed: 185
+  - Videos evaluated: 175
+  - Videos with children's voice: 97
+  - Videos in Vietnamese: 175
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 52.43%
+  - Children's voice rate: 55.43%
+  - Vietnamese rate: 100.00%
+  - New channels found: 39
+
+Query: "trẻ em đối thoại"
+  - Videos collected: 11
+  - Videos reviewed: 105
+  - Videos evaluated: 93
+  - Videos with children's voice: 11
+  - Videos in Vietnamese: 93
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 10.48%
+  - Children's voice rate: 11.83%
+  - Vietnamese rate: 100.00%
+  - New channels found: 45
+
+Query: "bé đối thoại"
+  - Videos collected: 12
+  - Videos reviewed: 69
+  - Videos evaluated: 59
+  - Videos with children's voice: 12
+  - Videos in Vietnamese: 59
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 17.39%
+  - Children's voice rate: 20.34%
+  - Vietnamese rate: 100.00%
+  - New channels found: 51
+
+Query: "trẻ tự nhiên"
+  - Videos collected: 27
+  - Videos reviewed: 101
+  - Videos evaluated: 88
+  - Videos with children's voice: 27
+  - Videos in Vietnamese: 88
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 26.73%
+  - Children's voice rate: 30.68%
+  - Vietnamese rate: 100.00%
+  - New channels found: 54
+
+Query: "bé tự giới thiệu"
+  - Videos collected: 12
+  - Videos reviewed: 64
+  - Videos evaluated: 36
+  - Videos with children's voice: 12
+  - Videos in Vietnamese: 36
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 18.75%
+  - Children's voice rate: 33.33%
+  - Vietnamese rate: 100.00%
+  - New channels found: 61
+
+Query: "trẻ giới thiệu"
+  - Videos collected: 41
+  - Videos reviewed: 161
+  - Videos evaluated: 155
+  - Videos with children's voice: 41
+  - Videos in Vietnamese: 155
+  - Videos not in Vietnamese: 0
+  - Efficiency rate: 25.47%
+  - Children's voice rate: 26.45%
+  - Vietnamese rate: 100.00%
+  - New channels found: 72
+
+=== QUERY PERFORMANCE ANALYSIS ===
+Most efficient query: "bé chia sẻ" (52.43%)
+Least efficient query: "trẻ Việt Nam" (0.00%)
+Best children's voice rate: "bé chia sẻ" (55.43%)
+Best Vietnamese rate: "bé Việt Nam" (100.00%)
+
+=== RECOMMENDATIONS ===
+- Prioritize using query: "bé chia sẻ" for high efficiency
+- Consider improving or replacing query: "trẻ Việt Nam"
+- Query "bé chia sẻ" provides best quality results
+- Query "bé Việt Nam" has highest Vietnamese content rate
+- Language detection helps improve collection accuracy
+
+=== END OF REPORT ===
