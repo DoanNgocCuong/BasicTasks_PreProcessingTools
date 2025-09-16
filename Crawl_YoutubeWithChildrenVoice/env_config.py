@@ -82,21 +82,30 @@ class EnvironmentConfig:
         Args:
             env_file (str, optional): Path to .env file. Defaults to '.env' in current directory.
         """
-        # Determine .env file path
-        if env_file is None:
-            env_file = str(Path(__file__).parent / '.env')
-        
-        # Load .env file if it exists
-        if Path(env_file).exists():
-            if DOTENV_AVAILABLE:
-                load_dotenv(env_file)
-                print(f"✅ Loaded environment variables from: {env_file}")
-            else:
-                manual_load_dotenv(env_file)
-                print(f"✅ Manually loaded environment variables from: {env_file}")
+        # Determine .env file path(s)
+        env_paths = []
+        if env_file is not None:
+            env_paths.append(Path(env_file))
         else:
-            print(f"⚠️ No .env file found at: {env_file}")
-            print("Using system environment variables only")
+            # Prefer module directory .env, then fallback to current working directory .env
+            env_paths.append(Path(__file__).parent / '.env')
+            cwd_env = Path.cwd() / '.env'
+            if cwd_env not in env_paths:
+                env_paths.append(cwd_env)
+        
+        loaded_any = False
+        for path in env_paths:
+            if path.exists():
+                if DOTENV_AVAILABLE:
+                    load_dotenv(str(path), override=False)
+                    print(f"✅ Loaded environment variables from: {path}")
+                else:
+                    manual_load_dotenv(str(path))
+                    print(f"✅ Manually loaded environment variables from: {path}")
+                loaded_any = True
+        
+        if not loaded_any:
+            print("⚠️ No .env file found in expected locations (module dir or CWD). Using system environment variables only.")
     
     def get_env(self, key: str, default: Any = None, 
                 required: bool = False, var_type: type = str) -> Any:
@@ -140,9 +149,52 @@ class EnvironmentConfig:
     
     # YouTube API Configuration
     @property
-    def YOUTUBE_API_KEY(self) -> str:
-        """YouTube Data API v3 key (required)."""
-        return self.get_env('YOUTUBE_API_KEY', required=True)
+    def YOUTUBE_API_KEY_1(self) -> str:
+        """Primary YouTube Data API v3 key (required)."""
+        return self.get_env('YOUTUBE_API_KEY_1', required=True)
+    
+    @property
+    def YOUTUBE_API_KEY_2(self) -> Optional[str]:
+        """Secondary YouTube Data API v3 key (optional)."""
+        return self.get_env('YOUTUBE_API_KEY_2', default=None)
+    
+    @property
+    def YOUTUBE_API_KEY_3(self) -> Optional[str]:
+        """Tertiary YouTube Data API v3 key (optional)."""
+        return self.get_env('YOUTUBE_API_KEY_3', default=None)
+    
+    @property
+    def YOUTUBE_API_KEYS(self) -> list[str]:
+        """List of all available YouTube API keys (supports CSV YOUTUBE_API_KEYS and numbered keys)."""
+        keys: list[str] = []
+        # CSV list support
+        csv_keys = self.get_env('YOUTUBE_API_KEYS', default=None)
+        if csv_keys:
+            for k in str(csv_keys).split(','):
+                k = k.strip()
+                if k:
+                    keys.append(k)
+        
+        # Numbered keys support
+        for var in ['YOUTUBE_API_KEY_1', 'YOUTUBE_API_KEY_2', 'YOUTUBE_API_KEY_3']:
+            try:
+                k = self.get_env(var, required=False)
+                if k:
+                    keys.append(k)
+            except ValueError:
+                pass
+        
+        # De-duplicate while preserving order
+        seen = set()
+        unique_keys: list[str] = []
+        for k in keys:
+            if k not in seen:
+                seen.add(k)
+                unique_keys.append(k)
+        
+        if not unique_keys:
+            raise ValueError("No YouTube API keys found. Set YOUTUBE_API_KEYS or YOUTUBE_API_KEY_1 in .env")
+        return unique_keys
     
     # Audio Processing Configuration
     @property
@@ -171,6 +223,11 @@ class EnvironmentConfig:
     def MAX_WORKERS(self) -> int:
         """Maximum number of parallel workers."""
         return self.get_env('MAX_WORKERS', default=4, var_type=int)
+
+    @property
+    def POLL_INTERVAL_SECONDS(self) -> int:
+        """Polling interval (seconds) used to check for quota restoration."""
+        return self.get_env('POLL_INTERVAL_SECONDS', default=300, var_type=int)
     
     @property
     def CHILD_THRESHOLD(self) -> float:
@@ -209,9 +266,10 @@ class EnvironmentConfig:
         print("🔍 Validating configuration...")
         
         # Validate API key format (basic check)
-        api_key = self.YOUTUBE_API_KEY
-        if not api_key.startswith('AIza'):
-            print("⚠️ YouTube API key format may be incorrect (should start with 'AIza')")
+        api_keys = self.YOUTUBE_API_KEYS
+        for i, api_key in enumerate(api_keys, 1):
+            if not api_key.startswith('AIza'):
+                print(f"⚠️ YouTube API key {i} format may be incorrect (should start with 'AIza')")
         
         # Validate numeric ranges
         if not (1 <= self.MAX_WORKERS <= 16):
@@ -234,7 +292,10 @@ class EnvironmentConfig:
         """Print current configuration (hiding sensitive values)."""
         print("\n🔧 Current Configuration:")
         print("=" * 50)
-        print(f"YouTube API Key: {'*' * 20}...{self.YOUTUBE_API_KEY[-4:]}")
+        api_keys = self.YOUTUBE_API_KEYS
+        for i, api_key in enumerate(api_keys, 1):
+            print(f"YouTube API Key {i}: {'*' * 20}...{api_key[-4:]}")
+        print(f"Total API Keys Available: {len(api_keys)}")
         print(f"Max Audio Duration: {self.MAX_AUDIO_DURATION_SECONDS}s")
         print(f"Audio Quality: {self.AUDIO_QUALITY}")
         print(f"Whisper Model: {self.WHISPER_MODEL_SIZE}")

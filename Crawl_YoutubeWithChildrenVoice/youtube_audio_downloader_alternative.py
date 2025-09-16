@@ -274,4 +274,46 @@ def test_with_sample_video():
 
 
 if __name__ == "__main__":
-    test_with_sample_video()
+    # Simple CLI: if args provided, treat as batch or single; else batch from default file
+    import sys
+    from pathlib import Path
+    args = sys.argv[1:]
+    base_dir = Path(__file__).parent
+    default_urls_file = base_dir / 'youtube_url_outputs' / 'collected_video_urls.txt'
+    downloader = YouTubeAudioDownloaderAlternative()
+
+    def run_single(url: str, index: int):
+        result = downloader.download_audio_pytube(url, index=index)
+        if result:
+            wav_file, duration = result
+            print(f"✅ Saved: {wav_file} ({duration}s)")
+        else:
+            print("❌ Download failed")
+
+    if not args:
+        if default_urls_file.exists():
+            urls = [line.strip() for line in default_urls_file.read_text(encoding='utf-8').splitlines() if line.strip().startswith('http')]
+            print(f"📋 Batch download from: {default_urls_file} ({len(urls)} URLs)")
+            for idx, url in enumerate(urls, start=1):
+                print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+                run_single(url, idx)
+            print("\n🎉 Batch download completed")
+        else:
+            print("⚠️ No URLs file found. Usage: python youtube_audio_downloader_alternative.py <url>|--from-file <path>")
+            test_with_sample_video()
+    else:
+        # Support --from-file <path> or direct URL(s)
+        if args[0] == '--from-file' and len(args) >= 2:
+            file_path = Path(args[1])
+            if not file_path.exists():
+                print("❌ URLs file not found")
+                sys.exit(1)
+            urls = [line.strip() for line in file_path.read_text(encoding='utf-8').splitlines() if line.strip().startswith('http')]
+            print(f"📋 Batch download from: {file_path} ({len(urls)} URLs)")
+            for idx, url in enumerate(urls, start=1):
+                print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+                run_single(url, idx)
+            print("\n🎉 Batch download completed")
+        else:
+            for i, url in enumerate(args, start=1):
+                run_single(url, i)

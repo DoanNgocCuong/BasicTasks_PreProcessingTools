@@ -18,6 +18,7 @@ import re
 import os
 import torch
 import googleapiclient.discovery
+from googleapiclient.errors import HttpError
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Set, Any
@@ -507,10 +508,10 @@ class ErrorReporter:
     
     def report_quota_exceeded_error(self, current_collected: int, total_target: int) -> None:
         """Report YouTube API quota exceeded error with guidance."""
-        self.output.print_error("⚠️  YouTube Data API quota exceeded!")
+        self.output.print_error("⚠️  All YouTube Data API keys quota exceeded!")
         print("🔧 API Quota Information:")
         print("   • YouTube Data API v3 has a daily quota limit")
-        print("   • Default quota: 10,000 units per day")
+        print("   • Default quota: 10,000 units per day per API key")
         print("   • Each video search uses ~100 units")
         print("   • Each channel search uses ~100 units")
         print("")
@@ -522,7 +523,7 @@ class ErrorReporter:
         print("💡 Solutions:")
         print("   1. Wait until tomorrow (quota resets at midnight Pacific Time)")
         print("   2. Request quota increase from Google Cloud Console")
-        print("   3. Use multiple API keys (if you have multiple projects)")
+        print("   3. Add more API keys (YOUTUBE_API_KEY_4, etc.) to env file")
         print("   4. Continue with videos already collected")
         print("")
         print("🔗 Quota Management:")
@@ -730,12 +731,16 @@ class YouTubeVideoCrawler:
         self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
         
         self.debug = DebugLogger(enabled=config.debug_mode)
-        self.api_key = self._get_api_key()
+        self.api_keys = self._get_api_keys()
+        self.current_api_key_index = 0
+        self.api_key = self.api_keys[0] if self.api_keys else None
         self.base_url = Config.YOUTUBE_API_BASE_URL
         
         # Configure parallel processing from environment config
         from env_config import config as env_config
         self.max_workers = env_config.MAX_WORKERS
+        # Configurable polling interval for quota restoration checks
+        self.poll_interval_seconds = getattr(env_config, 'POLL_INTERVAL_SECONDS', 300)
         
         if config.debug_mode:
             self.debug.log(f"Parallel processing configured with max_workers: {self.max_workers}")
@@ -804,15 +809,114 @@ class YouTubeVideoCrawler:
         self.start_time = time.time()
         self.start_datetime = datetime.now()
         
-    def _get_api_key(self) -> str:
-        """Get and validate API key from environment configuration."""
+    def _get_api_keys(self) -> list[str]:
+        """Get and validate API keys from environment configuration."""
         try:
-            api_key = config.YOUTUBE_API_KEY
-            print(f"✅ YouTube API key loaded from environment")
-            return api_key
+            api_keys = config.YOUTUBE_API_KEYS
+            if not api_keys:
+                raise ValueError("No YouTube API keys found in environment")
+            
+            print(f"✅ {len(api_keys)} YouTube API key(s) loaded from environment")
+            for i, key in enumerate(api_keys, 1):
+                print(f"   API Key {i}: {'*' * 20}...{key[-4:]}")
+            
+            return api_keys
         except ValueError as e:
             self.error_reporter.report_configuration_error(e)
             raise
+    
+    def _switch_to_next_api_key(self) -> bool:
+        """
+        Switch to the next available API key when current one is exhausted.
+        
+        Returns:
+            bool: True if successfully switched to next key, False if no more keys available
+        """
+        if self.current_api_key_index + 1 < len(self.api_keys):
+            self.current_api_key_index += 1
+            old_key = self.api_key
+            self.api_key = self.api_keys[self.current_api_key_index]
+            
+            print(f"🔄 Switching to API Key {self.current_api_key_index + 1}")
+            print(f"   Previous: {'*' * 20}...{old_key[-4:]}")
+            print(f"   Current:  {'*' * 20}...{self.api_key[-4:]}")
+            
+            # Reinitialize YouTube Data API service with new key
+            self._init_youtube_data_api()
+            
+            # Reset quota tracking for new key
+            self.api_quota_exceeded = False
+            print(f"✅ Successfully switched to API Key {self.current_api_key_index + 1}")
+            
+            return True
+        else:
+            print(f"❌ No more API keys available (used {len(self.api_keys)}/{len(self.api_keys)})")
+            return False
+    
+    def _switch_to_key_index(self, idx: int) -> None:
+        """Switch to a specific API key index and reinitialize the YouTube service."""
+        old_key = self.api_key
+        self.current_api_key_index = idx
+        self.api_key = self.api_keys[idx]
+        print(f"🔄 Switching to API Key {idx + 1}")
+        print(f"   Previous: {'*' * 20}...{old_key[-4:]}")
+        print(f"   Current:  {'*' * 20}...{self.api_key[-4:]}")
+        self._init_youtube_data_api()
+        self.api_quota_exceeded = False
+    
+    def _probe_key_available(self, key: str) -> bool:
+        """
+        Cheap quota probe for a single key using a low-cost videos.list call.
+        Returns True if the key appears usable (HTTP 200), False otherwise.
+        """
+        try:
+            probe_url = f"{self.base_url}/videos"
+            params = {
+                "part": "id",
+                "id": "Ks-_Mh1QhMc",
+                "key": key,
+            }
+            resp = requests.get(probe_url, params=params, timeout=10)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code == 403:
+                try:
+                    data = resp.json() if resp.content else {}
+                except Exception:
+                    data = {}
+                reason = (data.get("error", {}).get("errors", [{}])[0].get("reason", "") or "").lower()
+                if "quotaexceeded" in reason or "dailylimitexceeded" in reason:
+                    return False
+            return False
+        except Exception:
+            return False
+    
+    def wait_until_any_key_restored(self, poll_interval_seconds: Optional[int] = None) -> None:
+        """
+        Poll all configured API keys periodically. As soon as any key is usable,
+        switch to it and return. Does not alter quotas; only waits.
+        """
+        if poll_interval_seconds is None:
+            poll_interval_seconds = self.poll_interval_seconds
+        print(f"⏳ All configured API keys appear exhausted. Polling every {poll_interval_seconds}s until any key resets...")
+        start_time = time.time()
+        poll_count = 0
+        while True:
+            polled_this_cycle = 0
+            for idx, key in enumerate(self.api_keys):
+                if self._probe_key_available(key):
+                    print(f"✅ Quota available on API Key {idx + 1}. Resuming...")
+                    self._switch_to_key_index(idx)
+                    return
+                polled_this_cycle += 1
+            poll_count += 1
+            # Heartbeat: emit a status line every 5 cycles to indicate we're still waiting
+            if poll_count % 5 == 0:
+                elapsed = int(time.time() - start_time)
+                minutes = elapsed // 60
+                seconds = elapsed % 60
+                print(f"⏳ Still waiting... elapsed {minutes}m{seconds:02d}s, last cycle probed {polled_this_cycle} key(s)")
+            time.sleep(poll_interval_seconds)
     
     def _init_youtube_data_api(self) -> None:
         """Initialize YouTube Data API service for enhanced metadata retrieval."""
@@ -849,11 +953,42 @@ class YouTubeVideoCrawler:
             for i in range(0, len(video_ids), batch_size):
                 batch_ids = video_ids[i:i + batch_size]
                 
+                # Build request
                 request = self.youtube_service.videos().list(
                     part="snippet,contentDetails,statistics",
                     id=",".join(batch_ids)
                 )
-                response = request.execute()
+                
+                # Execute with simple quota-aware retry: try once, if quota 403 → wait → rebuild request → retry once
+                for attempt in range(2):
+                    try:
+                        response = request.execute()
+                        break
+                    except HttpError as http_err:
+                        status = getattr(http_err, 'status_code', None) or getattr(http_err.resp, 'status', None)
+                        # Extract reason if present
+                        try:
+                            err_content = http_err.content.decode() if hasattr(http_err, 'content') and isinstance(http_err.content, (bytes, bytearray)) else str(http_err)
+                            err_json = json.loads(err_content) if err_content and err_content.startswith('{') else {}
+                            reason = (err_json.get('error', {}).get('errors', [{}])[0].get('reason', '') or '').lower()
+                        except Exception:
+                            reason = ''
+                        if status == 403 and ("quotaexceeded" in reason or "dailylimitexceeded" in reason):
+                            print("⚠️ Metadata fetch quota exceeded - waiting for any key to restore...")
+                            self.api_quota_exceeded = True
+                            self.wait_until_any_key_restored()
+                            # Rebuild request with refreshed service/key and retry once
+                            request = self.youtube_service.videos().list(
+                                part="snippet,contentDetails,statistics",
+                                id=",".join(batch_ids)
+                            )
+                            continue
+                        else:
+                            raise
+                else:
+                    # If we exhausted retries without a break
+                    print("⚠️ Failed to fetch metadata after quota wait")
+                    response = {"items": []}
                 
                 for item in response.get('items', []):
                     video_id = item['id']
@@ -1007,11 +1142,8 @@ class YouTubeVideoCrawler:
         wav_file_path = None  # Initialize to handle cleanup in exception cases
         
         # Check video duration limit before any processing (skip if too long)
-        # Use configured duration limit from environment
-        try:
-            MAX_VIDEO_DURATION_SECONDS = config.MAX_AUDIO_DURATION_SECONDS
-        except:
-            MAX_VIDEO_DURATION_SECONDS = 300  # Default 5 minutes limit
+        # Use configured duration limit from environment (no hardcoded fallback)
+        MAX_VIDEO_DURATION_SECONDS = config.MAX_AUDIO_DURATION_SECONDS
             
         try:
             # Get video duration from metadata if available
@@ -1319,26 +1451,33 @@ class YouTubeVideoCrawler:
         self.output.print_sub_header("🔗 API USAGE SUMMARY")
         
         print(f"📊 YouTube Data API Statistics:")
+        print(f"  ├─ Total API keys available: {len(self.api_keys)}")
+        print(f"  ├─ Current active API key: Key {self.current_api_key_index + 1}")
         print(f"  ├─ Total API requests made: {self.api_requests_made}")
         
         # Estimate quota units used (rough calculation)
         estimated_quota_used = self.api_requests_made * 100  # Each search request uses ~100 units
         print(f"  ├─ Estimated quota units used: {estimated_quota_used}")
-        print(f"  ├─ Daily quota limit: 10,000 units (default)")
+        print(f"  ├─ Daily quota limit per key: 10,000 units (default)")
         
         if self.api_quota_exceeded:
-            print(f"  └─ Status: ❌ QUOTA EXCEEDED")
+            print(f"  └─ Status: ❌ ALL API KEYS QUOTA EXCEEDED")
             remaining_percentage = 0
+            print(f"     └─ Used API keys: {self.current_api_key_index + 1}/{len(self.api_keys)}")
         else:
             remaining_quota = max(0, 10000 - estimated_quota_used)
             remaining_percentage = (remaining_quota / 10000) * 100
-            print(f"  └─ Status: ✅ ACTIVE")
+            print(f"  └─ Status: ✅ ACTIVE (Key {self.current_api_key_index + 1})")
             print(f"     ├─ Estimated remaining quota: {remaining_quota} units")
-            print(f"     └─ Estimated remaining: {remaining_percentage:.1f}%")
+            print(f"     ├─ Estimated remaining: {remaining_percentage:.1f}%")
+            print(f"     └─ Unused API keys: {len(self.api_keys) - self.current_api_key_index - 1}")
         
         if estimated_quota_used > 8000:  # Warning at 80%
-            print(f"  ⚠️  Warning: High quota usage detected!")
-            print(f"     Consider monitoring usage to avoid hitting limits")
+            print(f"  ⚠️  Warning: High quota usage detected on current key!")
+            if self.current_api_key_index + 1 < len(self.api_keys):
+                print(f"     Will automatically switch to next key when quota exceeded")
+            else:
+                print(f"     This is the last available API key")
         
         self.output.print_section_divider()
 
@@ -1355,8 +1494,12 @@ class YouTubeVideoCrawler:
             Optional[Dict]: API response data or None if failed
         """
         if self.api_quota_exceeded:
-            self.debug.log(f"Skipping {operation_name} - API quota exceeded")
-            return None
+            self.debug.log(f"API quota exceeded flag set; polling before attempting {operation_name}")
+            # Block-and-poll across all keys until any becomes available, then continue
+            self.wait_until_any_key_restored()
+            # Ensure params reflect the newly active key (if caller included a key param)
+            if isinstance(params, dict) and 'key' in params:
+                params['key'] = self.api_key
         
         # Rate limiting: ensure minimum interval between requests
         current_time = time.time()
@@ -1388,12 +1531,26 @@ class YouTubeVideoCrawler:
                     error_reason = error_details.get('errors', [{}])[0].get('reason', '')
                     
                     if 'quotaExceeded' in error_reason or 'dailyLimitExceeded' in error_reason:
-                        self.api_quota_exceeded = True
-                        self.error_reporter.report_quota_exceeded_error(
-                            self.current_session_collected_count,
-                            self.total_target_count
-                        )
-                        return None
+                        print(f"⚠️ API Key {self.current_api_key_index + 1} quota exceeded")
+                        
+                        # Try to switch to next API key
+                        if self._switch_to_next_api_key():
+                            print(f"🔄 Retrying request with new API key...")
+                            # Update params with new API key and retry the request
+                            params['key'] = self.api_key
+                            return self._make_api_request(url, params, operation_name)
+                        else:
+                            # No more API keys currently available -> poll until any key is restored, then retry
+                            self.api_quota_exceeded = True
+                            self.error_reporter.report_quota_exceeded_error(
+                                self.current_session_collected_count,
+                                self.total_target_count
+                            )
+                            print(f"❌ All {len(self.api_keys)} API keys have exceeded their quota")
+                            self.wait_until_any_key_restored()
+                            # Update params with the now-active key and retry once resumed
+                            params['key'] = self.api_key
+                            return self._make_api_request(url, params, operation_name)
                     else:
                         # Other 403 errors (e.g., API not enabled, invalid key)
                         error_message = error_details.get('message', 'Unknown API error')
@@ -1459,8 +1616,8 @@ class YouTubeVideoCrawler:
             List[Dict]: List of video information dictionaries including duration
         """
         if self.api_quota_exceeded:
-            self.debug.log("Skipping video search - API quota exceeded")
-            return []
+            self.debug.log("API quota exceeded before video search - waiting for any key to be restored")
+            self.wait_until_any_key_restored()
         
         url = f"{self.base_url}/search"
         params = {
@@ -1539,8 +1696,8 @@ class YouTubeVideoCrawler:
             List[Dict]: List of video information dictionaries including duration
         """
         if self.api_quota_exceeded:
-            self.debug.log("Skipping channel search - API quota exceeded")
-            return []
+            self.debug.log("API quota exceeded before channel search - waiting for any key to be restored")
+            self.wait_until_any_key_restored()
         
         url = f"{self.base_url}/search"
         params = {
@@ -2025,8 +2182,8 @@ class YouTubeVideoCrawler:
         for query_index, current_query in enumerate(self.query_list, 1):
             # Check if API quota has been exceeded
             if self.api_quota_exceeded:
-                self.output.print_warning(f"⚠️  Stopping collection at query {query_index}/{len(self.query_list)} due to API quota exceeded")
-                break
+                self.output.print_warning(f"⚠️  API quota exceeded detected at query {query_index}/{len(self.query_list)} - waiting to resume...")
+                self.wait_until_any_key_restored()
             
             # Check if we've reached the total target count for current session
             if self.current_session_collected_count >= self.total_target_count:
@@ -2052,19 +2209,27 @@ class YouTubeVideoCrawler:
             video_list = self.search_videos_by_query(current_query)
             if not video_list:
                 self.reporter.report_query_results(0, current_query)
-                # Check if failure was due to quota exceeded
+                # If quota caused empty result, wait and retry this query once
                 if self.api_quota_exceeded:
-                    self.output.print_warning("⚠️  Stopping collection due to API quota exceeded")
-                    break
-                continue
+                    self.output.print_warning("⚠️  API quota exceeded during query search - waiting to resume and retry...")
+                    self.wait_until_any_key_restored()
+                    video_list = self.search_videos_by_query(current_query)
+                    if not video_list:
+                        self.reporter.report_query_results(0, current_query)
+                        continue
+                else:
+                    continue
             
             self.reporter.report_query_results(len(video_list), current_query)
             
             # Collection loop for current query
             while (query_stats['videos_collected'] < self.target_video_count_per_query and 
                    video_index_current < len(video_list) and 
-                   self.current_session_collected_count < self.total_target_count and
-                   not self.api_quota_exceeded):  # Stop if quota exceeded
+                   self.current_session_collected_count < self.total_target_count):
+                # If quota hits mid-loop, pause and resume without losing position
+                if self.api_quota_exceeded:
+                    self.output.print_warning("⚠️  API quota exceeded during processing - waiting to resume...")
+                    self.wait_until_any_key_restored()
                 
                 current_video_processing = video_list[video_index_current]
                 query_stats['videos_reviewed'] += 1

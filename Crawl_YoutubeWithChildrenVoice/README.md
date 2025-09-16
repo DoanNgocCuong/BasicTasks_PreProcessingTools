@@ -1,5 +1,85 @@
 # YouTube Children's Voice Crawler
 
+## Quota auto-resume (YouTube Data API v3)
+
+The crawler now automatically pauses when all API keys hit the daily quota and resumes the moment any key is available again. It periodically probes each configured key with a low-cost request and switches to the first key that recovers.
+
+- Configure polling interval in `.env`:
+  - `POLL_INTERVAL_SECONDS=300` (default). Example: set to `120` for faster pickup.
+- Configure API keys in `.env` (either method works):
+  - `YOUTUBE_API_KEYS=AIza...A1,AIza...B2,AIza...C3`
+  - or `YOUTUBE_API_KEY_1=...`, `YOUTUBE_API_KEY_2=...`, `YOUTUBE_API_KEY_3=...`
+- While waiting, the crawler logs a heartbeat line every few cycles: "Still waiting... elapsed XmYYs".
+
+## Duration limit from .env
+
+Set the maximum video/audio duration (in seconds) via `.env`:
+
+```
+MAX_AUDIO_DURATION_SECONDS=1200
+```
+
+All duration pre-filters and analysis checks respect this value (no hardcoded 5-minute limit).
+
+Notes:
+- The analysis crawler uses this limit for pre-filtering and during `analyze_video_audio`.
+- The standalone alternative downloader (`youtube_audio_downloader_alternative.py`) currently trims output to 5 minutes and may skip videos longer than 5 minutes; use the main `youtube_audio_downloader.py` if you need full-length audio respecting `MAX_AUDIO_DURATION_SECONDS`.
+
+## Batch download audio from collected URLs
+
+Two downloader scripts can now batch-download all URLs from `youtube_url_outputs/collected_video_urls.txt` into `youtube_audio_outputs/` when run from the terminal without arguments.
+
+### youtube_audio_downloader.py (yt-dlp based)
+
+- Default batch (uses `youtube_url_outputs/collected_video_urls.txt` if present):
+
+```
+python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader.py
+```
+
+- Batch from custom file:
+
+```
+python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader.py --from-file D:\path\to\urls.txt
+```
+
+- Options (can be combined as applicable):
+  - `--cookies-file <path>`: Use Netscape-format cookies
+  - `--cookies-browser <name>`: Use browser cookies (chrome, firefox, safari, edge, opera, brave)
+  - `--test-duration`: Only inspect duration/metadata, do not download
+
+### youtube_audio_downloader_alternative.py (pytube/pytubefix based)
+
+- Default batch (uses `youtube_url_outputs/collected_video_urls.txt` if present):
+
+```
+python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader_alternative.py
+```
+
+- Batch from custom file or pass direct URLs:
+
+```
+python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader_alternative.py --from-file D:\path\to\urls.txt
+python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader_alternative.py https://youtu.be/.. https://www.youtube.com/watch?v=..
+```
+
+All outputs are saved to `youtube_audio_outputs/`.
+
+## .env loading behavior
+
+Environment variables are loaded automatically when any module imports `env_config`.
+
+- Search locations (in order):
+  1) `.env` in this folder (`BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/.env`)
+  2) `.env` in the current working directory (CWD)
+- Supports both python-dotenv and a manual parser fallback.
+- Values already present in the process environment are not overridden.
+
+Key variables:
+- `YOUTUBE_API_KEYS` (comma-separated) or `YOUTUBE_API_KEY_1..3`
+- `POLL_INTERVAL_SECONDS` (default 300)
+- `MAX_AUDIO_DURATION_SECONDS` (e.g., 1200)
+
 ## Overview
 
 AI-powered crawler that automatically searches, downloads, and analyzes YouTube videos to collect URLs of videos containing Vietnamese children's voices using machine learning models.

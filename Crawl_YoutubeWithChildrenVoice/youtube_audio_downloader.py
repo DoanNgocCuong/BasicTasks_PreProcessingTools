@@ -1196,13 +1196,14 @@ def main():
     # Initialize downloader with cookie settings
     downloader = YoutubeAudioDownloader(config, cookies_file, cookies_browser)
     
-    if len(args) > 2:
+    if len(args) > 3:
         print("Too many arguments.")
-        print("Usage: python youtube_audio_downloader.py [options] <optional link> [--test-duration]")
+        print("Usage: python youtube_audio_downloader.py [options] <optional link> [--test-duration] [--from-file <path>]")
         print("Options:")
         print("  --cookies-file <path>     Use cookies from Netscape format file")
         print("  --cookies-browser <name>  Use cookies from browser (chrome, firefox, safari, edge, opera, brave)")
         print("  --test-duration          Test video duration extraction without downloading")
+        print("  --from-file <path>       Download all URLs listed in the given file (one per line)")
         print("")
         print("Examples:")
         print("  python youtube_audio_downloader.py --cookies-file cookies.txt https://youtube.com/watch?v=...")
@@ -1215,6 +1216,20 @@ def main():
     if "--test-duration" in args:
         test_duration = True
         args.remove("--test-duration")
+
+    # Optional: batch from file
+    from_file_path = None
+    if "--from-file" in args:
+        try:
+            fi = args.index("--from-file")
+            if fi + 1 < len(args):
+                from_file_path = args[fi + 1]
+                # Remove flag and value
+                args.pop(fi)
+                args.pop(fi)
+        except (ValueError, IndexError):
+            print("⚠️ Error: --from-file requires a path")
+            exit(1)
     
     # Show cookie status
     cookie_status = downloader.get_cookie_status()
@@ -1222,6 +1237,34 @@ def main():
         print(f"🍪 Cookie configuration: {cookie_status}")
     
     if len(args) == 0:
+        # Batch mode if no args and collected file exists or --from-file provided
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
+        urls_file = from_file_path or (default_urls_file if os.path.exists(default_urls_file) else None)
+        if urls_file:
+            print(f"📋 Batch download from: {urls_file}")
+            if not os.path.exists(urls_file):
+                print("❌ URLs file not found")
+                exit(1)
+            with open(urls_file, 'r', encoding='utf-8') as f:
+                urls = [line.strip() for line in f if line.strip() and line.strip().startswith('http')]
+            print(f"🔢 Total URLs: {len(urls)}")
+            for idx, url in enumerate(urls, start=1):
+                print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+                if test_duration:
+                    downloader.test_video_duration_extraction(url)
+                else:
+                    result = downloader.download_audio_from_yturl(url, index=idx)
+                    if isinstance(result, tuple):
+                        wav_path, duration = result
+                        if wav_path:
+                            print(f"✅ Saved: {wav_path}")
+                    else:
+                        if result:
+                            print(f"✅ Saved: {result}")
+            print("\n🎉 Batch download completed")
+            return
+        # Fallback to interactive
         url = input("Enter Youtube URL: ")
         if test_duration:
             downloader.test_video_duration_extraction(url)
