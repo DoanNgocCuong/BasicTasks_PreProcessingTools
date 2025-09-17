@@ -137,10 +137,13 @@ class YouTubeAudioDownloaderAlternative:
         print("🔧 ============================================")
         print(f"🎵 Starting pytube download for video {index}")
         
-        # Generate unique output filename
-        timestamp = int(time.time() * 1000)
-        process_id = os.getpid()
-        wav_file = self.output_dir / f"youtube_audio_pytube_{index}_{timestamp}_{process_id}.wav"
+        # Generate compact, descriptive filename when run as script (basename may be injected)
+        custom_base = getattr(self, '_current_basename', None)
+        if custom_base:
+            wav_file = self.output_dir / f"{custom_base}.wav"
+        else:
+            timestamp = int(time.time() * 1000)
+            wav_file = self.output_dir / f"yt_{index}_{timestamp}.wav"
         temp_audio_file = None
         
         try:
@@ -151,10 +154,7 @@ class YouTubeAudioDownloaderAlternative:
             print(f"📺 Video: {yt.title[:50]}...")
             print(f"📏 Duration: {yt.length//60}m {yt.length%60}s")
             
-            # Check duration limit (5 minutes = 300 seconds)
-            if yt.length > 300:
-                print(f"⏭️  Video too long ({yt.length//60}m {yt.length%60}s > 5m), skipping...")
-                return None
+            # No duration limit here; crawler decides whether to skip by length
             
             # Get best audio stream
             print("🔍 Getting audio streams...")
@@ -168,7 +168,7 @@ class YouTubeAudioDownloaderAlternative:
             
             # Download audio
             print("⏬ Downloading audio...")
-            temp_filename = f"temp_audio_{index}_{timestamp}.{audio_stream.subtype}"
+            temp_filename = f"tmp_{index}.{audio_stream.subtype}"
             temp_audio_file = self.output_dir / temp_filename
             
             audio_stream.download(output_path=str(self.output_dir), filename=temp_filename)
@@ -185,13 +185,13 @@ class YouTubeAudioDownloaderAlternative:
             # Use ffmpeg to convert to WAV
             try:
                 stream = ffmpeg.input(str(temp_audio_file))
+                # No time cap; convert full audio
                 stream = ffmpeg.output(
                     stream, 
                     str(wav_file),
                     acodec='pcm_s16le',  # WAV PCM format
                     ar=16000,  # 16kHz sample rate
-                    ac=1,  # Mono
-                    t=300  # Max 5 minutes
+                    ac=1  # Mono
                 )
                 ffmpeg.run(stream, quiet=True, overwrite_output=True)
                 
@@ -280,13 +280,111 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     base_dir = Path(__file__).parent
     default_urls_file = base_dir / 'youtube_url_outputs' / 'collected_video_urls.txt'
-    downloader = YouTubeAudioDownloaderAlternative()
+    # When executed directly, use final audio folder and manifest
+    final_output_dir = 'final_audio_files'
+    downloader = YouTubeAudioDownloaderAlternative(output_dir=final_output_dir)
+    manifest_path = base_dir / final_output_dir / 'manifest.json'
+    
+    def _load_manifest(path: Path):
+        try:
+            if path.exists():
+                return json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+        return []
+    
+    def _save_manifest(path: Path, records):
+        try:
+            path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding='utf-8')
+        except Exception as e:
+            print(f"⚠️ Unable to write manifest: {e}")
+    
+    def _index_manifest(records):
+        by_id = {}
+        for rec in records:
+            vid = rec.get('video_id')
+            if vid:
+                by_id[vid] = rec
+        return by_id
+    
+    import json
+    manifest_records = _load_manifest(manifest_path)
+    manifest_index = _index_manifest(manifest_records)
+
+    def _to_camel_case_lower_suffix(text: str, max_len: int = 40) -> str:
+        try:
+            import re
+            words = re.split(r'[^a-z0-9]+', (text or '').lower())
+            words = [w for w in words if w]
+            camel = ''.join(w.capitalize() for w in words)
+            return camel[:max_len] if camel else 'NoTitle'
+        except Exception:
+            return 'NoTitle'
+
+    def _build_basename(idx: int, url: str) -> str:
+        # Try to derive title via pytube (cheap; already used later)
+        title = None
+        try:
+            yt_tmp = YouTube(url)
+            title = yt_tmp.title
+        except Exception:
+            title = None
+        # Extract video id
+        vid_local = None
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(url)
+            if 'youtube.com' in parsed.netloc:
+                vid_local = parse_qs(parsed.query).get('v', [None])[0]
+            elif 'youtu.be' in parsed.netloc:
+                vid_local = parsed.path[1:]
+        except Exception:
+            pass
+        camel = _to_camel_case_lower_suffix(title)
+        short_id = (vid_local or 'noid')[:8]
+        return f"{idx:04d}_{short_id}_{camel}"
 
     def run_single(url: str, index: int):
+        vid = None
+        # Simple video_id extract
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(url)
+            if 'youtube.com' in parsed.netloc:
+                vid = parse_qs(parsed.query).get('v', [None])[0]
+            elif 'youtu.be' in parsed.netloc:
+                vid = parsed.path[1:]
+        except Exception:
+            vid = None
+        if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+            print("⏭️  Already downloaded (manifest) - skipping")
+            return
+        try:
+            downloader._current_basename = _build_basename(index, url)
+        except Exception:
+            downloader._current_basename = None
         result = downloader.download_audio_pytube(url, index=index)
+        downloader._current_basename = None
         if result:
             wav_file, duration = result
             print(f"✅ Saved: {wav_file} ({duration}s)")
+            # Update manifest
+            record = {
+                'video_id': vid or '',
+                'url': url,
+                'output_path': wav_file,
+                'status': 'success',
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                'duration_seconds': duration
+            }
+            if vid:
+                manifest_index[vid] = record
+                # Merge preserving any records without video_id
+                others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
+                manifest_records[:] = others + list(manifest_index.values())
+            else:
+                manifest_records.append(record)
+            _save_manifest(manifest_path, manifest_records)
         else:
             print("❌ Download failed")
 

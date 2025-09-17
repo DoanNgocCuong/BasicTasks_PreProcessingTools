@@ -198,9 +198,15 @@ class EnvironmentConfig:
     
     # Audio Processing Configuration
     @property
-    def MAX_AUDIO_DURATION_SECONDS(self) -> int:
-        """Maximum audio duration to process in seconds."""
-        return self.get_env('MAX_AUDIO_DURATION_SECONDS', default=300, var_type=int)
+    def MAX_AUDIO_DURATION_SECONDS(self) -> Optional[int]:
+        """Maximum audio duration to process in seconds. None means unlimited."""
+        value = self.get_env('MAX_AUDIO_DURATION_SECONDS', default=None)
+        try:
+            if value is None or str(value).strip() == '':
+                return None
+            return int(value)
+        except (ValueError, TypeError):
+            return None
     
     @property
     def AUDIO_QUALITY(self) -> str:
@@ -296,7 +302,8 @@ class EnvironmentConfig:
         for i, api_key in enumerate(api_keys, 1):
             print(f"YouTube API Key {i}: {'*' * 20}...{api_key[-4:]}")
         print(f"Total API Keys Available: {len(api_keys)}")
-        print(f"Max Audio Duration: {self.MAX_AUDIO_DURATION_SECONDS}s")
+        max_dur = self.MAX_AUDIO_DURATION_SECONDS
+        print(f"Max Audio Duration: {'unlimited' if max_dur is None else str(max_dur)+'s'}")
         print(f"Audio Quality: {self.AUDIO_QUALITY}")
         print(f"Whisper Model: {self.WHISPER_MODEL_SIZE}")
         print(f"Wav2Vec2 Model: {self.WAV2VEC2_MODEL}")

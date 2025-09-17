@@ -98,10 +98,17 @@ class Config:
     
     def get_m4a_filename(self, index):
         """Get the m4a filename for a given index."""
+        # Allow run-as-script to inject a custom base name
+        custom_base = getattr(self, '_current_basename', None)
+        if custom_base:
+            return f'{custom_base}.m4a'
         return f'output_{index}.m4a'
     
     def get_wav_filename(self, index):
         """Get the wav filename for a given index."""
+        custom_base = getattr(self, '_current_basename', None)
+        if custom_base:
+            return f'{custom_base}.wav'
         return f'output_{index}.wav'
 
 
@@ -533,7 +540,7 @@ class YoutubeAudioDownloader:
         """
         self._rate_limit_delay()
         
-        # Get video duration first
+        # Optionally get video duration for manifest metadata; do not enforce any length limit here
         video_duration = self.get_video_duration(url)
         
         # Ensure output directory exists (thread-safe)
@@ -1161,6 +1168,60 @@ class YoutubeAudioDownloader:
 def main():
     """Main function to handle command line interface."""
     config = Config()
+    # When executed as a script, redirect outputs to final audio folder and use a JSON manifest
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    final_output_dir = os.path.join(base_dir, 'final_audio_files')
+    os.makedirs(final_output_dir, exist_ok=True)
+    config.output_dir = final_output_dir
+    
+    manifest_path = os.path.join(final_output_dir, 'manifest.json')
+    
+    def _load_manifest(path):
+        try:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return data
+        except Exception:
+            pass
+        return []
+    
+    def _save_manifest(path, records):
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(records, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"⚠️ Unable to write manifest: {e}")
+    
+    def _index_manifest(records):
+        by_id = {}
+        for rec in records:
+            vid = rec.get('video_id')
+            if vid:
+                by_id[vid] = rec
+        return by_id
+    
+    manifest_records = _load_manifest(manifest_path)
+    manifest_index = _index_manifest(manifest_records)
+
+    def _to_camel_case_lower_suffix(text: str, max_len: int = 40) -> str:
+        try:
+            import re
+            words = re.split(r'[^a-z0-9]+', (text or '').lower())
+            words = [w for w in words if w]
+            camel = ''.join(w.capitalize() for w in words)
+            return camel[:max_len] if camel else 'NoTitle'
+        except Exception:
+            return 'NoTitle'
+    
+    def _build_basename(idx: int, url: str) -> str:
+        vid = downloader._extract_video_id(url)
+        info = downloader.get_video_info_with_duration(url) if not test_duration else None
+        title = (info or {}).get('title') if info else None
+        camel = _to_camel_case_lower_suffix(title)
+        short_id = (vid or 'noid')[:8]
+        return f"{idx:04d}_{short_id}_{camel}"
     
     args = sys.argv[1:]
     
@@ -1195,6 +1256,8 @@ def main():
     
     # Initialize downloader with cookie settings
     downloader = YoutubeAudioDownloader(config, cookies_file, cookies_browser)
+    # Allow unlimited length when running as a script
+    setattr(downloader, 'no_length_limit', True)
     
     if len(args) > 3:
         print("Too many arguments.")
@@ -1238,7 +1301,6 @@ def main():
     
     if len(args) == 0:
         # Batch mode if no args and collected file exists or --from-file provided
-        base_dir = os.path.dirname(os.path.abspath(__file__))
         default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
         urls_file = from_file_path or (default_urls_file if os.path.exists(default_urls_file) else None)
         if urls_file:
@@ -1251,14 +1313,43 @@ def main():
             print(f"🔢 Total URLs: {len(urls)}")
             for idx, url in enumerate(urls, start=1):
                 print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+                # Skip if already downloaded per manifest
+                vid = downloader._extract_video_id(url)
+                if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+                    print("⏭️  Already downloaded (manifest) - skipping")
+                    continue
                 if test_duration:
                     downloader.test_video_duration_extraction(url)
                 else:
+                    # Set per-download basename for nicer filenames
+                    try:
+                        config._current_basename = _build_basename(idx, url)
+                    except Exception:
+                        config._current_basename = None
                     result = downloader.download_audio_from_yturl(url, index=idx)
+                    # Clear basename to avoid leaking into next calls unexpectedly
+                    config._current_basename = None
                     if isinstance(result, tuple):
                         wav_path, duration = result
                         if wav_path:
                             print(f"✅ Saved: {wav_path}")
+                            # Update manifest on success
+                            record = {
+                                'video_id': vid or '',
+                                'url': url,
+                                'output_path': wav_path,
+                                'status': 'success',
+                                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                                'duration_seconds': duration
+                            }
+                            if vid:
+                                manifest_index[vid] = record
+                                # Rebuild records from index while preserving any without video_id
+                                others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
+                                manifest_records = others + list(manifest_index.values())
+                            else:
+                                manifest_records.append(record)
+                            _save_manifest(manifest_path, manifest_records)
                     else:
                         if result:
                             print(f"✅ Saved: {result}")
@@ -1269,7 +1360,18 @@ def main():
         if test_duration:
             downloader.test_video_duration_extraction(url)
         else:
+            # Skip if already downloaded per manifest
+            vid = downloader._extract_video_id(url)
+            if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+                print("⏭️  Already downloaded (manifest) - skipping")
+                return
+            # Set per-download basename (single run: index 1)
+            try:
+                config._current_basename = _build_basename(1, url)
+            except Exception:
+                config._current_basename = None
             result = downloader.download_audio_from_yturl(url)
+            config._current_basename = None
             if isinstance(result, tuple):
                 wav_path, duration = result
                 print(f"✅ Audio downloaded to: {wav_path}")
@@ -1277,6 +1379,24 @@ def main():
                     minutes = int(duration // 60)
                     seconds = int(duration % 60)
                     print(f"📏 Video duration: {minutes}:{seconds:02d}")
+                # Update manifest on success
+                vid = downloader._extract_video_id(url)
+                if wav_path:
+                    record = {
+                        'video_id': vid or '',
+                        'url': url,
+                        'output_path': wav_path,
+                        'status': 'success',
+                        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                        'duration_seconds': duration
+                    }
+                    if vid:
+                        manifest_index[vid] = record
+                        others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
+                        manifest_records = others + list(manifest_index.values())
+                    else:
+                        manifest_records.append(record)
+                    _save_manifest(manifest_path, manifest_records)
             else:
                 # Handle backward compatibility
                 print(f"✅ Audio downloaded to: {result}")
@@ -1285,7 +1405,17 @@ def main():
         if test_duration:
             downloader.test_video_duration_extraction(url)
         else:
+            # Skip if already downloaded per manifest
+            vid = downloader._extract_video_id(url)
+            if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+                print("⏭️  Already downloaded (manifest) - skipping")
+                return
+            try:
+                config._current_basename = _build_basename(1, url)
+            except Exception:
+                config._current_basename = None
             result = downloader.download_audio_from_yturl(url)
+            config._current_basename = None
             if isinstance(result, tuple):
                 wav_path, duration = result
                 print(f"✅ Audio downloaded to: {wav_path}")
@@ -1293,6 +1423,24 @@ def main():
                     minutes = int(duration // 60)
                     seconds = int(duration % 60)
                     print(f"📏 Video duration: {minutes}:{seconds:02d}")
+                # Update manifest on success
+                vid = downloader._extract_video_id(url)
+                if wav_path:
+                    record = {
+                        'video_id': vid or '',
+                        'url': url,
+                        'output_path': wav_path,
+                        'status': 'success',
+                        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                        'duration_seconds': duration
+                    }
+                    if vid:
+                        manifest_index[vid] = record
+                        others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
+                        manifest_records = others + list(manifest_index.values())
+                    else:
+                        manifest_records.append(record)
+                    _save_manifest(manifest_path, manifest_records)
             else:
                 # Handle backward compatibility
                 print(f"✅ Audio downloaded to: {result}")

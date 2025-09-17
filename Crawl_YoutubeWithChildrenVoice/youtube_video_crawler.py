@@ -809,6 +809,24 @@ class YouTubeVideoCrawler:
         self.start_time = time.time()
         self.start_datetime = datetime.now()
         
+    def _ensure_video_duration_seconds(self, video: Dict) -> None:
+        """Ensure the video dict has numeric 'duration' in seconds when a max limit is configured."""
+        try:
+            max_limit = config.MAX_AUDIO_DURATION_SECONDS
+            if max_limit is None:
+                return
+            has_duration = video.get('duration') is not None
+            if has_duration:
+                return
+            # Try fetching duration via YouTube Data API for this single video
+            if self.youtube_service and video.get('video_id'):
+                metadata = self.get_video_metadata_via_api([video['video_id']])
+                if metadata and video['video_id'] in metadata:
+                    video['duration'] = metadata[video['video_id']].get('duration_seconds')
+        except Exception:
+            # Non-fatal; if we cannot resolve duration we don't alter the video
+            pass
+
     def _get_api_keys(self) -> list[str]:
         """Get and validate API keys from environment configuration."""
         try:
@@ -1142,12 +1160,15 @@ class YouTubeVideoCrawler:
         wav_file_path = None  # Initialize to handle cleanup in exception cases
         
         # Check video duration limit before any processing (skip if too long)
-        # Use configured duration limit from environment (no hardcoded fallback)
+        # Use configured duration limit from environment; if None, no limit
         MAX_VIDEO_DURATION_SECONDS = config.MAX_AUDIO_DURATION_SECONDS
             
         try:
+            # Ensure we have a duration when limit is set
+            if MAX_VIDEO_DURATION_SECONDS is not None:
+                self._ensure_video_duration_seconds(video)
             # Get video duration from metadata if available
-            if 'duration' in video and video['duration']:
+            if 'duration' in video and video['duration'] and MAX_VIDEO_DURATION_SECONDS is not None:
                 # Duration might be in ISO 8601 format (PT1M30S) or seconds
                 duration_str = video['duration']
                 if isinstance(duration_str, str) and duration_str.startswith('PT'):
@@ -1173,7 +1194,7 @@ class YouTubeVideoCrawler:
                                 children_detection_time=0.0,
                                 video_length_seconds=total_seconds
                             )
-                elif isinstance(duration_str, (int, float)):
+                elif isinstance(duration_str, (int, float)) and MAX_VIDEO_DURATION_SECONDS is not None:
                     # Duration already in seconds
                     if duration_str > MAX_VIDEO_DURATION_SECONDS:
                         print(f"⏭️  Skipping long video ({int(duration_str//60)}m {int(duration_str%60)}s > {MAX_VIDEO_DURATION_SECONDS//60}m): {video.get('title', 'Unknown')[:50]}...")
@@ -1776,12 +1797,15 @@ class YouTubeVideoCrawler:
         
         # Additional duration check as fallback (in case pre-filter missed it)
         max_duration = config.MAX_AUDIO_DURATION_SECONDS
-        if video.get('duration') and video['duration'] > max_duration:
-            duration_minutes = int(video['duration'] // 60)
-            duration_seconds = int(video['duration'] % 60)
-            max_minutes = int(max_duration // 60)
-            print(f"⏭️  FALLBACK FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {video['title'][:50]}...")
-            return False
+        if max_duration is not None:
+            # Try to ensure duration before comparing
+            self._ensure_video_duration_seconds(video)
+            if isinstance(video.get('duration'), (int, float)) and video['duration'] > max_duration:
+                duration_minutes = int(video['duration'] // 60)
+                duration_seconds = int(video['duration'] % 60)
+                max_minutes = int(max_duration // 60)
+                print(f"⏭️  FALLBACK FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {video['title'][:50]}...")
+                return False
         
         # Analyze video audio (language detection + children's voice detection)
         print(f"Analyzing video: {video['title']}")
@@ -2051,24 +2075,28 @@ class YouTubeVideoCrawler:
         
         # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
         max_duration = config.MAX_AUDIO_DURATION_SECONDS
-        if similar_video.get('duration') and similar_video['duration'] > max_duration:
-            duration_minutes = int(similar_video['duration'] // 60)
-            duration_seconds = int(similar_video['duration'] % 60)
-            max_minutes = int(max_duration // 60)
-            print(f"⏭️  PRE-FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
-            return False
+        if max_duration is not None:
+            self._ensure_video_duration_seconds(similar_video)
+            if isinstance(similar_video.get('duration'), (int, float)) and similar_video['duration'] > max_duration:
+                duration_minutes = int(similar_video['duration'] // 60)
+                duration_seconds = int(similar_video['duration'] % 60)
+                max_minutes = int(max_duration // 60)
+                print(f"⏭️  PRE-FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
+                return False
         
         # Count similar video as reviewed since we're processing it
         query_stats['videos_reviewed'] += 1
         
         # Additional duration check as fallback (in case pre-filter missed it)
         max_duration = config.MAX_AUDIO_DURATION_SECONDS
-        if similar_video.get('duration') and similar_video['duration'] > max_duration:
-            duration_minutes = int(similar_video['duration'] // 60)
-            duration_seconds = int(similar_video['duration'] % 60)
-            max_minutes = int(max_duration // 60)
-            print(f"⏭️  FALLBACK FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
-            return False
+        if max_duration is not None:
+            self._ensure_video_duration_seconds(similar_video)
+            if isinstance(similar_video.get('duration'), (int, float)) and similar_video['duration'] > max_duration:
+                duration_minutes = int(similar_video['duration'] // 60)
+                duration_seconds = int(similar_video['duration'] % 60)
+                max_minutes = int(max_duration // 60)
+                print(f"⏭️  FALLBACK FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
+                return False
         
         # OPTIMIZED: Analyze similar video audio using combined prediction
         print(f"Analyzing similar video: {similar_video['title']}")
@@ -2246,13 +2274,15 @@ class YouTubeVideoCrawler:
                 
                 # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
                 max_duration = config.MAX_AUDIO_DURATION_SECONDS
-                if current_video_processing.get('duration') and current_video_processing['duration'] > max_duration:
-                    duration_minutes = int(current_video_processing['duration'] // 60)
-                    duration_seconds = int(current_video_processing['duration'] % 60)
-                    max_minutes = int(max_duration // 60)
-                    print(f"⏭️  PRE-FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {current_video_processing['title'][:50]}...")
-                    video_index_current += 1
-                    continue
+                if max_duration is not None:
+                    self._ensure_video_duration_seconds(current_video_processing)
+                    if isinstance(current_video_processing.get('duration'), (int, float)) and current_video_processing['duration'] > max_duration:
+                        duration_minutes = int(current_video_processing['duration'] // 60)
+                        duration_seconds = int(current_video_processing['duration'] % 60)
+                        max_minutes = int(max_duration // 60)
+                        print(f"⏭️  PRE-FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {current_video_processing['title'][:50]}...")
+                        video_index_current += 1
+                        continue
                 
                 # Process the video
                 video_added = self._process_main_video(current_video_processing, query_stats)
