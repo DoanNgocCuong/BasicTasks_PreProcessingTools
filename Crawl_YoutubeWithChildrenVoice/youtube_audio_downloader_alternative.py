@@ -288,14 +288,45 @@ if __name__ == "__main__":
     def _load_manifest(path: Path):
         try:
             if path.exists():
-                return json.loads(path.read_text(encoding='utf-8'))
+                data = json.loads(path.read_text(encoding='utf-8'))
+                # Backward compatibility: older manifests were plain lists
+                if isinstance(data, list):
+                    records = data
+                    total = 0.0
+                    try:
+                        total = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
+                    except Exception:
+                        total = 0.0
+                    return {
+                        'total_duration_seconds': total,
+                        'records': records
+                    }
+                elif isinstance(data, dict):
+                    records = data.get('records', []) or []
+                    # Ensure total exists; if missing, compute from records
+                    if 'total_duration_seconds' not in data:
+                        try:
+                            data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
+                        except Exception:
+                            data['total_duration_seconds'] = 0.0
+                    else:
+                        # Normalize type
+                        try:
+                            data['total_duration_seconds'] = float(data['total_duration_seconds'])
+                        except Exception:
+                            data['total_duration_seconds'] = 0.0
+                    data['records'] = records
+                    return data
         except Exception:
             pass
-        return []
+        return {
+            'total_duration_seconds': 0.0,
+            'records': []
+        }
     
-    def _save_manifest(path: Path, records):
+    def _save_manifest(path: Path, manifest_data):
         try:
-            path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding='utf-8')
+            path.write_text(json.dumps(manifest_data, ensure_ascii=False, indent=2), encoding='utf-8')
         except Exception as e:
             print(f"⚠️ Unable to write manifest: {e}")
     
@@ -308,7 +339,8 @@ if __name__ == "__main__":
         return by_id
     
     import json
-    manifest_records = _load_manifest(manifest_path)
+    manifest_data = _load_manifest(manifest_path)
+    manifest_records = manifest_data.get('records', [])
     manifest_index = _index_manifest(manifest_records)
 
     def _to_camel_case_lower_suffix(text: str, max_len: int = 40) -> str:
@@ -384,7 +416,15 @@ if __name__ == "__main__":
                 manifest_records[:] = others + list(manifest_index.values())
             else:
                 manifest_records.append(record)
-            _save_manifest(manifest_path, manifest_records)
+
+            # Recompute total_duration_seconds to ensure correctness
+            try:
+                manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
+            except Exception:
+                manifest_data['total_duration_seconds'] = 0.0
+            manifest_data['records'] = manifest_records
+
+            _save_manifest(manifest_path, manifest_data)
         else:
             print("❌ Download failed")
 
