@@ -1261,9 +1261,10 @@ class YouTubeVideoCrawler:
             if self.config.enable_language_detection:
                 # OPTIMIZED: Get both language and children's voice detection in one call
                 # This loads audio only ONCE instead of twice (40-50% performance gain)
+                # Pass YouTube URL for transcript-based language detection
                 # Time the children's voice detection portion specifically
                 children_detection_start_time = time.time()
-                combined_result = classifier.get_combined_prediction(wav_file_path)
+                combined_result = classifier.get_combined_prediction(wav_file_path, youtube_url=video['url'])
                 children_detection_duration = time.time() - children_detection_start_time
             else:
                 # Skip language detection, only perform children's voice detection

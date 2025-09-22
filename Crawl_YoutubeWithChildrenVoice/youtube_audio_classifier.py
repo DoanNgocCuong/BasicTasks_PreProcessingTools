@@ -35,6 +35,16 @@ except ImportError:
     config = None
     USE_ENV_CONFIG = False
     print("⚠️ Environment configuration not available, using defaults")
+
+# Import YouTube language classifier
+try:
+    from youtube_language_classifier import YouTubeLanguageClassifier
+    YOUTUBE_TRANSCRIPT_AVAILABLE = True
+    print("✅ YouTube Transcript API language detection available")
+except ImportError:
+    YouTubeLanguageClassifier = None
+    YOUTUBE_TRANSCRIPT_AVAILABLE = False
+    print("⚠️ YouTube Transcript API not available, falling back to audio-based detection")
 from transformers import Wav2Vec2Processor
 from transformers.models.wav2vec2.modeling_wav2vec2 import (
     Wav2Vec2Model,
@@ -345,6 +355,7 @@ class AudioClassifier:
     # Class-level shared instances for memory efficiency
     _shared_classifier = None
     _shared_whisper_model = None
+    _shared_youtube_classifier = None
     
     def __init__(self, model_name=None, child_threshold=None, age_threshold=None):
         """
@@ -403,6 +414,11 @@ class AudioClassifier:
                 torch.cuda.synchronize()
             cls._shared_whisper_model = None
             print("✅ Whisper model cache cleared")
+        
+        if cls._shared_youtube_classifier is not None:
+            print("🗑️ Clearing YouTube language classifier cache...")
+            cls._shared_youtube_classifier = None
+            print("✅ YouTube language classifier cache cleared")
             
         # Force garbage collection
         import gc
@@ -479,6 +495,19 @@ class AudioClassifier:
         else:
             print("🔄 Reusing existing Whisper model")
         return AudioClassifier._shared_whisper_model
+    
+    def _get_youtube_classifier(self):
+        """Get or create YouTube language classifier instance"""
+        if not YOUTUBE_TRANSCRIPT_AVAILABLE:
+            return None
+            
+        if AudioClassifier._shared_youtube_classifier is None:
+            print("🚀 Initializing YouTube Transcript API language classifier...")
+            AudioClassifier._shared_youtube_classifier = YouTubeLanguageClassifier()
+            print("✅ YouTube language classifier initialized")
+        else:
+            print("🔄 Reusing existing YouTube language classifier")
+        return AudioClassifier._shared_youtube_classifier
 
     def is_vietnamese(self, audio_path: str) -> Optional[bool]:
         """
@@ -550,6 +579,44 @@ class AudioClassifier:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             return None
+    
+    def is_vietnamese_from_youtube_url(self, youtube_url: str) -> bool:
+        """
+        Determines whether a YouTube video is in Vietnamese using transcript API.
+        This is faster and more reliable than audio-based detection for YouTube content.
+        When transcripts are not available, assumes the video is Vietnamese.
+
+        Args:
+            youtube_url (str): YouTube video URL
+
+        Returns:
+            bool: True if the video is Vietnamese or if transcript detection fails, False otherwise.
+        """
+        youtube_classifier = self._get_youtube_classifier()
+        if not youtube_classifier:
+            print("⚠️ YouTube transcript API not available, assuming video is Vietnamese")
+            return True
+        
+        try:
+            result = youtube_classifier.detect_language_from_url(youtube_url)
+            
+            if result['error']:
+                print(f"⚠️ YouTube transcript detection failed: {result['error']}")
+                print("  Assuming video is Vietnamese")
+                return True
+            
+            detected_language = result['detected_language']
+            is_vietnamese = result['is_vietnamese']
+            confidence = result['confidence']
+            
+            print(f"  📄 Transcript detected language: {detected_language} (confidence: {confidence:.3f})")
+            
+            return is_vietnamese
+            
+        except Exception as e:
+            print(f"⚠️ YouTube transcript detection error: {e}")
+            print("  Assuming video is Vietnamese")
+            return True
     
     def _load_audio_once(self, audio_path: str):
         """Load audio once for both age detection and language detection"""
@@ -704,12 +771,14 @@ class AudioClassifier:
                 torch.cuda.empty_cache()
             return None
 
-    def get_combined_prediction(self, audio_path: str) -> dict:
+    def get_combined_prediction(self, audio_path: str, youtube_url: Optional[str] = None) -> dict:
         """
-        Get combined prediction with shared audio loading and improved memory management
+        Get combined prediction with shared audio loading and improved memory management.
+        Uses YouTube transcript API for language detection when available, falling back to audio-based detection.
         
         Args:
             audio_path (str): Path to the .wav audio file.
+            youtube_url (Optional[str]): YouTube URL for transcript-based language detection.
             
         Returns:
             dict: Combined prediction results with both age/gender and language detection
@@ -721,7 +790,13 @@ class AudioClassifier:
                 return {"error": "Failed to load audio file"}
             
             # Get language detection first (less memory intensive)
-            is_vietnamese = self._detect_language_from_audio_data(audio_data)
+            # Try YouTube transcript API first if URL is provided
+            if youtube_url:
+                print("🚀 Attempting transcript-based language detection...")
+                is_vietnamese = self.is_vietnamese_from_youtube_url(youtube_url)
+            else:
+                print("🔄 Using audio-based language detection...")
+                is_vietnamese = self._detect_language_from_audio_data(audio_data)
             
             # Skip age detection if not Vietnamese - performance optimization
             if not is_vietnamese:

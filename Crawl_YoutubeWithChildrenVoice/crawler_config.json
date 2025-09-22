@@ -1,7 +1,7 @@
 {
   "debug_mode": true,
   "target_videos_per_query": 250,
-  "enable_language_detection": false,
+  "enable_language_detection": true,
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
   "search_queries": [
     "bé",
