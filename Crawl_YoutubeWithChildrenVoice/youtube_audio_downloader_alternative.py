@@ -343,6 +343,76 @@ if __name__ == "__main__":
     manifest_records = manifest_data.get('records', [])
     manifest_index = _index_manifest(manifest_records)
 
+    # Backfill missing titles by downloading and then deleting the file
+    def _backfill_missing_titles_by_download():
+        updated = False
+        updated_count = 0
+        total_missing = sum(1 for r in manifest_records if r.get('status') == 'success' and not r.get('title'))
+        if total_missing:
+            print(f"🔧 Backfilling titles for {total_missing} records without titles...")
+        for idx_bf, rec in enumerate(manifest_records, start=1):
+            try:
+                if rec.get('status') == 'success' and not rec.get('title'):
+                    url_val = rec.get('url')
+                    if not url_val:
+                        # Try reconstruct from video_id
+                        vid_local = rec.get('video_id')
+                        if vid_local:
+                            url_val = f"https://www.youtube.com/watch?v={vid_local}"
+                    if not url_val:
+                        continue
+                    title_val = None
+                    # Download to a temporary directory and delete afterward
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        try:
+                            yt_tmp2 = YouTube(url_val)
+                            audio_stream = yt_tmp2.streams.filter(only_audio=True).order_by('abr').desc().first()
+                            if audio_stream is not None:
+                                temp_name = f"tmp_title_fetch.{audio_stream.subtype}"
+                                temp_path = Path(tmpdir) / temp_name
+                                audio_stream.download(output_path=tmpdir, filename=temp_name)
+                                # We only needed to perform a download; we don't keep the file
+                                title_val = yt_tmp2.title
+                                try:
+                                    if temp_path.exists():
+                                        temp_path.unlink()
+                                except Exception:
+                                    pass
+                            else:
+                                # Even if no stream, try to use the title if accessible
+                                title_val = yt_tmp2.title
+                        except Exception:
+                            title_val = None
+                    if title_val:
+                        rec['title'] = title_val
+                        updated = True
+                        updated_count += 1
+                        try:
+                            vid_print = rec.get('video_id') or url_val
+                            print(f"📝 Title added for {vid_print}: {title_val}")
+                        except Exception:
+                            pass
+                        # Persist incrementally so progress is visible
+                        try:
+                            manifest_data['records'] = manifest_records
+                            _save_manifest(manifest_path, manifest_data)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        if updated:
+            try:
+                manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
+            except Exception:
+                manifest_data['total_duration_seconds'] = 0.0
+            manifest_data['records'] = manifest_records
+            _save_manifest(manifest_path, manifest_data)
+            print(f"✅ Backfill complete. Updated titles for {updated_count} record(s).")
+        elif total_missing:
+            print("⚠️ Backfill attempted, but no titles could be updated.")
+
+    _backfill_missing_titles_by_download()
+
     def _to_camel_case_lower_suffix(text: str, max_len: int = 40) -> str:
         try:
             import re
@@ -401,13 +471,21 @@ if __name__ == "__main__":
             wav_file, duration = result
             print(f"✅ Saved: {wav_file} ({duration}s)")
             # Update manifest
+            # Try to fetch full title for manifest
+            title_val = ''
+            try:
+                yt_tmp2 = YouTube(url)
+                title_val = yt_tmp2.title or ''
+            except Exception:
+                title_val = ''
             record = {
                 'video_id': vid or '',
                 'url': url,
                 'output_path': wav_file,
                 'status': 'success',
                 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                'duration_seconds': duration
+                'duration_seconds': duration,
+                'title': title_val
             }
             if vid:
                 manifest_index[vid] = record
