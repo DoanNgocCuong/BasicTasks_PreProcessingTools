@@ -16,6 +16,7 @@ import shutil
 import warnings
 import logging
 import importlib.util
+import threading
 from pathlib import Path
 from typing import Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -356,6 +357,7 @@ class AudioClassifier:
     _shared_classifier = None
     _shared_whisper_model = None
     _shared_youtube_classifier = None
+    _lock = threading.Lock()  # Thread safety for shared instances
     
     def __init__(self, model_name=None, child_threshold=None, age_threshold=None):
         """
@@ -380,49 +382,51 @@ class AudioClassifier:
         self.classifier = self._get_or_create_classifier(model_name, child_threshold, age_threshold)
     
     def _get_or_create_classifier(self, model_name, child_threshold, age_threshold):
-        """Get existing classifier or create new one if parameters differ"""
-        if (self._shared_classifier is not None and
-            self._shared_classifier.model_name == model_name and
-            self._shared_classifier.child_threshold == child_threshold and
-            self._shared_classifier.age_threshold == age_threshold):
-            print("🔄 Reusing existing model (model already loaded)")
-            return self._shared_classifier
-        else:
-            print("🚀 Loading model for the first time...")
-            classifier = BaseAudioClassifier(model_name, child_threshold, age_threshold)
-            AudioClassifier._shared_classifier = classifier
-            print("✅ Model loaded and cached for future use")
-            return classifier
+        """Get existing classifier or create new one if parameters differ (thread-safe)"""
+        with AudioClassifier._lock:
+            if (self._shared_classifier is not None and
+                self._shared_classifier.model_name == model_name and
+                self._shared_classifier.child_threshold == child_threshold and
+                self._shared_classifier.age_threshold == age_threshold):
+                print("🔄 Reusing existing model (model already loaded)")
+                return self._shared_classifier
+            else:
+                print("🚀 Loading model for the first time...")
+                classifier = BaseAudioClassifier(model_name, child_threshold, age_threshold)
+                AudioClassifier._shared_classifier = classifier
+                print("✅ Model loaded and cached for future use")
+                return classifier
     
     @classmethod
     def clear_model_cache(cls):
-        """Clear cached model instances to free memory"""
-        if cls._shared_classifier is not None:
-            print("🗑️ Clearing audio classifier cache...")
-            # Clear CUDA cache if available
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-            cls._shared_classifier = None
-            print("✅ Audio classifier cache cleared")
-        
-        if cls._shared_whisper_model is not None:
-            print("🗑️ Clearing Whisper model cache...")
-            # Clear CUDA cache if available
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-            cls._shared_whisper_model = None
-            print("✅ Whisper model cache cleared")
-        
-        if cls._shared_youtube_classifier is not None:
-            print("🗑️ Clearing YouTube language classifier cache...")
-            cls._shared_youtube_classifier = None
-            print("✅ YouTube language classifier cache cleared")
+        """Clear cached model instances to free memory (thread-safe)"""
+        with cls._lock:
+            if cls._shared_classifier is not None:
+                print("🗑️ Clearing audio classifier cache...")
+                # Clear CUDA cache if available
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                cls._shared_classifier = None
+                print("✅ Audio classifier cache cleared")
             
-        # Force garbage collection
-        import gc
-        gc.collect()
+            if cls._shared_whisper_model is not None:
+                print("🗑️ Clearing Whisper model cache...")
+                # Clear CUDA cache if available
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                cls._shared_whisper_model = None
+                print("✅ Whisper model cache cleared")
+            
+            if cls._shared_youtube_classifier is not None:
+                print("🗑️ Clearing YouTube language classifier cache...")
+                cls._shared_youtube_classifier = None
+                print("✅ YouTube language classifier cache cleared")
+                
+            # Force garbage collection
+            import gc
+            gc.collect()
         
     @classmethod
     def clear_cuda_memory(cls):
@@ -481,33 +485,35 @@ class AudioClassifier:
             return None
     
     def _get_whisper_model(self):
-        """Get or load Whisper model for language detection"""
-        if AudioClassifier._shared_whisper_model is None:
-            # Use environment configuration for model size
-            if USE_ENV_CONFIG and config is not None:
-                model_size = config.WHISPER_MODEL_SIZE
+        """Get or load Whisper model for language detection (thread-safe)"""
+        with AudioClassifier._lock:
+            if AudioClassifier._shared_whisper_model is None:
+                # Use environment configuration for model size
+                if USE_ENV_CONFIG and config is not None:
+                    model_size = config.WHISPER_MODEL_SIZE
+                else:
+                    model_size = "tiny"
+                    
+                print(f"🚀 Loading Whisper {model_size} model for language detection...")
+                AudioClassifier._shared_whisper_model = whisper.load_model(model_size)
+                print("✅ Whisper model loaded and cached")
             else:
-                model_size = "tiny"
-                
-            print(f"🚀 Loading Whisper {model_size} model for language detection...")
-            AudioClassifier._shared_whisper_model = whisper.load_model(model_size)
-            print("✅ Whisper model loaded and cached")
-        else:
-            print("🔄 Reusing existing Whisper model")
-        return AudioClassifier._shared_whisper_model
+                print("🔄 Reusing existing Whisper model")
+            return AudioClassifier._shared_whisper_model
     
     def _get_youtube_classifier(self):
-        """Get or create YouTube language classifier instance"""
+        """Get or create YouTube language classifier instance (thread-safe)"""
         if not YOUTUBE_TRANSCRIPT_AVAILABLE:
             return None
             
-        if AudioClassifier._shared_youtube_classifier is None:
-            print("🚀 Initializing YouTube Transcript API language classifier...")
-            AudioClassifier._shared_youtube_classifier = YouTubeLanguageClassifier()
-            print("✅ YouTube language classifier initialized")
-        else:
-            print("🔄 Reusing existing YouTube language classifier")
-        return AudioClassifier._shared_youtube_classifier
+        with AudioClassifier._lock:
+            if AudioClassifier._shared_youtube_classifier is None:
+                print("🚀 Initializing YouTube Transcript API language classifier...")
+                AudioClassifier._shared_youtube_classifier = YouTubeLanguageClassifier()
+                print("✅ YouTube language classifier initialized")
+            else:
+                print("🔄 Reusing existing YouTube language classifier")
+            return AudioClassifier._shared_youtube_classifier
 
     def is_vietnamese(self, audio_path: str) -> Optional[bool]:
         """
@@ -1022,7 +1028,8 @@ def _process_single_url(url: str, index: int, classifier, downloader) -> str:
         print(f"  [{index+1}] Audio saved, classifying...")
         
         # Use optimized combined prediction (loads audio only once)
-        prediction_result = classifier.get_combined_prediction(audio_file_path)
+        # Pass YouTube URL for transcript-based language detection
+        prediction_result = classifier.get_combined_prediction(audio_file_path, youtube_url=url)
         
         # Clean up the audio file immediately after processing
         _cleanup_audio_file(audio_file_path)
