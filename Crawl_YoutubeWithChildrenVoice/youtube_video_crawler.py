@@ -477,11 +477,14 @@ class CollectionReporter:
         estimated_chunks = int(duration / chunk_size) + (1 if duration % chunk_size > 0 else 0)
         print(f"🧩 Starting chunk analysis for '{truncated_title}' ({duration:.1f}s → ~{estimated_chunks} chunks)")
     
-    def report_chunk_analysis_result(self, chunks_analyzed: int, positive_chunk: Optional[int], was_successful: bool) -> None:
+    def report_chunk_analysis_result(self, chunks_analyzed: int, positive_chunk: Optional[int], was_successful: bool, was_early_exit: bool = False, early_exit_reason: str = "") -> None:
         """Report chunk analysis completion."""
         if was_successful and positive_chunk:
             print(f"🎯 SUCCESS: Found children's voice in chunk {positive_chunk}/{chunks_analyzed}")
             print(f"⚡ Early exit saved {chunks_analyzed - positive_chunk} chunk analysis")
+        elif was_early_exit:
+            print(f"⏭️  EARLY EXIT: {early_exit_reason}")
+            print(f"📊 Analyzed {chunks_analyzed} chunks before exit")
         else:
             print(f"❌ No children's voice found in any of {chunks_analyzed} chunks")
     
@@ -1428,6 +1431,11 @@ class YouTubeVideoCrawler:
             # Get shared classifier
             classifier = self._get_shared_classifier()
             
+            # Track consecutive disqualified chunks for early exit
+            consecutive_disqualified_count = 0
+            MAX_CONSECUTIVE_DISQUALIFIED = 3
+            chunk_index = 0  # Initialize in case loop exits early
+            
             # Analyze chunks sequentially with early exit
             for chunk_index, chunk_file in enumerate(chunk_files, 1):
                 print(f"\n🔍 Analyzing chunk {chunk_index}/{len(chunk_files)}...")
@@ -1463,6 +1471,14 @@ class YouTubeVideoCrawler:
                     # Check for critical errors
                     if "error" in combined_result and "age_detection_failed" not in combined_result:
                         print(f"❌ Chunk {chunk_index} analysis failed: {combined_result['error']}")
+                        consecutive_disqualified_count += 1
+                        
+                        # Check for consecutive failure threshold
+                        if consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED:
+                            print(f"⏭️  EARLY EXIT: {MAX_CONSECUTIVE_DISQUALIFIED} consecutive chunk analysis failures")
+                            print(f"⚡ Skipping remaining {len(chunk_files) - chunk_index} chunks to save time")
+                            break
+                        
                         continue  # Try next chunk
                     
                     # Extract results
@@ -1487,6 +1503,13 @@ class YouTubeVideoCrawler:
                         # Clean up chunk files
                         self._cleanup_chunk_files(chunk_files)
                         
+                        # Report successful early exit
+                        self.reporter.report_chunk_analysis_result(
+                            chunk_index, 
+                            chunk_index, 
+                            True
+                        )
+                        
                         # Return positive result
                         total_analysis_time = time.time() - analysis_start_time
                         return AnalysisResult(
@@ -1503,26 +1526,78 @@ class YouTubeVideoCrawler:
                             was_chunked=True
                         )
                     else:
-                        # This chunk doesn't meet criteria, continue to next
+                        # This chunk doesn't meet full criteria
                         reasons = []
                         if not is_vietnamese:
                             reasons.append(f"not Vietnamese (detected: {combined_result.get('detected_language', 'unknown')})")
                         if not children_voice_result:
                             reasons.append("no children's voice detected")
+                        
                         print(f"❌ Chunk {chunk_index}: {', '.join(reasons)}")
+                        
+                        # Only count as disqualified if not Vietnamese
+                        # Vietnamese content without children's voice still shows promise
+                        if not is_vietnamese:
+                            consecutive_disqualified_count += 1
+                        else:
+                            # Reset counter for Vietnamese content (shows video has potential)
+                            print(f"🔄 Vietnamese content detected - resetting consecutive counter")
+                            consecutive_disqualified_count = 0
+                        
+                        # Check for consecutive disqualification threshold
+                        if consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED:
+                            print(f"⏭️  EARLY EXIT: {MAX_CONSECUTIVE_DISQUALIFIED} consecutive non-Vietnamese chunks")
+                            print(f"📊 Pattern suggests video unlikely to contain Vietnamese children's content")
+                            print(f"⚡ Skipping remaining {len(chunk_files) - chunk_index} chunks to save time")
+                            break
+                        
                         continue
                         
                 except Exception as e:
                     print(f"❌ Error analyzing chunk {chunk_index}: {e}")
+                    consecutive_disqualified_count += 1
+                    
+                    # Check for consecutive error threshold
+                    if consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED:
+                        print(f"⏭️  EARLY EXIT: {MAX_CONSECUTIVE_DISQUALIFIED} consecutive chunk errors")
+                        print(f"⚡ Skipping remaining {len(chunk_files) - chunk_index} chunks due to persistent errors")
+                        break
+                    
                     continue  # Try next chunk
             
-            # If we get here, no chunk met the criteria
-            print(f"❌ No chunks contained Vietnamese children's voice ({len(chunk_files)} chunks analyzed)")
+            # If we get here, no chunk met the criteria or we had early exit
+            was_early_exit = consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED
+            
+            if was_early_exit:
+                print(f"❌ Analysis terminated early due to {MAX_CONSECUTIVE_DISQUALIFIED} consecutive non-Vietnamese chunks")
+                print(f"📊 Analyzed {chunk_index}/{len(chunk_files)} chunks before early exit")
+                
+                # Report early exit
+                self.reporter.report_chunk_analysis_result(
+                    chunk_index, 
+                    None, 
+                    False, 
+                    was_early_exit=True, 
+                    early_exit_reason=f"{MAX_CONSECUTIVE_DISQUALIFIED} consecutive non-Vietnamese chunks"
+                )
+            else:
+                print(f"❌ No chunks contained Vietnamese children's voice ({len(chunk_files)} chunks analyzed)")
+                
+                # Report normal completion
+                self.reporter.report_chunk_analysis_result(
+                    len(chunk_files), 
+                    None, 
+                    False
+                )
             
             # Clean up chunk files
             self._cleanup_chunk_files(chunk_files)
             
             total_analysis_time = time.time() - analysis_start_time
+            
+            # Use actual chunks analyzed for the result
+            chunks_actually_analyzed = chunk_index if was_early_exit else len(chunk_files)
+            
             return AnalysisResult(
                 is_vietnamese=False,  # No chunk met full criteria
                 detected_language='mixed_or_unknown',
@@ -1532,7 +1607,7 @@ class YouTubeVideoCrawler:
                 total_analysis_time=total_analysis_time,
                 children_detection_time=0.0,
                 video_length_seconds=video_duration,
-                chunks_analyzed=len(chunk_files),
+                chunks_analyzed=chunks_actually_analyzed,
                 positive_chunk_index=None,
                 was_chunked=True
             )
