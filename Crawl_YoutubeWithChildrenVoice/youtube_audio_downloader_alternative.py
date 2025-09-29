@@ -14,10 +14,10 @@ import sys
 import time
 import subprocess
 import tempfile
+import random
 from pathlib import Path
 from typing import Optional, Tuple
 import ffmpeg
-import random
 
 try:
     from pytubefix import YouTube

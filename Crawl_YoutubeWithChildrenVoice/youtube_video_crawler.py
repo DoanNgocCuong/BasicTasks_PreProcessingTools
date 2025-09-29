@@ -28,7 +28,6 @@ import librosa
 import soundfile as sf
 import tempfile
 from youtube_audio_downloader_alternative import YouTubeAudioDownloaderAlternative
-from youtube_audio_downloader import YoutubeAudioDownloader, Config as AudioDownloaderConfig
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
 from youtube_output_validator import YouTubeURLValidator
@@ -803,31 +802,21 @@ class YouTubeVideoCrawler:
             elif method == 'browser':
                 cookies_from_browser = config.cookie_settings.get('browser_name', 'chrome')
         
-        # Initialize both downloaders
+        # Initialize alternative downloader (provides both pytube and yt-dlp methods)
         self.alternative_downloader = YouTubeAudioDownloaderAlternative(
             output_dir="youtube_audio_outputs",
             cookies_file=cookies_file,
             cookies_from_browser=cookies_from_browser
         )
         
-        # Initialize primary yt-dlp downloader
-        audio_config = AudioDownloaderConfig()
-        audio_config.output_dir = os.path.join(os.path.dirname(__file__), "youtube_audio_outputs")
-        self.primary_downloader = YoutubeAudioDownloader(
-            audio_config,
-            cookies_file=cookies_file,
-            cookies_from_browser=cookies_from_browser
-        )
+        # Set audio downloader (always use alternative downloader which provides both methods)
+        self.audio_downloader = self.alternative_downloader
         
-        # Set primary and fallback based on configuration
+        # Log the configured priority
         if config.yt_dlp_primary:
-            self.audio_downloader = self.primary_downloader
-            self.fallback_downloader = self.alternative_downloader
-            print(f"🔧 Audio downloader priority: yt-dlp primary, pytube fallback")
+            print(f"🔧 Audio downloader priority: yt-dlp fallback method (working), pytube fallback")
         else:  # pytube primary
-            self.audio_downloader = self.alternative_downloader
-            self.fallback_downloader = self.primary_downloader
-            print(f"🔧 Audio downloader priority: pytube primary, yt-dlp fallback")
+            print(f"🔧 Audio downloader priority: pytube primary, yt-dlp fallback method")
         
         # Initialize YouTube Data API service for enhanced metadata retrieval
         self.youtube_service = None
@@ -893,50 +882,51 @@ class YouTubeVideoCrawler:
         Returns:
             Optional[Tuple[str, float]]: (wav_file_path, duration) or None if both fail
         """
-        # Try primary downloader first
+        # Try primary download method
+        primary_method = "yt-dlp" if self.config.yt_dlp_primary else "pytube"
         try:
-            print(f"🔄 Attempting download with primary downloader...")
+            print(f"🔄 Attempting download with primary method: {primary_method}")
             
             if self.config.yt_dlp_primary:
-                # Primary is yt-dlp downloader
-                result = self.primary_downloader.download_audio_from_yturl(url, index)
+                # Use the working yt-dlp fallback method as primary
+                result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
             else:
-                # Primary is pytube downloader
+                # Use pytube method as primary
                 result = self.alternative_downloader.download_audio_pytube(url, index)
             
             if result and result[0]:  # Check if we got a valid result with file path
-                print(f"✅ Primary downloader succeeded")
+                print(f"✅ Primary download method ({primary_method}) succeeded")
                 return result
             else:
-                print(f"❌ Primary downloader returned no result")
+                print(f"❌ Primary download method ({primary_method}) returned no result")
                 
         except Exception as e:
-            print(f"❌ Primary downloader failed: {str(e)[:100]}...")
+            print(f"❌ Primary download method ({primary_method}) failed: {str(e)[:100]}...")
         
-        # Fallback to secondary downloader
+        # Fallback to secondary download method
+        fallback_method = "pytube" if self.config.yt_dlp_primary else "yt-dlp"
         try:
-            print(f"🔄 Falling back to secondary downloader...")
+            print(f"🔄 Attempting fallback method: {fallback_method}")
             
             if self.config.yt_dlp_primary:
-                # Fallback is pytube downloader
-                result = self.fallback_downloader.download_audio_pytube(url, index)
+                # Fallback to pytube method
+                result = self.alternative_downloader.download_audio_pytube(url, index)
             else:
-                # Fallback is yt-dlp downloader  
-                result = self.fallback_downloader.download_audio_from_yturl(url, index)
+                # Fallback to yt-dlp method
+                result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
             
             if result and result[0]:  # Check if we got a valid result with file path
-                print(f"✅ Fallback downloader succeeded")
+                print(f"✅ Fallback download method ({fallback_method}) succeeded")
                 return result
             else:
-                print(f"❌ Fallback downloader returned no result")
+                print(f"❌ Fallback download method ({fallback_method}) returned no result")
                 
         except Exception as e:
-            print(f"❌ Fallback downloader failed: {str(e)[:100]}...")
+            print(f"❌ Fallback download method ({fallback_method}) failed: {str(e)[:100]}...")
         
         print(f"❌ Both downloaders failed for URL: {url[:50]}...")
         return None
     
-        
     def _ensure_video_duration_seconds(self, video: Dict) -> None:
         """Ensure the video dict has numeric 'duration' in seconds when a max limit is configured."""
         try:
@@ -1637,11 +1627,9 @@ class YouTubeVideoCrawler:
         try:
             # Convert YouTube video to .wav file once for both analyses
             # Use thread-safe global download index to prevent file overlap
-            # Get both audio file path and video duration
-            # Use alternative downloader (pytube) to bypass bot detection
             current_download_index = self._get_next_download_index()
             
-            # Use the configured primary downloader with fallback
+            # Use the configured download method with automatic fallback
             result = self._download_audio_with_fallback(video['url'], current_download_index)
             
             if result:
