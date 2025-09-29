@@ -21,9 +21,12 @@ import googleapiclient.discovery
 from googleapiclient.errors import HttpError
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Union, Set, Any
+from typing import List, Dict, Optional, Union, Set, Any, Tuple
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import librosa
+import soundfile as sf
+import tempfile
 from youtube_audio_downloader_alternative import YouTubeAudioDownloaderAlternative
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
@@ -222,6 +225,9 @@ class AnalysisResult:
     total_analysis_time: Optional[float] = None
     children_detection_time: Optional[float] = None
     video_length_seconds: Optional[float] = None
+    chunks_analyzed: Optional[int] = None
+    positive_chunk_index: Optional[int] = None
+    was_chunked: bool = False
 
 
 class OutputManager:
@@ -459,11 +465,30 @@ class CollectionReporter:
         truncated_title = video_title[:40] + "..." if len(video_title) > 40 else video_title
         self.output.print_timing(f"Children's voice detection for '{truncated_title}'", duration)
     
-    def report_audio_analysis_timing(self, video_title: str, total_duration: float, children_detection_duration: float) -> None:
-        """Report comprehensive audio analysis timing."""
+    def report_chunk_analysis_start(self, video_title: str, duration: float, chunk_size: int) -> None:
+        """Report start of chunk analysis for long videos."""
+        truncated_title = video_title[:40] + "..." if len(video_title) > 40 else video_title
+        estimated_chunks = int(duration / chunk_size) + (1 if duration % chunk_size > 0 else 0)
+        print(f"🧩 Starting chunk analysis for '{truncated_title}' ({duration:.1f}s → ~{estimated_chunks} chunks)")
+    
+    def report_chunk_analysis_result(self, chunks_analyzed: int, positive_chunk: Optional[int], was_successful: bool) -> None:
+        """Report chunk analysis completion."""
+        if was_successful and positive_chunk:
+            print(f"🎯 SUCCESS: Found children's voice in chunk {positive_chunk}/{chunks_analyzed}")
+            print(f"⚡ Early exit saved {chunks_analyzed - positive_chunk} chunk analysis")
+        else:
+            print(f"❌ No children's voice found in any of {chunks_analyzed} chunks")
+    
+    def report_audio_analysis_timing(self, video_title: str, total_duration: float, children_detection_duration: float, was_chunked: bool = False, chunks_analyzed: Optional[int] = None) -> None:
+        """Report comprehensive audio analysis timing with chunk information."""
         truncated_title = video_title[:40] + "..." if len(video_title) > 40 else video_title
         language_detection_duration = total_duration - children_detection_duration
-        self.output.print_timing(f"Total audio analysis for '{truncated_title}'", total_duration)
+        
+        if was_chunked and chunks_analyzed:
+            self.output.print_timing(f"Chunked audio analysis for '{truncated_title}' ({chunks_analyzed} chunks)", total_duration)
+        else:
+            self.output.print_timing(f"Total audio analysis for '{truncated_title}'", total_duration)
+        
         self.output.print_timing(f"  ├─ Language detection", language_detection_duration)
         self.output.print_timing(f"  └─ Children's voice detection", children_detection_duration)
 
@@ -856,7 +881,8 @@ class YouTubeVideoCrawler:
             self.api_key = self.api_keys[self.current_api_key_index]
             
             print(f"🔄 Switching to API Key {self.current_api_key_index + 1}")
-            print(f"   Previous: {'*' * 20}...{old_key[-4:]}")
+            if old_key:
+                print(f"   Previous: {'*' * 20}...{old_key[-4:]}")
             print(f"   Current:  {'*' * 20}...{self.api_key[-4:]}")
             
             # Reinitialize YouTube Data API service with new key
@@ -877,7 +903,8 @@ class YouTubeVideoCrawler:
         self.current_api_key_index = idx
         self.api_key = self.api_keys[idx]
         print(f"🔄 Switching to API Key {idx + 1}")
-        print(f"   Previous: {'*' * 20}...{old_key[-4:]}")
+        if old_key:
+            print(f"   Previous: {'*' * 20}...{old_key[-4:]}")
         print(f"   Current:  {'*' * 20}...{self.api_key[-4:]}")
         self._init_youtube_data_api()
         self.api_quota_exceeded = False
@@ -916,6 +943,11 @@ class YouTubeVideoCrawler:
         """
         if poll_interval_seconds is None:
             poll_interval_seconds = self.poll_interval_seconds
+        
+        # Ensure we have a valid polling interval
+        if poll_interval_seconds is None or poll_interval_seconds <= 0:
+            poll_interval_seconds = 300  # Default 5 minutes
+            
         print(f"⏳ All configured API keys appear exhausted. Polling every {poll_interval_seconds}s until any key resets...")
         start_time = time.time()
         poll_count = 0
@@ -934,7 +966,7 @@ class YouTubeVideoCrawler:
                 minutes = elapsed // 60
                 seconds = elapsed % 60
                 print(f"⏳ Still waiting... elapsed {minutes}m{seconds:02d}s, last cycle probed {polled_this_cycle} key(s)")
-            time.sleep(poll_interval_seconds)
+            time.sleep(float(poll_interval_seconds))
     
     def _init_youtube_data_api(self) -> None:
         """Initialize YouTube Data API service for enhanced metadata retrieval."""
@@ -1128,30 +1160,328 @@ class YouTubeVideoCrawler:
             gc.collect()
             
             # Clear CUDA cache if available
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                # Reset peak memory stats
-                torch.cuda.reset_peak_memory_stats()
-                
-                current_memory = torch.cuda.memory_allocated() / 1024**3  # GB
-                max_memory = torch.cuda.max_memory_allocated() / 1024**3  # GB
-                self.debug.log(f"CUDA Memory - Current: {current_memory:.2f}GB, Peak: {max_memory:.2f}GB")
+            try:
+                import torch
+                if hasattr(torch, 'cuda') and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    # Reset peak memory stats
+                    torch.cuda.reset_peak_memory_stats()
+                    
+                    current_memory = torch.cuda.memory_allocated() / 1024**3  # GB
+                    max_memory = torch.cuda.max_memory_allocated() / 1024**3  # GB
+                    self.debug.log(f"CUDA Memory - Current: {current_memory:.2f}GB, Peak: {max_memory:.2f}GB")
+            except ImportError:
+                pass  # torch not available
+            except Exception as cuda_error:
+                self.debug.log(f"CUDA cleanup warning: {cuda_error}")
                 
         except Exception as e:
             self.debug.log_error("Memory cleanup", e)
     
+    def _split_audio_into_chunks(self, audio_file_path: str, chunk_duration_seconds: int) -> List[str]:
+        """
+        Split audio file into chunks of specified duration.
+        
+        Args:
+            audio_file_path (str): Path to the audio file to split
+            chunk_duration_seconds (int): Duration of each chunk in seconds
+            
+        Returns:
+            List[str]: List of paths to chunk files
+        """
+        chunk_files = []
+        temp_dir = None
+        
+        try:
+            # Create temporary directory for chunks
+            temp_dir = tempfile.mkdtemp(prefix="audio_chunks_")
+            
+            # Load audio file
+            print(f"📄 Loading audio file for chunking: {audio_file_path}")
+            audio, sr = librosa.load(audio_file_path, sr=16000)  # Standard 16kHz for analysis
+            total_duration = len(audio) / sr
+            
+            print(f"📏 Audio duration: {total_duration:.1f}s, chunk size: {chunk_duration_seconds}s")
+            
+            # Calculate number of chunks
+            num_chunks = int(total_duration / chunk_duration_seconds) + (1 if total_duration % chunk_duration_seconds > 0 else 0)
+            print(f"📊 Will create {num_chunks} chunks")
+            
+            # Create chunks
+            for i in range(num_chunks):
+                start_time = i * chunk_duration_seconds
+                end_time = min((i + 1) * chunk_duration_seconds, total_duration)
+                
+                start_sample = int(start_time * sr)
+                end_sample = int(end_time * sr)
+                
+                chunk_audio = audio[start_sample:end_sample]
+                
+                # Skip very short chunks (less than 1 second)
+                if len(chunk_audio) < sr:
+                    print(f"⏭️  Skipping chunk {i+1} (too short: {len(chunk_audio)/sr:.1f}s)")
+                    continue
+                
+                # Save chunk
+                chunk_path = os.path.join(temp_dir, f"chunk_{i+1:03d}.wav")
+                sf.write(chunk_path, chunk_audio, sr)
+                chunk_files.append(chunk_path)
+                
+                chunk_duration = len(chunk_audio) / sr
+                print(f"📋 Created chunk {i+1}: {start_time:.1f}s-{end_time:.1f}s ({chunk_duration:.1f}s) -> {chunk_path}")
+            
+            print(f"✅ Successfully created {len(chunk_files)} audio chunks")
+            return chunk_files
+            
+        except Exception as e:
+            print(f"❌ Error splitting audio into chunks: {e}")
+            # Cleanup on error
+            if chunk_files:
+                for chunk_file in chunk_files:
+                    try:
+                        if os.path.exists(chunk_file):
+                            os.remove(chunk_file)
+                    except Exception:
+                        pass
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir)
+                except Exception:
+                    pass
+            return []
+    
+    def _cleanup_chunk_files(self, chunk_files: List[str]) -> None:
+        """
+        Clean up temporary chunk files and their directory.
+        
+        Args:
+            chunk_files (List[str]): List of chunk file paths to clean up
+        """
+        if not chunk_files:
+            return
+            
+        try:
+            # Get the directory containing the chunks
+            chunk_dir = os.path.dirname(chunk_files[0])
+            
+            # Remove all chunk files
+            for chunk_file in chunk_files:
+                try:
+                    if os.path.exists(chunk_file):
+                        os.remove(chunk_file)
+                        self.debug.log(f"Cleaned up chunk file: {chunk_file}")
+                except Exception as e:
+                    self.debug.log(f"Could not clean up chunk file {chunk_file}: {e}")
+            
+            # Remove the temporary directory if empty
+            try:
+                if os.path.exists(chunk_dir) and not os.listdir(chunk_dir):
+                    os.rmdir(chunk_dir)
+                    self.debug.log(f"Cleaned up chunk directory: {chunk_dir}")
+            except Exception as e:
+                self.debug.log(f"Could not clean up chunk directory {chunk_dir}: {e}")
+                
+        except Exception as e:
+            self.debug.log(f"Error during chunk cleanup: {e}")
+    
+    def _analyze_video_chunks(self, video: Dict, video_type: str, audio_file_path: str, video_duration: float) -> AnalysisResult:
+        """
+        Analyze video by splitting it into chunks and processing sequentially with early exit.
+        
+        Args:
+            video (Dict): Video information dictionary
+            video_type (str): Type of video being processed ("main" or "similar")
+            audio_file_path (str): Path to the downloaded audio file
+            video_duration (float): Duration of the video in seconds
+            
+        Returns:
+            AnalysisResult: Analysis results from the first positive chunk or overall negative result
+        """
+        analysis_start_time = time.time()
+        chunk_files = []
+        
+        try:
+            # Get chunk duration from config
+            chunk_duration = config.MAX_AUDIO_DURATION_SECONDS
+            if chunk_duration is None:
+                # Fallback to default chunk size if no limit configured
+                chunk_duration = 300  # 5 minutes
+            
+            print(f"🧩 Starting chunk analysis for {video_duration:.1f}s video (chunk size: {chunk_duration}s)")
+            
+            # Split audio into chunks
+            chunk_files = self._split_audio_into_chunks(audio_file_path, chunk_duration)
+            
+            if not chunk_files:
+                print("❌ Failed to create audio chunks")
+                return AnalysisResult(
+                    is_vietnamese=False,
+                    detected_language='error',
+                    has_children_voice=None,
+                    confidence=0,
+                    error='Failed to create audio chunks',
+                    total_analysis_time=time.time() - analysis_start_time,
+                    children_detection_time=0.0,
+                    video_length_seconds=video_duration,
+                    chunks_analyzed=0,
+                    positive_chunk_index=None,
+                    was_chunked=True
+                )
+            
+            print(f"📊 Analyzing {len(chunk_files)} chunks sequentially with early exit...")
+            
+            # Get shared classifier
+            classifier = self._get_shared_classifier()
+            
+            # Analyze chunks sequentially with early exit
+            for chunk_index, chunk_file in enumerate(chunk_files, 1):
+                print(f"\n🔍 Analyzing chunk {chunk_index}/{len(chunk_files)}...")
+                
+                try:
+                    # Clear GPU memory before each chunk
+                    try:
+                        import torch
+                        if hasattr(torch, 'cuda') and torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                    except (ImportError, AttributeError):
+                        pass  # torch or CUDA not available
+                    
+                    # Analyze this chunk
+                    children_detection_start_time = time.time()
+                    
+                    if self.config.enable_language_detection:
+                        # Combined analysis (language + children's voice)
+                        combined_result = classifier.get_combined_prediction(chunk_file, youtube_url=video['url'])
+                    else:
+                        # Children's voice only (assume Vietnamese)
+                        children_voice_result = classifier.is_child_audio(chunk_file)
+                        combined_result = {
+                            'is_vietnamese': True,
+                            'detected_language': 'vi',
+                            'is_child': children_voice_result,
+                            'confidence': 1.0 if children_voice_result is not None else 0.0
+                        }
+                    
+                    children_detection_duration = time.time() - children_detection_start_time
+                    
+                    # Check for critical errors
+                    if "error" in combined_result and "age_detection_failed" not in combined_result:
+                        print(f"❌ Chunk {chunk_index} analysis failed: {combined_result['error']}")
+                        continue  # Try next chunk
+                    
+                    # Extract results
+                    is_vietnamese = combined_result.get('is_vietnamese', False)
+                    children_voice_result = combined_result.get('is_child', None)
+                    confidence = combined_result.get('confidence', 0.0)
+                    
+                    # Handle age detection failures gracefully
+                    if "age_detection_failed" in combined_result:
+                        print(f"⚠️  Chunk {chunk_index}: Age detection failed ({combined_result['age_detection_failed']}) but language detection succeeded")
+                        if is_vietnamese:
+                            children_voice_result = None  # Unknown due to age detection failure
+                            confidence = 0.5  # Moderate confidence
+                    
+                    print(f"📋 Chunk {chunk_index} results: Vietnamese={is_vietnamese}, Children={children_voice_result}, Confidence={confidence:.2f}")
+                    
+                    # Check if this chunk meets our criteria (Vietnamese + children's voice)
+                    if is_vietnamese and children_voice_result:
+                        print(f"🎯 SUCCESS! Chunk {chunk_index} contains Vietnamese children's voice")
+                        print(f"⚡ Early exit: Found positive match, skipping remaining {len(chunk_files) - chunk_index} chunks")
+                        
+                        # Clean up chunk files
+                        self._cleanup_chunk_files(chunk_files)
+                        
+                        # Return positive result
+                        total_analysis_time = time.time() - analysis_start_time
+                        return AnalysisResult(
+                            is_vietnamese=True,
+                            detected_language='vi',
+                            has_children_voice=True,
+                            confidence=confidence,
+                            error=None,
+                            total_analysis_time=total_analysis_time,
+                            children_detection_time=children_detection_duration,
+                            video_length_seconds=video_duration,
+                            chunks_analyzed=chunk_index,
+                            positive_chunk_index=chunk_index,
+                            was_chunked=True
+                        )
+                    else:
+                        # This chunk doesn't meet criteria, continue to next
+                        reasons = []
+                        if not is_vietnamese:
+                            reasons.append(f"not Vietnamese (detected: {combined_result.get('detected_language', 'unknown')})")
+                        if not children_voice_result:
+                            reasons.append("no children's voice detected")
+                        print(f"❌ Chunk {chunk_index}: {', '.join(reasons)}")
+                        continue
+                        
+                except Exception as e:
+                    print(f"❌ Error analyzing chunk {chunk_index}: {e}")
+                    continue  # Try next chunk
+            
+            # If we get here, no chunk met the criteria
+            print(f"❌ No chunks contained Vietnamese children's voice ({len(chunk_files)} chunks analyzed)")
+            
+            # Clean up chunk files
+            self._cleanup_chunk_files(chunk_files)
+            
+            total_analysis_time = time.time() - analysis_start_time
+            return AnalysisResult(
+                is_vietnamese=False,  # No chunk met full criteria
+                detected_language='mixed_or_unknown',
+                has_children_voice=False,
+                confidence=0.0,
+                error=None,
+                total_analysis_time=total_analysis_time,
+                children_detection_time=0.0,
+                video_length_seconds=video_duration,
+                chunks_analyzed=len(chunk_files),
+                positive_chunk_index=None,
+                was_chunked=True
+            )
+            
+        except Exception as e:
+            print(f"❌ Error in chunk analysis: {e}")
+            
+            # Clean up chunk files on error
+            if chunk_files:
+                self._cleanup_chunk_files(chunk_files)
+            
+            total_analysis_time = time.time() - analysis_start_time
+            return AnalysisResult(
+                is_vietnamese=False,
+                detected_language='error',
+                has_children_voice=None,
+                confidence=0,
+                error=str(e),
+                total_analysis_time=total_analysis_time,
+                children_detection_time=0.0,
+                video_length_seconds=video_duration,
+                chunks_analyzed=0,
+                positive_chunk_index=None,
+                was_chunked=True
+            )
+        
+        finally:
+            # Force memory cleanup
+            self._force_memory_cleanup()
+    
     def analyze_video_audio(self, video: Dict, video_type: str = "main") -> AnalysisResult:
         """
-        OPTIMIZED: Download and analyze video audio using combined prediction for maximum efficiency.
-        This method downloads the audio once and performs both analyses using shared audio loading.
+        ENHANCED: Download and analyze video audio with chunking support for long videos.
+        For videos within duration limit: uses optimized combined prediction.
+        For videos exceeding limit: splits into chunks and analyzes sequentially with early exit.
         
         Args:
             video (Dict): Video information dictionary
             video_type (str): Type of video being processed ("main" or "similar")
             
         Returns:
-            AnalysisResult: Combined analysis results with timing information
+            AnalysisResult: Combined analysis results with timing information and chunking details
         """
         analysis_start_time = time.time()
         children_detection_start_time = None
@@ -1159,10 +1489,13 @@ class YouTubeVideoCrawler:
         video_duration = None  # Ensure video_duration is always defined
         wav_file_path = None  # Initialize to handle cleanup in exception cases
         
-        # Check video duration limit before any processing (skip if too long)
-        # Use configured duration limit from environment; if None, no limit
+        # Get configured duration limit from environment; if None, no limit
         MAX_VIDEO_DURATION_SECONDS = config.MAX_AUDIO_DURATION_SECONDS
             
+        # Check if we need chunking (no longer skip long videos, but chunk them instead)
+        should_use_chunking = False
+        estimated_duration = None
+        
         try:
             # Ensure we have a duration when limit is set
             if MAX_VIDEO_DURATION_SECONDS is not None:
@@ -1181,35 +1514,21 @@ class YouTubeVideoCrawler:
                         minutes = int(match.group(2) or 0)  
                         seconds = int(match.group(3) or 0)
                         total_seconds = hours * 3600 + minutes * 60 + seconds
+                        estimated_duration = total_seconds
                         
                         if total_seconds > MAX_VIDEO_DURATION_SECONDS:
-                            print(f"⏭️  Skipping long video ({total_seconds//60}m {total_seconds%60}s > {MAX_VIDEO_DURATION_SECONDS//60}m): {video.get('title', 'Unknown')[:50]}...")
-                            return AnalysisResult(
-                                is_vietnamese=False,
-                                detected_language='skipped_too_long',
-                                has_children_voice=None,
-                                confidence=0,
-                                error=f"Video too long: {total_seconds}s > {MAX_VIDEO_DURATION_SECONDS}s",
-                                total_analysis_time=time.time() - analysis_start_time,
-                                children_detection_time=0.0,
-                                video_length_seconds=total_seconds
-                            )
+                            should_use_chunking = True
+                            print(f"📊 Long video detected ({total_seconds//60}m {total_seconds%60}s > {MAX_VIDEO_DURATION_SECONDS//60}m): {video.get('title', 'Unknown')[:50]}...")
+                            print(f"🧩 Will use chunk analysis instead of skipping")
                 elif isinstance(duration_str, (int, float)) and MAX_VIDEO_DURATION_SECONDS is not None:
                     # Duration already in seconds
+                    estimated_duration = duration_str
                     if duration_str > MAX_VIDEO_DURATION_SECONDS:
-                        print(f"⏭️  Skipping long video ({int(duration_str//60)}m {int(duration_str%60)}s > {MAX_VIDEO_DURATION_SECONDS//60}m): {video.get('title', 'Unknown')[:50]}...")
-                        return AnalysisResult(
-                            is_vietnamese=False,
-                            detected_language='skipped_too_long',
-                            has_children_voice=None,
-                            confidence=0,
-                            error=f"Video too long: {duration_str}s > {MAX_VIDEO_DURATION_SECONDS}s",
-                            total_analysis_time=time.time() - analysis_start_time,
-                            children_detection_time=0.0,
-                            video_length_seconds=duration_str
-                        )
+                        should_use_chunking = True
+                        print(f"📊 Long video detected ({int(duration_str//60)}m {int(duration_str%60)}s > {MAX_VIDEO_DURATION_SECONDS//60}m): {video.get('title', 'Unknown')[:50]}...")
+                        print(f"🧩 Will use chunk analysis instead of skipping")
         except Exception as duration_check_error:
-            # If duration check fails, continue with processing
+            # If duration check fails, continue with regular processing
             print(f"⚠️  Could not check video duration: {duration_check_error}")
         
         try:
@@ -1238,8 +1557,24 @@ class YouTubeVideoCrawler:
                     error='Failed to download audio',
                     total_analysis_time=time.time() - analysis_start_time,
                     children_detection_time=0.0,
-                    video_length_seconds=video_duration
+                    video_length_seconds=video_duration,
+                    chunks_analyzed=None,
+                    positive_chunk_index=None,
+                    was_chunked=False
                 )
+            
+            # Check if we should use chunking for this video
+            if should_use_chunking or (video_duration and MAX_VIDEO_DURATION_SECONDS and video_duration > MAX_VIDEO_DURATION_SECONDS):
+                print(f"🧩 Using chunk analysis for long video ({video_duration:.1f}s)")
+                
+                # Use chunk-based analysis (ensure video_duration is not None)
+                actual_duration = video_duration or estimated_duration or 0.0
+                result = self._analyze_video_chunks(video, video_type, wav_file_path, actual_duration)
+                
+                # Clean up original audio file
+                self._cleanup_audio_file(wav_file_path)
+                
+                return result
             
             # Debug: Print the audio file path being passed to classifier
             print(f"🔍 DEBUG: Audio file path for analysis: {wav_file_path}")
@@ -1251,10 +1586,13 @@ class YouTubeVideoCrawler:
             classifier = self._get_shared_classifier()
             
             # Clear GPU memory before prediction to avoid fragmentation
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
+            try:
+                import torch
+                if hasattr(torch, 'cuda') and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+            except (ImportError, AttributeError):
+                pass  # torch or CUDA not available
             
             # Check if language detection is enabled (controlled by self.config.enable_language_detection)
             # When disabled, all videos are assumed to be Vietnamese and only children's voice detection is performed
@@ -1283,8 +1621,12 @@ class YouTubeVideoCrawler:
                 }
             
             # Clear GPU memory after prediction
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            try:
+                import torch
+                if hasattr(torch, 'cuda') and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except (ImportError, AttributeError):
+                pass  # torch or CUDA not available
             
             # Check for critical errors (not age detection failures)
             if "error" in combined_result and "age_detection_failed" not in combined_result:
@@ -1299,7 +1641,10 @@ class YouTubeVideoCrawler:
                     error=combined_result['error'],
                     total_analysis_time=total_analysis_time,
                     children_detection_time=children_detection_duration,
-                    video_length_seconds=video_duration
+                    video_length_seconds=video_duration,
+                    chunks_analyzed=None,
+                    positive_chunk_index=None,
+                    was_chunked=False
                 )
             
             # Extract results from combined prediction
@@ -1345,7 +1690,15 @@ class YouTubeVideoCrawler:
             self.debug.log_timing(f"Children's voice detection for video {display_index}", children_detection_duration)
             
             # Report timing information
-            self.reporter.report_audio_analysis_timing(video['title'], total_analysis_time, children_detection_duration)
+            was_chunked = getattr(self, '_last_analysis_was_chunked', False)
+            chunks_analyzed = getattr(self, '_last_analysis_chunks', None)
+            self.reporter.report_audio_analysis_timing(
+                video['title'], 
+                total_analysis_time, 
+                children_detection_duration,
+                was_chunked=was_chunked,
+                chunks_analyzed=chunks_analyzed
+            )
             
             # Update timing statistics
             self._update_timing_statistics(total_analysis_time, children_detection_duration)
@@ -1364,7 +1717,10 @@ class YouTubeVideoCrawler:
                 error=None,
                 total_analysis_time=total_analysis_time,
                 children_detection_time=children_detection_duration,
-                video_length_seconds=video_duration
+                video_length_seconds=video_duration,
+                chunks_analyzed=None,
+                positive_chunk_index=None,
+                was_chunked=False
             )
             
         except Exception as e:
@@ -1386,7 +1742,10 @@ class YouTubeVideoCrawler:
                 error=str(e),
                 total_analysis_time=total_analysis_time,
                 children_detection_time=children_detection_duration,
-                video_length_seconds=video_duration
+                video_length_seconds=video_duration,
+                chunks_analyzed=None,
+                positive_chunk_index=None,
+                was_chunked=False
             )
             
     def _update_timing_statistics(self, total_analysis_time: float, children_detection_time: float) -> None:
@@ -1796,18 +2155,6 @@ class YouTubeVideoCrawler:
             self.reporter.report_duplicate_skip()
             return False
         
-        # Additional duration check as fallback (in case pre-filter missed it)
-        max_duration = config.MAX_AUDIO_DURATION_SECONDS
-        if max_duration is not None:
-            # Try to ensure duration before comparing
-            self._ensure_video_duration_seconds(video)
-            if isinstance(video.get('duration'), (int, float)) and video['duration'] > max_duration:
-                duration_minutes = int(video['duration'] // 60)
-                duration_seconds = int(video['duration'] % 60)
-                max_minutes = int(max_duration // 60)
-                print(f"⏭️  FALLBACK FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {video['title'][:50]}...")
-                return False
-        
         # Analyze video audio (language detection + children's voice detection)
         print(f"Analyzing video: {video['title']}")
         self.reporter.report_language_check_start()
@@ -2074,30 +2421,8 @@ class YouTubeVideoCrawler:
         if similar_video['url'] in self.collected_url_set:
             return False
         
-        # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
-        max_duration = config.MAX_AUDIO_DURATION_SECONDS
-        if max_duration is not None:
-            self._ensure_video_duration_seconds(similar_video)
-            if isinstance(similar_video.get('duration'), (int, float)) and similar_video['duration'] > max_duration:
-                duration_minutes = int(similar_video['duration'] // 60)
-                duration_seconds = int(similar_video['duration'] % 60)
-                max_minutes = int(max_duration // 60)
-                print(f"⏭️  PRE-FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
-                return False
-        
         # Count similar video as reviewed since we're processing it
         query_stats['videos_reviewed'] += 1
-        
-        # Additional duration check as fallback (in case pre-filter missed it)
-        max_duration = config.MAX_AUDIO_DURATION_SECONDS
-        if max_duration is not None:
-            self._ensure_video_duration_seconds(similar_video)
-            if isinstance(similar_video.get('duration'), (int, float)) and similar_video['duration'] > max_duration:
-                duration_minutes = int(similar_video['duration'] // 60)
-                duration_seconds = int(similar_video['duration'] % 60)
-                max_minutes = int(max_duration // 60)
-                print(f"⏭️  FALLBACK FILTER: Skipping long similar video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {similar_video['title'][:50]}...")
-                return False
         
         # OPTIMIZED: Analyze similar video audio using combined prediction
         print(f"Analyzing similar video: {similar_video['title']}")
@@ -2272,18 +2597,6 @@ class YouTubeVideoCrawler:
                 
                 # Set current video index for debugging
                 self.current_video_index = video_index_current
-                
-                # PRE-FILTER: Skip videos that exceed maximum duration BEFORE processing
-                max_duration = config.MAX_AUDIO_DURATION_SECONDS
-                if max_duration is not None:
-                    self._ensure_video_duration_seconds(current_video_processing)
-                    if isinstance(current_video_processing.get('duration'), (int, float)) and current_video_processing['duration'] > max_duration:
-                        duration_minutes = int(current_video_processing['duration'] // 60)
-                        duration_seconds = int(current_video_processing['duration'] % 60)
-                        max_minutes = int(max_duration // 60)
-                        print(f"⏭️  PRE-FILTER: Skipping long video ({duration_minutes}m {duration_seconds}s > {max_minutes}m): {current_video_processing['title'][:50]}...")
-                        video_index_current += 1
-                        continue
                 
                 # Process the video
                 video_added = self._process_main_video(current_video_processing, query_stats)

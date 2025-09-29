@@ -97,6 +97,7 @@ class EnvironmentConfig:
         for path in env_paths:
             if path.exists():
                 if DOTENV_AVAILABLE:
+                    from dotenv import load_dotenv  # Import here to avoid unbound variable warning
                     load_dotenv(str(path), override=False)
                     print(f"✅ Loaded environment variables from: {path}")
                 else:
@@ -165,8 +166,9 @@ class EnvironmentConfig:
     
     @property
     def YOUTUBE_API_KEYS(self) -> list[str]:
-        """List of all available YouTube API keys (supports CSV YOUTUBE_API_KEYS and numbered keys)."""
+        """List of all available YouTube API keys (supports CSV YOUTUBE_API_KEYS, singular YOUTUBE_API_KEY, and numbered keys)."""
         keys: list[str] = []
+        
         # CSV list support
         csv_keys = self.get_env('YOUTUBE_API_KEYS', default=None)
         if csv_keys:
@@ -174,6 +176,11 @@ class EnvironmentConfig:
                 k = k.strip()
                 if k:
                     keys.append(k)
+        
+        # Single key support (YOUTUBE_API_KEY)
+        single_key = self.get_env('YOUTUBE_API_KEY', default=None)
+        if single_key:
+            keys.append(single_key)
         
         # Numbered keys support
         for var in ['YOUTUBE_API_KEY_1', 'YOUTUBE_API_KEY_2', 'YOUTUBE_API_KEY_3']:
@@ -193,7 +200,7 @@ class EnvironmentConfig:
                 unique_keys.append(k)
         
         if not unique_keys:
-            raise ValueError("No YouTube API keys found. Set YOUTUBE_API_KEYS or YOUTUBE_API_KEY_1 in .env")
+            raise ValueError("No YouTube API keys found. Set YOUTUBE_API_KEY, YOUTUBE_API_KEYS, or YOUTUBE_API_KEY_1 in .env")
         return unique_keys
     
     # Audio Processing Configuration
@@ -304,6 +311,10 @@ class EnvironmentConfig:
         print(f"Total API Keys Available: {len(api_keys)}")
         max_dur = self.MAX_AUDIO_DURATION_SECONDS
         print(f"Max Audio Duration: {'unlimited' if max_dur is None else str(max_dur)+'s'}")
+        if max_dur:
+            print(f"  → Videos >{max_dur}s will be chunked into {max_dur}s segments")
+        else:
+            print(f"  → All videos processed in full (no chunking)")
         print(f"Audio Quality: {self.AUDIO_QUALITY}")
         print(f"Whisper Model: {self.WHISPER_MODEL_SIZE}")
         print(f"Wav2Vec2 Model: {self.WAV2VEC2_MODEL}")
