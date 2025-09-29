@@ -4,6 +4,7 @@
   "enable_language_detection": true,
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
   "search_queries": [
+    "BHMEDIA",
     "BHMEDIA thiếu nhi",
     "Kênh Thiếu Nhi BHMEDIA",
     "@KenhThieuNhiBHMedia",
@@ -183,6 +184,7 @@
   "max_recommended_per_query": 500,
   "min_target_count": 1,
   "download_method": "api_assisted",
+  "yt_dlp_primary": true, 
   "user_agent_settings": {
     "default_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
     "rotation_user_agents": [
@@ -202,5 +204,5 @@
     "cookies_file_path": "cookies.txt",
     "description": "Cookie configuration for YouTube access. Set enabled to true to use cookies. Method can be 'browser' (uses browser cookies) or 'file' (uses cookies.txt file). For browser method, specify browser_name (chrome, firefox, safari, edge, opera, brave). For file method, specify cookies_file_path."
   },
-  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, set user_agent to specify browser user agent string, set download_method to 'api_assisted' (recommended) or 'yt_dlp_only', and configure cookie_settings for enhanced access to YouTube content."
+  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, set user_agent to specify browser user agent string, set download_method to 'api_assisted' (recommended) or 'yt_dlp_only', set yt_dlp_primary to true (uses youtube_audio_downloader.py as primary) or false (uses youtube_audio_downloader_alternative.py as primary), and configure cookie_settings for enhanced access to YouTube content."
 }
