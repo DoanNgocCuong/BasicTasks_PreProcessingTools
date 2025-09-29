@@ -43,6 +43,7 @@ class YouTubeAudioDownloaderAlternative:
         self.base_dir = Path(__file__).parent
         self.output_dir = self.base_dir / output_dir
         self.output_dir.mkdir(exist_ok=True)
+        self._current_basename: Optional[str] = None  # For custom basenames when run as script
         
         print(f"📁 Alternative downloader initialized. Output dir: {self.output_dir}")
     
@@ -162,6 +163,7 @@ class YouTubeAudioDownloaderAlternative:
             
             if not audio_stream:
                 print("❌ No audio streams available")
+                print(f"💔 DOWNLOAD FAILED: No audio streams for {yt.title[:50]}...")
                 return None
             
             print(f"🎯 Selected: {audio_stream.mime_type} - {audio_stream.abr}")
@@ -175,9 +177,11 @@ class YouTubeAudioDownloaderAlternative:
             
             if not temp_audio_file.exists():
                 print("❌ Download failed - file not created")
+                print(f"💔 DOWNLOAD FAILED: File not created for {yt.title[:50]}...")
                 return None
             
             print(f"✅ Downloaded: {temp_audio_file.stat().st_size} bytes")
+            print(f"🎉 Video successfully downloaded: {yt.title[:50]}...")
             
             # Step 2: Convert to WAV using ffmpeg
             print("🎵 Converting to WAV format...")
@@ -208,14 +212,17 @@ class YouTubeAudioDownloaderAlternative:
                     return str(wav_file), audio_duration
                 else:
                     print("❌ WAV conversion failed")
+                    print(f"💔 CONVERSION FAILED: WAV file not created for {yt.title[:50]}...")
                     return None
                     
             except Exception as ffmpeg_error:
                 print(f"❌ FFmpeg conversion failed: {ffmpeg_error}")
+                print(f"💔 FFMPEG FAILED: Could not convert audio for {yt.title[:50]}...")
                 return None
                 
         except Exception as e:
             print(f"❌ Pytube download error: {e}")
+            print(f"💔 PYTUBE FAILED: General download error for URL: {url[:50]}...")
             return None
             
         finally:
@@ -442,7 +449,7 @@ if __name__ == "__main__":
                 vid_local = parsed.path[1:]
         except Exception:
             pass
-        camel = _to_camel_case_lower_suffix(title)
+        camel = _to_camel_case_lower_suffix(title or '')
         short_id = (vid_local or 'noid')[:8]
         return f"{idx:04d}_{short_id}_{camel}"
 
@@ -505,6 +512,7 @@ if __name__ == "__main__":
             _save_manifest(manifest_path, manifest_data)
         else:
             print("❌ Download failed")
+            print(f"💔 SCRIPT EXECUTION FAILED: Could not download {url[:50]}...")
 
     if not args:
         if default_urls_file.exists():
