@@ -113,7 +113,7 @@ print("🔍 Checking existing packages and installing only what's missing...")
 # Core packages
 install_if_missing("google", "google-api-python-client")
 install_if_missing("yt_dlp", "yt-dlp")
-install_if_missing("whisper", "openai-whisper")
+# install_if_missing("whisper", "openai-whisper")  # REMOVED: No longer using Whisper
 install_if_missing("ffmpeg", "ffmpeg-python")
 install_if_missing("audioread")
 install_if_missing("dotenv", "python-dotenv")

@@ -273,10 +273,10 @@ class YouTubeAudioDownloaderAlternative:
             Optional[Tuple[str, float]]: (wav_file_path, duration) or None if failed
         """
         print("🔧 ============================================")
-        print("🔧 YT-DLP FALLBACK METHOD ACTIVATED")
-        print("🔧 pytube failed, trying yt-dlp with cookies")
+        print("🔧 YT-DLP ANDROID CLIENT METHOD ACTIVATED")
+        print("🔧 Using reliable Android client to bypass restrictions")
         print("🔧 ============================================")
-        print(f"🎵 Starting yt-dlp fallback for video {index}")
+        print(f"🎵 Starting yt-dlp Android client download for video {index}")
         
         # Generate output filename
         custom_base = getattr(self, '_current_basename', None)
@@ -292,26 +292,23 @@ class YouTubeAudioDownloaderAlternative:
             # Step 1: Use yt-dlp to download audio with cookies
             print("⏬ Downloading with yt-dlp...")
             
-            # Build yt-dlp command
+            # Build yt-dlp command with Android client to bypass YouTube restrictions
             cmd = [
                 "yt-dlp",
-                "-f", "bestaudio/best",
+                "-f", "bestaudio[ext=m4a]/bestaudio/best",  # Prefer m4a to avoid format issues
                 "--extract-audio",
                 "--audio-format", "wav",
-                "--audio-quality", "0",  # Best quality
+                "--audio-quality", "5",  # Reduced quality to speed up processing (0=best, 9=worst)
+                "--extractor-args", "youtube:player_client=android",  # Use Android client to bypass restrictions
+                "--no-playlist",  # Ensure we don't accidentally download playlists
+                "--no-check-certificate",  # Skip SSL certificate verification that might hang
                 "--output", str(self.output_dir / f"{temp_audio_name}.%(ext)s"),
                 url
             ]
             
-            # Add cookie support
-            if self.cookies_file and os.path.exists(self.cookies_file):
-                cmd.extend(["--cookies", self.cookies_file])
-                print(f"🍪 Using cookies from file: {self.cookies_file}")
-            elif self.cookies_from_browser:
-                cmd.extend(["--cookies-from-browser", self.cookies_from_browser])
-                print(f"🍪 Using cookies from browser: {self.cookies_from_browser}")
-            else:
-                print("⚠️ No cookies available for yt-dlp fallback")
+            # Skip cookies when using Android client (incompatible)
+            print("🤖 Using Android client - cookies disabled (Android client doesn't support cookies)")
+            print("💡 Android client bypasses restrictions without needing cookies")
             
             # Add user agent for anti-detection
             user_agents = [
@@ -321,12 +318,60 @@ class YouTubeAudioDownloaderAlternative:
             ]
             cmd.extend(["--user-agent", random.choice(user_agents)])
             
-            # Execute yt-dlp
-            print(f"🔄 Running yt-dlp with cookies...")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            # Add progress output and limit retries to prevent hanging
+            cmd.extend(["--progress", "--retries", "1", "--fragment-retries", "1"])
+            
+            # Execute yt-dlp with enhanced timeout handling and stdin closure
+            print(f"🔄 Running yt-dlp with Android client...")
+            try:
+                # Use Popen for better timeout control and explicitly close stdin
+                process = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE, 
+                    stdin=subprocess.PIPE,
+                    text=True,
+                    universal_newlines=True
+                )
+                
+                # Close stdin immediately to prevent hanging
+                process.stdin.close()
+                
+                # Wait with shorter timeout and provide periodic status updates
+                print("⏳ Waiting for yt-dlp download (timeout: 2 minutes)...")
+                try:
+                    stdout, stderr = process.communicate(timeout=120)
+                except subprocess.TimeoutExpired:
+                    print("⚠️ Download taking longer than expected, forcing termination...")
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)  # Give it 5 seconds to terminate gracefully
+                    except subprocess.TimeoutExpired:
+                        print("🔪 Force killing stuck process...")
+                        process.kill()
+                        process.wait()  # Wait for process to die
+                    raise
+                returncode = process.returncode
+                
+                # Create result object compatible with subprocess.run
+                class ProcessResult:
+                    def __init__(self, returncode, stdout, stderr):
+                        self.returncode = returncode
+                        self.stdout = stdout
+                        self.stderr = stderr
+                
+                result = ProcessResult(returncode, stdout, stderr)
+                
+            except subprocess.TimeoutExpired:
+                print("⏰ yt-dlp process forced termination due to timeout")
+                # Clean up any partial files left behind
+                self._cleanup_temp_files(temp_audio_name)
+                return None
             
             if result.returncode != 0:
                 print(f"❌ yt-dlp failed: {result.stderr.strip()}")
+                # Clean up any partial files left behind
+                self._cleanup_temp_files(temp_audio_name)
                 return None
             
             # Find the downloaded file
@@ -338,6 +383,8 @@ class YouTubeAudioDownloaderAlternative:
             
             if not temp_wav_file or not temp_wav_file.exists():
                 print("❌ yt-dlp download failed - no output file found")
+                # Clean up any partial files left behind
+                self._cleanup_temp_files(temp_audio_name)
                 return None
             
             print(f"✅ yt-dlp download successful: {temp_wav_file}")
@@ -378,10 +425,10 @@ class YouTubeAudioDownloaderAlternative:
                 duration = None
             
             print("🎉 ============================================")
-            print("🎉 YT-DLP FALLBACK METHOD SUCCESSFUL!")
-            print("🎉 Downloaded with cookies when pytube failed")
+            print("🎉 YT-DLP ANDROID CLIENT METHOD SUCCESSFUL!")
+            print("🎉 Downloaded using Android client bypass")
             print("🎉 ============================================")
-            print(f"✅ Successfully downloaded via yt-dlp fallback: {wav_file}")
+            print(f"✅ Successfully downloaded via yt-dlp Android client: {wav_file}")
             
             if duration:
                 minutes = int(duration // 60)
@@ -391,11 +438,64 @@ class YouTubeAudioDownloaderAlternative:
             return str(wav_file), duration
             
         except subprocess.TimeoutExpired:
-            print("❌ yt-dlp timeout")
+            print("❌ yt-dlp timeout after 2 minutes - process was hanging")
+            print("💡 This indicates the download was stuck, likely due to network issues")
             return None
         except Exception as e:
             print(f"❌ yt-dlp fallback error: {e}")
+            # Clean up any partial files left behind
+            self._cleanup_temp_files(temp_audio_name if 'temp_audio_name' in locals() else None)
             return None
+    
+    def _cleanup_temp_files(self, temp_audio_name: Optional[str] = None) -> None:
+        """
+        Clean up temporary and partial files left behind by failed downloads.
+        
+        Args:
+            temp_audio_name (Optional[str]): Specific temp file name to clean up,
+                                           or None to clean all orphaned files
+        """
+        try:
+            if temp_audio_name:
+                # Clean up specific temp files
+                pattern_files = list(self.output_dir.glob(f"{temp_audio_name}.*"))
+                for temp_file in pattern_files:
+                    try:
+                        temp_file.unlink()
+                        print(f"🧹 Cleaned up temp file: {temp_file.name}")
+                    except Exception as e:
+                        print(f"⚠️  Could not clean up {temp_file.name}: {e}")
+            
+            # Always clean up orphaned .part files (partial downloads)
+            part_files = list(self.output_dir.glob("*.part"))
+            if part_files:
+                print(f"🧹 Found {len(part_files)} orphaned .part files to clean up")
+                import time
+                current_time = time.time()
+                
+                for part_file in part_files:
+                    try:
+                        # Check file age - only remove files older than 5 minutes
+                        file_age = current_time - part_file.stat().st_mtime
+                        if file_age > 300:  # 5 minutes
+                            part_file.unlink()
+                            print(f"🗑️  Removed orphaned file: {part_file.name}")
+                        else:
+                            print(f"⏳ Skipping recent file (still downloading): {part_file.name}")
+                    except Exception as e:
+                        print(f"⚠️  Could not remove {part_file.name}: {e}")
+            
+        except Exception as e:
+            print(f"⚠️  Error during temp file cleanup: {e}")
+    
+    def cleanup_all_temp_files(self) -> None:
+        """
+        Public method to clean up all temporary files.
+        Call this periodically or at the end of processing.
+        """
+        print("🧹 Starting comprehensive temp file cleanup...")
+        self._cleanup_temp_files()
+        print("✅ Temp file cleanup completed")
 
 
 def test_with_sample_video():

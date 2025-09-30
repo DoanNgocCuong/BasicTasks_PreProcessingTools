@@ -178,7 +178,6 @@ AI-powered crawler that automatically searches, downloads, and analyzes YouTube 
 
 3. Optional: Adjust other settings in `.env` as needed:
    - `MAX_WORKERS=4` (parallel processing threads)
-   - `WHISPER_MODEL_SIZE=tiny` (tiny/base/small/medium/large)
    - `CHILD_THRESHOLD=0.5` (confidence threshold for children's voice)
    - `DEBUG_MODE=false` (enable detailed logging)
 
@@ -226,14 +225,14 @@ sudo dnf install ffmpeg
 # Windows PowerShell
 ffmpeg -version
 Get-Content .env | Select-String "YOUTUBE_API_KEY"
-python -c "import torch, transformers, whisper; print('Dependencies OK')"
+python -c "import torch, transformers; print('Dependencies OK')"
 ```
 
 ```bash
 # Mac/Linux
 ffmpeg -version
 grep "YOUTUBE_API_KEY" .env
-python -c "import torch, transformers, whisper; print('Dependencies OK')"
+python -c "import torch, transformers; print('Dependencies OK')"
 ```
 
 ### 4. Run the Crawler

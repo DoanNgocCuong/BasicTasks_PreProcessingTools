@@ -221,10 +221,7 @@ class EnvironmentConfig:
         return self.get_env('AUDIO_QUALITY', default='medium')
     
     # Model Configuration
-    @property
-    def WHISPER_MODEL_SIZE(self) -> str:
-        """Whisper model size (tiny, base, small, medium, large)."""
-        return self.get_env('WHISPER_MODEL_SIZE', default='tiny')
+    # REMOVED: WHISPER_MODEL_SIZE - No longer using Whisper for language detection
     
     @property
     def WAV2VEC2_MODEL(self) -> str:
@@ -294,10 +291,7 @@ class EnvironmentConfig:
         if not (0.0 <= self.AGE_THRESHOLD <= 1.0):
             print("⚠️ AGE_THRESHOLD should be between 0.0 and 1.0")
         
-        # Validate model size
-        valid_whisper_sizes = ['tiny', 'base', 'small', 'medium', 'large']
-        if self.WHISPER_MODEL_SIZE not in valid_whisper_sizes:
-            print(f"⚠️ WHISPER_MODEL_SIZE should be one of: {valid_whisper_sizes}")
+        # REMOVED: Whisper model size validation - No longer using Whisper
         
         print("✅ Configuration validation completed")
     
@@ -316,7 +310,7 @@ class EnvironmentConfig:
         else:
             print(f"  → All videos processed in full (no chunking)")
         print(f"Audio Quality: {self.AUDIO_QUALITY}")
-        print(f"Whisper Model: {self.WHISPER_MODEL_SIZE}")
+        # REMOVED: Whisper Model - No longer using Whisper for language detection
         print(f"Wav2Vec2 Model: {self.WAV2VEC2_MODEL}")
         print(f"Max Workers: {self.MAX_WORKERS}")
         print(f"Child Threshold: {self.CHILD_THRESHOLD}")

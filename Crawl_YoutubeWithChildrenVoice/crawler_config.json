@@ -490,7 +490,7 @@
     "description": "User agent configuration for web requests. Update chrome_version and user agent strings to match latest browser versions for better YouTube compatibility."
   },
   "cookie_settings": {
-    "enabled": true,
+    "enabled": false,
     "method": "file",
     "browser_name": "chrome",
     "cookies_file_path": "cookies.txt",

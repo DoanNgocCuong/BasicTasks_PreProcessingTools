@@ -25,7 +25,7 @@ import torch
 import torch.nn as nn
 import librosa
 import numpy as np
-import whisper
+# import whisper  # REMOVED: No longer using Whisper for language detection
 
 # Import environment configuration
 try:
@@ -355,7 +355,6 @@ class AudioClassifier:
     
     # Class-level shared instances for memory efficiency
     _shared_classifier = None
-    _shared_whisper_model = None
     _shared_youtube_classifier = None
     _lock = threading.Lock()  # Thread safety for shared instances
     
@@ -410,14 +409,6 @@ class AudioClassifier:
                 cls._shared_classifier = None
                 print("✅ Audio classifier cache cleared")
             
-            if cls._shared_whisper_model is not None:
-                print("🗑️ Clearing Whisper model cache...")
-                # Clear CUDA cache if available
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                cls._shared_whisper_model = None
-                print("✅ Whisper model cache cleared")
             
             if cls._shared_youtube_classifier is not None:
                 print("🗑️ Clearing YouTube language classifier cache...")
@@ -484,22 +475,6 @@ class AudioClassifier:
             print(f"An error occurred: {e}")
             return None
     
-    def _get_whisper_model(self):
-        """Get or load Whisper model for language detection (thread-safe)"""
-        with AudioClassifier._lock:
-            if AudioClassifier._shared_whisper_model is None:
-                # Use environment configuration for model size
-                if USE_ENV_CONFIG and config is not None:
-                    model_size = config.WHISPER_MODEL_SIZE
-                else:
-                    model_size = "tiny"
-                    
-                print(f"🚀 Loading Whisper {model_size} model for language detection...")
-                AudioClassifier._shared_whisper_model = whisper.load_model(model_size)
-                print("✅ Whisper model loaded and cached")
-            else:
-                print("🔄 Reusing existing Whisper model")
-            return AudioClassifier._shared_whisper_model
     
     def _get_youtube_classifier(self):
         """Get or create YouTube language classifier instance (thread-safe)"""
@@ -515,76 +490,6 @@ class AudioClassifier:
                 print("🔄 Reusing existing YouTube language classifier")
             return AudioClassifier._shared_youtube_classifier
 
-    def is_vietnamese(self, audio_path: str) -> Optional[bool]:
-        """
-        Determines whether the given .wav audio file contains Vietnamese speech.
-
-        Args:
-            audio_path (str): Path to the .wav audio file.
-
-        Returns:
-            Optional[bool]: True if the audio is classified as Vietnamese, False otherwise.
-                            Returns None if an error occurs.
-        """
-        try:
-            whisper_model = self._get_whisper_model()
-            
-            # Clear CUDA cache before processing
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            # Load audio and detect language
-            audio = whisper.load_audio(audio_path)
-            audio = whisper.pad_or_trim(audio)
-            
-            # Make log-Mel spectrogram and move to the same device as the model
-            mel = whisper.log_mel_spectrogram(audio).to(whisper_model.device)
-            
-            # Detect the spoken language with proper error handling
-            with torch.no_grad():
-                try:
-                    _, probs = whisper_model.detect_language(mel)
-                    
-                    # Ensure probs is a dict (as expected by whisper)
-                    if isinstance(probs, list) and len(probs) > 0 and isinstance(probs[0], dict):
-                        probs = probs[0]
-                    
-                    if not isinstance(probs, dict):
-                        print("⚠️ Language detection failed: probs is not a dict")
-                        return None
-                    
-                    if not probs:
-                        print("⚠️ Language detection failed: empty probabilities")
-                        return None
-                    
-                    detected_language, confidence = max(probs.items(), key=lambda x: x[1])
-                    print(f"  Detected language: {detected_language} (confidence: {confidence:.3f})")
-                    
-                    # Clean up GPU memory
-                    del mel
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    
-                    # Return True if Vietnamese is detected with reasonable confidence
-                    return detected_language == "vi" and confidence > 0.1
-                    
-                except torch.cuda.OutOfMemoryError as e:
-                    print(f"⚠️ CUDA out of memory during language detection: {e}")
-                    # Clear all cached memory and try again
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                    # Return unknown instead of crashing
-                    print("  Detected language: unknown (CUDA memory error)")
-                    return None
-            
-        except Exception as e:
-            print(f"⚠️ Language detection error: {e}")
-            print("  Detected language: unknown")
-            # Clean up on any error
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            return None
     
     def is_vietnamese_from_youtube_url(self, youtube_url: str) -> bool:
         """
@@ -625,7 +530,7 @@ class AudioClassifier:
             return True
     
     def _load_audio_once(self, audio_path: str):
-        """Load audio once for both age detection and language detection"""
+        """Load audio for age detection only (language detection now uses transcripts)"""
         try:
             # Load with librosa for age detection (16kHz)
             speech_array, original_sr = librosa.load(audio_path, sr=None)
@@ -638,13 +543,8 @@ class AudioClassifier:
             if np.max(np.abs(speech_array_16k)) > 0:
                 speech_array_16k = speech_array_16k / np.max(np.abs(speech_array_16k))
             
-            # Load with whisper format for language detection
-            whisper_audio = whisper.load_audio(audio_path)
-            whisper_audio = whisper.pad_or_trim(whisper_audio)
-            
             return {
                 "age_audio": speech_array_16k.astype(np.float32),
-                "whisper_audio": whisper_audio,
                 "sample_rate": 16000
             }
         except Exception as e:
@@ -717,70 +617,12 @@ class AudioClassifier:
                 torch.cuda.empty_cache()
             return None, None, None, "error"
 
-    def _detect_language_from_audio_data(self, audio_data):
-        """Detect language from pre-loaded audio data with better error handling"""
-        if audio_data is None:
-            print("⚠️ No audio data provided for language detection")
-            return None
-        
-        try:
-            whisper_model = self._get_whisper_model()
-            whisper_audio = audio_data["whisper_audio"]
-            
-            # Clear GPU cache if using CUDA
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            # Make log-Mel spectrogram and move to the same device as the model
-            mel = whisper.log_mel_spectrogram(whisper_audio).to(whisper_model.device)
-            
-            # Detect the spoken language
-            with torch.no_grad():
-                try:
-                    _, probs = whisper_model.detect_language(mel)
-                    
-                    # Ensure probs is a dict (as expected by whisper)
-                    if isinstance(probs, list) and len(probs) > 0 and isinstance(probs[0], dict):
-                        probs = probs[0]
-                    
-                    if not isinstance(probs, dict):
-                        print("⚠️ Language detection failed: probs is not a dict")
-                        return None
-                    
-                    if not probs:
-                        print("⚠️ Language detection failed: empty probabilities")
-                        return None
-                    
-                    detected_language, confidence = max(probs.items(), key=lambda x: x[1])
-                    print(f"  Language detection: {detected_language} (confidence: {confidence:.3f})")
-                    
-                    # Clear GPU memory after processing
-                    del mel
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    
-                    # Return True if Vietnamese is detected with reasonable confidence
-                    return detected_language == "vi" and confidence > 0.1
-                    
-                except torch.cuda.OutOfMemoryError as e:
-                    print(f"⚠️ CUDA out of memory during language detection: {e}")
-                    # Clear all cached memory
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                    return None
-            
-        except Exception as e:
-            print(f"⚠️ Language detection error: {e}")
-            # Clean up on any error
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            return None
 
     def get_combined_prediction(self, audio_path: str, youtube_url: Optional[str] = None) -> dict:
         """
-        Get combined prediction with shared audio loading and improved memory management.
-        Uses YouTube transcript API for language detection when available, falling back to audio-based detection.
+        Get combined prediction with shared audio loading.
+        Uses YouTube transcript API for language detection when available.
+        For non-YouTube content, assumes Vietnamese language.
         
         Args:
             audio_path (str): Path to the .wav audio file.
@@ -790,19 +632,19 @@ class AudioClassifier:
             dict: Combined prediction results with both age/gender and language detection
         """
         try:
-            # Load audio once for both predictions
+            # Load audio once for age detection
             audio_data = self._load_audio_once(audio_path)
             if audio_data is None:
                 return {"error": "Failed to load audio file"}
             
-            # Get language detection first (less memory intensive)
-            # Try YouTube transcript API first if URL is provided
+            # Get language detection using transcript API for YouTube content
             if youtube_url:
-                print("🚀 Attempting transcript-based language detection...")
+                print("🚀 Using transcript-based language detection...")
                 is_vietnamese = self.is_vietnamese_from_youtube_url(youtube_url)
             else:
-                print("🔄 Using audio-based language detection...")
-                is_vietnamese = self._detect_language_from_audio_data(audio_data)
+                print("⚠️  No YouTube URL provided - assuming content is Vietnamese")
+                print("   For YouTube videos, provide youtube_url parameter for accurate language detection")
+                is_vietnamese = True  # Assume Vietnamese for non-YouTube content
             
             # Skip age detection if not Vietnamese - performance optimization
             if not is_vietnamese:

@@ -274,17 +274,19 @@ class YoutubeAudioDownloader:
         # Add additional anti-detection measures
         opts['sleep_interval'] = random.uniform(8, 15)  # Random sleep between 8-15 seconds
         opts['max_sleep_interval'] = 20  # Maximum sleep interval
+        # Force Android client to bypass bot detection
+        opts['extractor_args'] = {
+            'youtube': {
+                'player_client': ['android']
+            }
+        }
+        # Avoid playlist processing unless explicitly desired
+        opts['noplaylist'] = True
         
         # Add anti-detection headers
         opts = self._add_anti_detection_headers(opts)
         
-        # Add cookie support
-        if self.cookies_file and os.path.exists(self.cookies_file):
-            opts['cookiefile'] = self.cookies_file
-            print(f"🍪 Using cookies from file: {self.cookies_file}")
-        elif self.cookies_from_browser:
-            opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
-            print(f"🍪 Using cookies from browser: {self.cookies_from_browser}")
+        # Do NOT use cookies by default when Android client is enabled
         
         return opts
     
@@ -319,17 +321,7 @@ class YoutubeAudioDownloader:
             return False
     
     def _apply_cookies_to_opts(self, ydl_opts):
-        """Consistently apply cookies to yt-dlp options to prevent detection"""
-        # Validate cookies before applying
-        if not self._validate_cookies():
-            print("⚠️ Cookie validation failed - proceeding without cookies (may trigger detection)")
-            return ydl_opts
-        
-        if self.cookies_file and os.path.exists(self.cookies_file):
-            ydl_opts['cookiefile'] = self.cookies_file
-        elif self.cookies_from_browser:
-            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
-        
+        """Bypass cookie usage when using Android client; return options unchanged."""
         return ydl_opts
     
     def _extract_video_id(self, url):
@@ -420,40 +412,41 @@ class YoutubeAudioDownloader:
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
             ]),
-            'sleep_interval': random.uniform(3, 8),  # Increased sleep interval
-            'retries': 5,
-            'fragment_retries': 5,
+            'sleep_interval': random.uniform(1, 3),
+            'retries': 1,
+            'fragment_retries': 1,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android']
+                }
+            },
+            'noplaylist': True,
         }
-        
-        # Apply cookies consistently
-        ydl_opts = self._apply_cookies_to_opts(ydl_opts)
-        
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    if info is not None:
-                        duration_raw = info.get('duration')
-                        print(f"🔧 Retrieved metadata via yt-dlp (attempt {attempt + 1})")
-                        return {
-                            'duration': float(duration_raw) if duration_raw is not None else None,
-                            'title': info.get('title', ''),
-                            'uploader': info.get('uploader', ''),
-                            'upload_date': info.get('upload_date', ''),
-                            'view_count': info.get('view_count', 0),
-                            'like_count': info.get('like_count', 0),
-                            'description': info.get('description', '')
-                        }
-                    return None
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    print(f"⚠️ Error getting video info after {max_retries} attempts: {e}")
-                    return None
-                else:
-                    wait_time = (5 ** (attempt + 1)) + random.uniform(10, 20)  # Much longer waits: 35-45s, 135-145s, 635-645s
-                    print(f"⚠️ Attempt {attempt + 1} failed, retrying in {wait_time:.1f}s: {e}")
-                    time.sleep(wait_time)
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if info is not None:
+                duration_raw = info.get('duration')
+                print(f"🔧 Retrieved metadata via yt-dlp (android client)")
+                return {
+                    'duration': float(duration_raw) if duration_raw is not None else None,
+                    'title': info.get('title', ''),
+                    'uploader': info.get('uploader', ''),
+                    'upload_date': info.get('upload_date', ''),
+                    'view_count': info.get('view_count', 0),
+                    'like_count': info.get('like_count', 0),
+                    'description': info.get('description', '')
+                }
+        except Exception as e:
+            msg = str(e).lower()
+            # Mark as unavailable to allow caller to skip
+            if any(k in msg for k in ['video unavailable', 'removed by the uploader', 'private video', 'copyright']):
+                setattr(self, '_last_error_reason', 'unavailable')
+                print(f"⏭️  Skipping unavailable video: {e}")
+                return None
+            print(f"⚠️ Metadata retrieval error: {e}")
+        return None
 
     def get_video_duration(self, url):
         """
@@ -475,7 +468,6 @@ class YoutubeAudioDownloader:
         
         # Fallback to yt-dlp
         self._rate_limit_delay()
-        
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -484,29 +476,30 @@ class YoutubeAudioDownloader:
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
             ]),
-            'sleep_interval': random.uniform(3, 8),  # Increased sleep interval
+            'sleep_interval': random.uniform(1, 3),
+            'retries': 1,
+            'fragment_retries': 1,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android']
+                }
+            },
+            'noplaylist': True,
         }
-        
-        # Apply cookies consistently
-        ydl_opts = self._apply_cookies_to_opts(ydl_opts)
-        
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    if info is not None:
-                        duration = info.get('duration')
-                        return float(duration) if duration is not None else None
-                    return None
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    print(f"⚠️ Error getting video duration after {max_retries} attempts: {e}")
-                    return None
-                else:
-                    wait_time = (5 ** (attempt + 1)) + random.uniform(10, 20)  # Much longer waits: 35-45s, 135-145s, 635-645s
-                    print(f"⚠️ Duration attempt {attempt + 1} failed, retrying in {wait_time:.1f}s")
-                    time.sleep(wait_time)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if info is not None:
+                duration = info.get('duration')
+                return float(duration) if duration is not None else None
+        except Exception as e:
+            msg = str(e).lower()
+            if any(k in msg for k in ['video unavailable', 'removed by the uploader', 'private video', 'copyright']):
+                setattr(self, '_last_error_reason', 'unavailable')
+                print(f"⏭️  Skipping unavailable video: {e}")
+                return None
+            print(f"⚠️ Error getting video duration: {e}")
+        return None
     
     def get_audio_length_from_file(self, audio_file_path):
         """
@@ -581,13 +574,13 @@ class YoutubeAudioDownloader:
         if cleanup_count > 0:
             print(f"🧹 Cleaned up {cleanup_count} existing file(s)")
         
-        # Configure dynamic options with anti-detection
+        # Configure dynamic options with anti-detection (Android client; no cookies)
         print("⚙️ Configuring yt-dlp options...")
         ydl_opts = self._get_dynamic_ydl_opts()
-        ydl_opts = self._apply_cookies_to_opts(ydl_opts) # Apply cookies here
+        # Ensure no cookies are applied
         ydl_opts['outtmpl'] = m4a_file
         
-        max_retries = 3
+        max_retries = 1
         for attempt in range(max_retries):
             try:
                 # Add exponential backoff between retries
@@ -640,24 +633,20 @@ class YoutubeAudioDownloader:
                 error_msg = str(e).lower()
                 print(f"❌ Download attempt {attempt + 1} failed: {str(e)[:100]}...")
                 
+                # Unavailable or removed => mark skip and stop
+                if any(k in error_msg for k in ['video unavailable', 'removed by the uploader', 'private video', 'copyright']):
+                    setattr(self, '_last_error_reason', 'unavailable')
+                    print("⏭️  Skipping this video due to availability restrictions")
+                    return None, None
+                
                 # Check for specific YouTube blocking errors
                 if any(keyword in error_msg for keyword in ['sign in', 'bot', 'automated', 'captcha', 'blocked']):
                     print(f"🚫 Bot detection triggered on attempt {attempt + 1}")
-                    if attempt == max_retries - 1:
-                        print("❌ All attempts exhausted due to bot detection")
-                        print("🔄 Trying ffmpeg fallback as last resort...")
+                    print("❌ Attempt exhausted due to bot detection; trying ffmpeg fallback...")
                         return self.download_audio_via_ffmpeg(url, index)
-                    else:
-                        # Longer wait for bot detection
-                        wait_time = 60 + random.uniform(30, 60)  # 90-120 seconds
-                        print(f"⏳ Bot detected, waiting {wait_time:.1f}s before retry...")
-                        time.sleep(wait_time)
-                        # Reset request counter to get fresh delays
-                        self._reset_request_counter()
                 else:
                     print(f"⚠️ General download error (attempt {attempt + 1})")
-                    if attempt == max_retries - 1:
-                        print("❌ All yt-dlp attempts failed, trying ffmpeg fallback...")
+                    print("❌ yt-dlp attempt failed, trying ffmpeg fallback...")
                         return self.download_audio_via_ffmpeg(url, index)
                 
                 # Clean up any partial files on error
@@ -672,8 +661,8 @@ class YoutubeAudioDownloader:
                 if cleanup_count > 0:
                     print(f"🧹 Cleaned up {cleanup_count} partial file(s)")
         
-        # If we get here, all yt-dlp attempts failed, try ffmpeg fallback
-        print("❌ All yt-dlp methods exhausted, trying ffmpeg fallback as last resort...")
+        # If we get here, try ffmpeg fallback
+        print("❌ yt-dlp method failed, trying ffmpeg fallback as last resort...")
         return self.download_audio_via_ffmpeg(url, index)
     
     def download_audio_via_api(self, url, index=0):
@@ -992,8 +981,22 @@ class YoutubeAudioDownloader:
         """Convert using subprocess directly."""
         import subprocess
         cmd = [ffmpeg_path, '-i', input_file, '-y', output_file]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        return result.returncode == 0
+        try:
+            # Use shorter timeout and better process control
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                     stdin=subprocess.PIPE, text=True)
+            process.stdin.close()
+            stdout, stderr = process.communicate(timeout=120)  # Reduced from 5min to 2min
+            return process.returncode == 0
+        except subprocess.TimeoutExpired:
+            print("⏰ FFmpeg conversion timeout, killing process...")
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            return False
     
     def _convert_with_basic_command(self, input_file, output_file, ffmpeg_path):
         """Convert using basic os.system command."""
@@ -1069,11 +1072,12 @@ class YoutubeAudioDownloader:
             # Step 1: Get direct stream URL using yt-dlp
             print("📡 Getting direct stream URL...")
             
-            # Build yt-dlp command to extract URL only
+            # Build yt-dlp command to extract URL only with Android client
             cmd_get_url = [
                 "yt-dlp", 
                 "--get-url", 
                 "-f", "bestaudio/best",
+                "--extractor-args", "youtube:player_client=android",  # Use Android client to bypass restrictions
                 "--user-agent", self.ydl_opts.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0')
             ]
             
@@ -1085,8 +1089,22 @@ class YoutubeAudioDownloader:
             
             cmd_get_url.append(url)
             
-            # Execute yt-dlp to get direct URL
-            result = subprocess.run(cmd_get_url, capture_output=True, text=True, timeout=30)
+            # Execute yt-dlp to get direct URL with better timeout handling
+            try:
+                process = subprocess.Popen(cmd_get_url, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                         stdin=subprocess.PIPE, text=True)
+                process.stdin.close()
+                stdout, stderr = process.communicate(timeout=30)
+                result = type('Result', (), {'returncode': process.returncode, 'stdout': stdout, 'stderr': stderr})()
+            except subprocess.TimeoutExpired:
+                print("⏰ yt-dlp URL extraction timeout")
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                return None, None
             
             if result.returncode != 0:
                 error_msg = result.stderr.strip()
@@ -1125,8 +1143,22 @@ class YoutubeAudioDownloader:
                 wav_file
             ]
             
-            # Execute ffmpeg
-            result = subprocess.run(cmd_ffmpeg, capture_output=True, text=True, timeout=300)
+            # Execute ffmpeg with better timeout handling
+            try:
+                process = subprocess.Popen(cmd_ffmpeg, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                         stdin=subprocess.PIPE, text=True)
+                process.stdin.close()
+                stdout, stderr = process.communicate(timeout=120)  # Reduced from 5min to 2min
+                result = type('Result', (), {'returncode': process.returncode, 'stdout': stdout, 'stderr': stderr})()
+            except subprocess.TimeoutExpired:
+                print("⏰ FFmpeg download timeout")
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                return None, None
             
             if result.returncode != 0:
                 error_msg = result.stderr.strip()
@@ -1235,13 +1267,16 @@ class YoutubeAudioDownloader:
         }
 
 def main():
-    """Main function to handle command line interface."""
+    """Main function to handle command line interface with behavior aligned to the alternative script."""
     config = Config()
-    # When executed as a script, redirect outputs to final audio folder and use a JSON manifest
     base_dir = os.path.dirname(os.path.abspath(__file__))
     final_output_dir = os.path.join(base_dir, 'final_audio_files')
     os.makedirs(final_output_dir, exist_ok=True)
     config.output_dir = final_output_dir
+
+    # Initialize downloader early (no special CLI flags; behavior mirrors alternative script)
+    downloader = YoutubeAudioDownloader(config)
+    setattr(downloader, 'no_length_limit', True)
     
     manifest_path = os.path.join(final_output_dir, 'manifest.json')
     
@@ -1250,28 +1285,21 @@ def main():
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # Backward compatibility: older manifests were plain lists
                     if isinstance(data, list):
                         records = data
-                        total = 0.0
                         try:
                             total = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
                         except Exception:
                             total = 0.0
-                        return {
-                            'total_duration_seconds': total,
-                            'records': records
-                        }
+                        return {'total_duration_seconds': total, 'records': records}
                     elif isinstance(data, dict):
                         records = data.get('records', []) or []
-                        # Ensure total exists; if missing, compute from records
                         if 'total_duration_seconds' not in data:
                             try:
                                 data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
                             except Exception:
                                 data['total_duration_seconds'] = 0.0
                         else:
-                            # Normalize type
                             try:
                                 data['total_duration_seconds'] = float(data['total_duration_seconds'])
                             except Exception:
@@ -1280,10 +1308,7 @@ def main():
                         return data
         except Exception:
             pass
-        return {
-            'total_duration_seconds': 0.0,
-            'records': []
-        }
+        return {'total_duration_seconds': 0.0, 'records': []}
     
     def _save_manifest(path, manifest_data):
         try:
@@ -1304,8 +1329,8 @@ def main():
     manifest_records = manifest_data.get('records', [])
     manifest_index = _index_manifest(manifest_records)
 
-    # Backfill missing titles using yt-dlp metadata extraction
-    def _backfill_missing_titles_by_metadata():
+    # Backfill missing titles (mirrors alternative script timing; use metadata to avoid downloads)
+    def _backfill_missing_titles_similar_behavior():
         updated = False
         updated_count = 0
         failed_count = 0
@@ -1324,11 +1349,9 @@ def main():
                 if rec.get('status') == 'success' and not rec.get('title'):
                     url_val = rec.get('url')
                     if not url_val:
-                        # Try reconstruct from video_id
                         vid_local = rec.get('video_id')
                         if vid_local:
                             url_val = f"https://www.youtube.com/watch?v={vid_local}"
-                    
                     if not url_val:
                         vid_print = rec.get('video_id') or 'unknown'
                         print(f"⏭️  [{idx_bf}/{len(manifest_records)}] Skipping record {vid_print}: No URL available")
@@ -1340,41 +1363,33 @@ def main():
                     
                     title_val = None
                     try:
-                        print(f"   📡 Getting video info via yt-dlp for {vid_print}...")
-                        video_info = downloader.get_video_info_with_duration(url_val)
-                        if video_info and video_info.get('title'):
-                            title_val = video_info['title']
+                        info = downloader.get_video_info_with_duration(url_val)
+                        if info and info.get('title'):
+                            title_val = info['title']
                             print(f"   🎯 Found title: {title_val[:50]}...")
                         else:
-                            print(f"   ⚠️  No title found in video info")
-                            
-                    except Exception as metadata_error:
-                        print(f"   ❌ Metadata extraction failed: {str(metadata_error)[:100]}...")
-                        title_val = None
+                            print("   ⚠️ No title found in metadata")
+                    except Exception as e:
+                        print(f"   ❌ Metadata extraction failed: {str(e)[:100]}...")
                     
                     if title_val:
                         rec['title'] = title_val
                         updated = True
                         updated_count += 1
-                        print(f"   ✅ SUCCESS: Title added - {title_val[:50]}...")
-                        
-                        # Persist incrementally so progress is visible
                         try:
                             manifest_data['records'] = manifest_records
                             _save_manifest(manifest_path, manifest_data)
-                            print(f"   💾 Manifest updated incrementally")
+                            print("   💾 Manifest updated incrementally")
                         except Exception as save_error:
-                            print(f"   ⚠️  Incremental save failed: {save_error}")
+                            print(f"   ⚠️ Incremental save failed: {save_error}")
                     else:
                         failed_count += 1
                         print(f"   ❌ FAILED: Could not retrieve title for {vid_print}")
-                        
             except Exception as record_error:
                 failed_count += 1
                 vid_print = rec.get('video_id', 'unknown') if rec else 'unknown'
                 print(f"❌ [{idx_bf}/{len(manifest_records)}] Record processing failed for {vid_print}: {str(record_error)[:100]}...")
         
-        # Final summary and cleanup
         print("=" * 60)
         print("📊 BACKFILL SUMMARY:")
         print(f"   📋 Total records processed: {len(manifest_records)}")
@@ -1386,27 +1401,17 @@ def main():
         if updated:
             try:
                 print("💾 Finalizing manifest update...")
+                try:
                 manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
+                except Exception:
+                    manifest_data['total_duration_seconds'] = 0.0
                 manifest_data['records'] = manifest_records
                 _save_manifest(manifest_path, manifest_data)
-                print(f"✅ Backfill complete! Updated titles for {updated_count}/{total_missing} record(s).")
-                
-                if failed_count > 0:
-                    print(f"⚠️  Note: {failed_count} record(s) could not be updated (network issues, deleted videos, etc.)")
-                    
+                print("✅ Backfill complete!")
             except Exception as final_save_error:
                 print(f"❌ Final manifest save failed: {final_save_error}")
                 
-        elif total_missing > 0:
-            print("⚠️ Backfill attempted, but no titles could be updated.")
-            if failed_count == total_missing:
-                print("💡 All attempts failed - check network connection or try again later")
-            elif skipped_count == total_missing:
-                print("💡 All records were skipped due to missing URLs")
-        
-        print("=" * 60)
-
-    _backfill_missing_titles_by_metadata()
+    _backfill_missing_titles_similar_behavior()
 
     def _to_camel_case_lower_suffix(text: str, max_len: int = 40) -> str:
         try:
@@ -1420,205 +1425,35 @@ def main():
     
     def _build_basename(idx: int, url: str) -> str:
         vid = downloader._extract_video_id(url)
-        info = downloader.get_video_info_with_duration(url) if not test_duration else None
+        info = downloader.get_video_info_with_duration(url)
         title = (info or {}).get('title') if info else None
-        camel = _to_camel_case_lower_suffix(title)
+        camel = _to_camel_case_lower_suffix(title or '')
         short_id = (vid or 'noid')[:8]
         return f"{idx:04d}_{short_id}_{camel}"
     
-    args = sys.argv[1:]
-    
-    # Parse cookie-related arguments
-    cookies_file = None
-    cookies_browser = None
-    
-    # Check for cookie arguments
-    if '--cookies-file' in args:
-        try:
-            cookie_index = args.index('--cookies-file')
-            if cookie_index + 1 < len(args):
-                cookies_file = args[cookie_index + 1]
-                # Remove the argument and its value
-                args.pop(cookie_index)  # Remove --cookies-file
-                args.pop(cookie_index)  # Remove the file path
-        except (ValueError, IndexError):
-            print("⚠️ Error: --cookies-file requires a file path")
-            exit(1)
-    
-    if '--cookies-browser' in args:
-        try:
-            browser_index = args.index('--cookies-browser')
-            if browser_index + 1 < len(args):
-                cookies_browser = args[browser_index + 1]
-                # Remove the argument and its value
-                args.pop(browser_index)  # Remove --cookies-browser
-                args.pop(browser_index)  # Remove the browser name
-        except (ValueError, IndexError):
-            print("⚠️ Error: --cookies-browser requires a browser name")
-            exit(1)
-    
-    # Try to load cookies from crawler_config.json if not provided via command line
-    if not cookies_file and not cookies_browser:
-        try:
-            crawler_config_path = os.path.join(base_dir, 'crawler_config.json')
-            if os.path.exists(crawler_config_path):
-                print("🔍 No command line cookies provided, checking crawler_config.json...")
-                with open(crawler_config_path, 'r', encoding='utf-8') as f:
-                    crawler_config = json.load(f)
-                
-                cookie_settings = crawler_config.get('cookie_settings', {})
-                if cookie_settings.get('enabled', False):
-                    method = cookie_settings.get('method', 'file')
-                    
-                    if method == 'file':
-                        config_cookies_file = cookie_settings.get('cookies_file_path', 'cookies.txt')
-                        # Ensure we have the full path
-                        if not os.path.isabs(config_cookies_file):
-                            config_cookies_file = os.path.join(base_dir, config_cookies_file)
-                        
-                        if os.path.exists(config_cookies_file):
-                            cookies_file = config_cookies_file
-                            print(f"✅ Loaded cookies from crawler config: {cookies_file}")
-                        else:
-                            print(f"⚠️ Cookie file from config not found: {config_cookies_file}")
-                            
-                    elif method == 'browser':
-                        cookies_browser = cookie_settings.get('browser_name', 'chrome')
-                        print(f"✅ Loaded browser cookies from crawler config: {cookies_browser}")
-                    
-                    else:
-                        print(f"⚠️ Unknown cookie method in config: {method}")
-                else:
-                    print("⚠️ Cookies not enabled in crawler_config.json")
-            else:
-                print("ℹ️ No crawler_config.json found - using command line cookies only")
-        except Exception as e:
-            print(f"⚠️ Error loading cookies from crawler_config.json: {e}")
-
-    # Initialize downloader with cookie settings
-    downloader = YoutubeAudioDownloader(config, cookies_file, cookies_browser)
-    # Allow unlimited length when running as a script
-    setattr(downloader, 'no_length_limit', True)
-    
-    if len(args) > 3:
-        print("Too many arguments.")
-        print("Usage: python youtube_audio_downloader.py [options] <optional link> [--test-duration] [--from-file <path>]")
-        print("Options:")
-        print("  --cookies-file <path>     Use cookies from Netscape format file")
-        print("  --cookies-browser <name>  Use cookies from browser (chrome, firefox, safari, edge, opera, brave)")
-        print("  --test-duration          Test video duration extraction without downloading")
-        print("  --from-file <path>       Download all URLs listed in the given file (one per line)")
-        print("")
-        print("Cookie Configuration:")
-        print("  • Command line options (--cookies-file, --cookies-browser) take priority")
-        print("  • If no command line cookies provided, automatically loads from crawler_config.json")
-        print("  • Supports both file-based cookies (cookies.txt) and browser cookies")
-        print("")
-        print("Examples:")
-        print("  python youtube_audio_downloader.py --cookies-file cookies.txt https://youtube.com/watch?v=...")
-        print("  python youtube_audio_downloader.py --cookies-browser chrome https://youtube.com/watch?v=...")
-        print("  python youtube_audio_downloader.py https://youtube.com/watch?v=...  # Uses crawler_config.json cookies")
-        print("  python youtube_audio_downloader.py --cookies-browser firefox --test-duration https://youtube.com/watch?v=...")
-        exit()
-    
-    # Check for test duration flag
-    test_duration = False
-    if "--test-duration" in args:
-        test_duration = True
-        args.remove("--test-duration")
-
-    # Optional: batch from file
-    from_file_path = None
-    if "--from-file" in args:
-        try:
-            fi = args.index("--from-file")
-            if fi + 1 < len(args):
-                from_file_path = args[fi + 1]
-                # Remove flag and value
-                args.pop(fi)
-                args.pop(fi)
-        except (ValueError, IndexError):
-            print("⚠️ Error: --from-file requires a path")
-            exit(1)
-    
-    # Show cookie status
-    cookie_status = downloader.get_cookie_status()
-    if cookie_status['cookies_file'] or cookie_status['cookies_from_browser']:
-        print(f"🍪 Cookie configuration: {cookie_status}")
-        if cookie_status['cookies_file_exists']:
-            print(f"🍪 Cookie file size: {cookie_status['cookies_file_size']} bytes")
-    else:
-        print("⚠️ No cookies configured - downloads may fail for private/restricted videos")
-        print("💡 Configure cookies in crawler_config.json or use --cookies-file/--cookies-browser")
-    
-    if len(args) == 0:
-        # Batch mode if no args and collected file exists or --from-file provided
-        default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
-        urls_file = from_file_path or (default_urls_file if os.path.exists(default_urls_file) else None)
-        if urls_file:
-            print(f"📋 Batch download from: {urls_file}")
-            if not os.path.exists(urls_file):
-                print("❌ URLs file not found")
-                exit(1)
-            with open(urls_file, 'r', encoding='utf-8') as f:
-                urls = [line.strip() for line in f if line.strip() and line.strip().startswith('http')]
-            print(f"🔢 Total URLs: {len(urls)}")
-            
-            # Batch processing statistics
-            successful_downloads = 0
-            failed_downloads = 0
-            skipped_downloads = 0
-            
-            for idx, url in enumerate(urls, start=1):
-                print(f"\n===== [{idx}/{len(urls)}] PROCESSING URL =====")
-                print(f"🔗 URL: {url}")
-                
-                # Skip if already downloaded per manifest
+    def _run_single(url: str, index: int):
                 vid = downloader._extract_video_id(url)
                 if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
-                    existing_record = manifest_index[vid]
-                    print(f"⏭️  Already downloaded (manifest) - skipping")
-                    print(f"   📄 Existing file: {existing_record.get('output_path', 'Unknown')}")
-                    print(f"   📊 Duration: {existing_record.get('duration_seconds', 'Unknown')}s")
-                    skipped_downloads += 1
-                    continue
-                    
-                if test_duration:
-                    print("🧪 Testing duration extraction only...")
-                    downloader.test_video_duration_extraction(url)
-                else:
-                    # Set per-download basename for nicer filenames
-                    try:
-                        print("🏷️  Building filename...")
-                        config._current_basename = _build_basename(idx, url)
-                        print(f"   Base name: {config._current_basename}")
-                    except Exception as basename_error:
-                        print(f"⚠️  Basename generation failed: {basename_error}")
+            print("⏭️  Already downloaded (manifest) - skipping")
+            return
+        try:
+            config._current_basename = _build_basename(index, url)
+        except Exception:
                         config._current_basename = None
                         
-                    print(f"🚀 Starting download for video {idx}...")
-                    result = downloader.download_audio_from_yturl(url, index=idx)
-                    
-                    # Clear basename to avoid leaking into next calls unexpectedly
+        result = downloader.download_audio_from_yturl(url, index=index)
                     config._current_basename = None
                     
                     if isinstance(result, tuple):
                         wav_path, duration = result
                         if wav_path:
-                            print(f"✅ DOWNLOAD SUCCESS: {wav_path}")
-                            successful_downloads += 1
-                            
-                            # Try to fetch title for manifest
+                print(f"✅ Saved: {wav_path} ({duration}s)")
                             title_val = ''
                             try:
-                                video_info = downloader.get_video_info_with_duration(url)
-                                title_val = video_info.get('title', '') if video_info else ''
-                                if title_val:
-                                    print(f"📝 Title: {title_val[:50]}...")
+                    info = downloader.get_video_info_with_duration(url)
+                    title_val = info.get('title', '') if info else ''
                             except Exception:
                                 title_val = ''
-                            
-                            # Update manifest on success
                             record = {
                                 'video_id': vid or '',
                                 'url': url,
@@ -1628,220 +1463,57 @@ def main():
                                 'duration_seconds': duration,
                                 'title': title_val
                             }
-                            
                             if vid:
                                 manifest_index[vid] = record
-                                # Rebuild records from index while preserving any without video_id
                                 others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
                                 manifest_records[:] = others + list(manifest_index.values())
                             else:
                                 manifest_records.append(record)
-
-                            # Recompute total_duration_seconds to ensure correctness
                             try:
                                 manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
                             except Exception:
                                 manifest_data['total_duration_seconds'] = 0.0
                             manifest_data['records'] = manifest_records
-
                             _save_manifest(manifest_path, manifest_data)
-                            print(f"💾 Manifest updated successfully")
                         else:
-                            print(f"❌ DOWNLOAD FAILED: No output file created")
-                            failed_downloads += 1
+                print("❌ Download failed: No output file created")
                     elif result:
                         print(f"✅ DOWNLOAD SUCCESS (legacy): {result}")
-                        successful_downloads += 1
                     else:
-                        print(f"❌ DOWNLOAD FAILED: No result returned")
-                        failed_downloads += 1
-                        
-            # Batch completion summary
-            print("\n" + "=" * 60)
-            print("📊 BATCH DOWNLOAD SUMMARY")
-            print("=" * 60)
-            print(f"📋 Total URLs processed: {len(urls)}")
-            print(f"✅ Successful downloads: {successful_downloads}")
-            print(f"❌ Failed downloads: {failed_downloads}")
-            print(f"⏭️  Skipped (already downloaded): {skipped_downloads}")
-            
-            success_rate = (successful_downloads / len(urls)) * 100 if urls else 0
-            print(f"📈 Success rate: {success_rate:.1f}%")
-            
-            if failed_downloads > 0:
-                print(f"⚠️  Note: {failed_downloads} download(s) failed - check network connection or video availability")
-            
-            print("🎉 Batch download completed")
-            print("=" * 60)
-            return
-        # Fallback to interactive
-        print("📝 Interactive mode - no URLs file found")
-        url = input("Enter Youtube URL: ")
-        if test_duration:
-            print("🧪 Testing duration extraction only...")
-            downloader.test_video_duration_extraction(url)
+            print("❌ Download failed")
+
+    args = sys.argv[1:]
+    default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
+
+    if not args:
+        if os.path.exists(default_urls_file):
+            with open(default_urls_file, 'r', encoding='utf-8') as f:
+                urls = [line.strip() for line in f if line.strip().startswith('http')]
+            print(f"📋 Batch download from: {default_urls_file} ({len(urls)} URLs)")
+            for idx, url in enumerate(urls, start=1):
+                print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+                _run_single(url, idx)
+            print("\n🎉 Batch download completed")
         else:
-            print(f"🔗 Processing URL: {url}")
-            
-            # Skip if already downloaded per manifest
-            vid = downloader._extract_video_id(url)
-            if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
-                existing_record = manifest_index[vid]
-                print("⏭️  Already downloaded (manifest) - skipping")
-                print(f"   📄 Existing file: {existing_record.get('output_path', 'Unknown')}")
-                print(f"   📊 Duration: {existing_record.get('duration_seconds', 'Unknown')}s")
+            print("⚠️ No URLs file found. Usage: python youtube_audio_downloader.py <url>|--from-file <path>")
                 return
                 
-            # Set per-download basename (single run: index 1)
-            try:
-                print("🏷️  Building filename...")
-                config._current_basename = _build_basename(1, url)
-                print(f"   Base name: {config._current_basename}")
-            except Exception as basename_error:
-                print(f"⚠️  Basename generation failed: {basename_error}")
-                config._current_basename = None
-                
-            print("🚀 Starting single URL download...")
-            result = downloader.download_audio_from_yturl(url)
-            config._current_basename = None
-            
-            if isinstance(result, tuple):
-                wav_path, duration = result
-                if wav_path:
-                    print(f"✅ DOWNLOAD SUCCESS: {wav_path}")
-                    if duration:
-                        minutes = int(duration // 60)
-                        seconds = int(duration % 60)
-                        print(f"📏 Video duration: {minutes}:{seconds:02d}")
-                    
-                    # Try to fetch title for manifest
-                    title_val = ''
-                    try:
-                        video_info = downloader.get_video_info_with_duration(url)
-                        title_val = video_info.get('title', '') if video_info else ''
-                        if title_val:
-                            print(f"📝 Title: {title_val[:50]}...")
-                    except Exception:
-                        title_val = ''
-                    
-                    # Update manifest on success
-                    if wav_path:
-                        record = {
-                            'video_id': vid or '',
-                            'url': url,
-                            'output_path': wav_path,
-                            'status': 'success',
-                            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                            'duration_seconds': duration,
-                            'title': title_val
-                        }
-                        if vid:
-                            manifest_index[vid] = record
-                            others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
-                            manifest_records[:] = others + list(manifest_index.values())
-                        else:
-                            manifest_records.append(record)
-                        
-                        # Recompute total_duration_seconds to ensure correctness
-                        try:
-                            manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
-                        except Exception:
-                            manifest_data['total_duration_seconds'] = 0.0
-                        manifest_data['records'] = manifest_records
-                        
-                        _save_manifest(manifest_path, manifest_data)
-                        print(f"💾 Manifest updated successfully")
-                else:
-                    print(f"❌ DOWNLOAD FAILED: No output file created")
-            else:
-                # Handle backward compatibility
-                if result:
-                    print(f"✅ DOWNLOAD SUCCESS (legacy): {result}")
-                else:
-                    print(f"❌ DOWNLOAD FAILED: No result returned")
-    else:
-        url = args[0]
-        print(f"🔗 Command line URL: {url}")
-        
-        if test_duration:
-            print("🧪 Testing duration extraction only...")
-            downloader.test_video_duration_extraction(url)
-        else:
-            # Skip if already downloaded per manifest
-            vid = downloader._extract_video_id(url)
-            if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
-                existing_record = manifest_index[vid]
-                print("⏭️  Already downloaded (manifest) - skipping")
-                print(f"   📄 Existing file: {existing_record.get('output_path', 'Unknown')}")
-                print(f"   📊 Duration: {existing_record.get('duration_seconds', 'Unknown')}s")
+    if args[0] == '--from-file' and len(args) >= 2:
+        file_path = args[1]
+        if not os.path.exists(file_path):
+            print("❌ URLs file not found")
+            sys.exit(1)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            urls = [line.strip() for line in f if line.strip().startswith('http')]
+        print(f"📋 Batch download from: {file_path} ({len(urls)} URLs)")
+        for idx, url in enumerate(urls, start=1):
+            print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+            _run_single(url, idx)
+        print("\n🎉 Batch download completed")
                 return
                 
-            try:
-                print("🏷️  Building filename...")
-                config._current_basename = _build_basename(1, url)
-                print(f"   Base name: {config._current_basename}")
-            except Exception as basename_error:
-                print(f"⚠️  Basename generation failed: {basename_error}")
-                config._current_basename = None
-                
-            print("🚀 Starting command line URL download...")
-            result = downloader.download_audio_from_yturl(url)
-            config._current_basename = None
-            
-            if isinstance(result, tuple):
-                wav_path, duration = result
-                if wav_path:
-                    print(f"✅ DOWNLOAD SUCCESS: {wav_path}")
-                    if duration:
-                        minutes = int(duration // 60)
-                        seconds = int(duration % 60)
-                        print(f"📏 Video duration: {minutes}:{seconds:02d}")
-                    
-                    # Try to fetch title for manifest
-                    title_val = ''
-                    try:
-                        video_info = downloader.get_video_info_with_duration(url)
-                        title_val = video_info.get('title', '') if video_info else ''
-                        if title_val:
-                            print(f"📝 Title: {title_val[:50]}...")
-                    except Exception:
-                        title_val = ''
-                    
-                    # Update manifest on success
-                    if wav_path:
-                        record = {
-                            'video_id': vid or '',
-                            'url': url,
-                            'output_path': wav_path,
-                            'status': 'success',
-                            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                            'duration_seconds': duration,
-                            'title': title_val
-                        }
-                        if vid:
-                            manifest_index[vid] = record
-                            others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
-                            manifest_records[:] = others + list(manifest_index.values())
-                        else:
-                            manifest_records.append(record)
-                        
-                        # Recompute total_duration_seconds to ensure correctness
-                        try:
-                            manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
-                        except Exception:
-                            manifest_data['total_duration_seconds'] = 0.0
-                        manifest_data['records'] = manifest_records
-                        
-                        _save_manifest(manifest_path, manifest_data)
-                        print(f"💾 Manifest updated successfully")
-                else:
-                    print(f"❌ DOWNLOAD FAILED: No output file created")
-            else:
-                # Handle backward compatibility
-                if result:
-                    print(f"✅ DOWNLOAD SUCCESS (legacy): {result}")
-                else:
-                    print(f"❌ DOWNLOAD FAILED: No result returned")
+    for i, url in enumerate(args, start=1):
+        _run_single(url, i)
 
 if __name__ == "__main__":
     main()

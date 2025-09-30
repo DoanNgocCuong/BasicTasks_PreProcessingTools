@@ -42,7 +42,6 @@ if torch.cuda.is_available():
     torch.backends.cudnn.allow_tf32 = True
 
 
-# Configuration constants
 class Config:
     """Configuration constants for the YouTube video crawler."""
     
@@ -51,29 +50,29 @@ class Config:
     YOUTUBE_VIDEO_URL_PREFIX = "https://www.youtube.com/watch?v="
     MAX_RESULTS_PER_REQUEST = 50
     
-    # File names (relative to the script's directory)
+    # File paths
     _SCRIPT_DIR = Path(__file__).parent
-    DEFAULT_CONFIG_FILE = str(_SCRIPT_DIR / "crawler_config.json")
-    DEFAULT_URLS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/collected_video_urls.txt")
-    DEFAULT_REPORT_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/collection_report.txt")
-    DEFAULT_DETAILED_RESULTS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/detailed_collection_results.json")
-    DEFAULT_STATISTICS_FILE = str(_SCRIPT_DIR / "youtube_url_outputs/query_efficiency_statistics.json")
-    
-    # Additional file paths for main() function
     DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "youtube_url_outputs"
+    DEFAULT_CONFIG_FILE = str(_SCRIPT_DIR / "crawler_config.json")
+    DEFAULT_URLS_FILE = str(DEFAULT_OUTPUT_DIR / "collected_video_urls.txt")
+    DEFAULT_REPORT_FILE = str(DEFAULT_OUTPUT_DIR / "collection_report.txt")
+    DEFAULT_DETAILED_RESULTS_FILE = str(DEFAULT_OUTPUT_DIR / "detailed_collection_results.json")
+    DEFAULT_STATISTICS_FILE = str(DEFAULT_OUTPUT_DIR / "query_efficiency_statistics.json")
     DEFAULT_MAIN_URLS_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_collected_video_urls.txt")
     DEFAULT_MAIN_DETAILED_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_detailed_results.json")
-    DEFAULT_BACKUP_FILE_PREFIX = str(DEFAULT_OUTPUT_DIR / "backup")  # Will be used with timestamp
+    DEFAULT_BACKUP_FILE_PREFIX = str(DEFAULT_OUTPUT_DIR / "backup")
 
-    # User input validation
+    # Validation constants
     MIN_TARGET_COUNT = 1
     MAX_RECOMMENDED_PER_QUERY = 100
     
-    # Debug and logging
-    DEBUG_PREFIX = "🔍 DEBUG: "
-    
     # Default values
+    DEBUG_PREFIX = "🔍 DEBUG: "
     DEFAULT_QUERY = "bé giới thiệu bản thân"
+    
+    # Common message patterns
+    CHUNK_ANALYSIS_TIME_ESTIMATE = 20  # seconds per chunk
+    MAX_CONSECUTIVE_NO_CHILDREN = 3
 
 
 @dataclass
@@ -203,7 +202,7 @@ class ConfigLoader:
         self.output.print_info(f"Language detection: {'Enabled' if config.enable_language_detection else 'Disabled (assuming all videos are Vietnamese)'}")
         self.output.print_info(f"Target videos per query: {config.target_videos_per_query}")
         self.output.print_info(f"Total queries: {len(config.search_queries)}")
-        self.output.print_info(f"Primary downloader: {'yt-dlp' if config.yt_dlp_primary else 'pytube'}")
+        self.output.print_info(f"Download strategy: yt-dlp (Android client) → pytube fallback")
         
         total_target_count = config.target_videos_per_query * len(config.search_queries)
         self.output.print_info(f"Total target videos: {total_target_count}")
@@ -354,12 +353,10 @@ class CollectionReporter:
         """Report start of video evaluation."""
         self.output.print_progress("Evaluating video for children's voice...")
     
-    def report_evaluation_result(self, has_children_voice: bool, is_new_channel: bool) -> None:
+    def report_evaluation_result(self, has_children_voice: bool, is_new_channel: bool = True) -> None:
         """Report evaluation results."""
-        if has_children_voice and is_new_channel:
-            self.output.print_result("Video contains children's voice and channel is new")
-        elif not is_new_channel:
-            self.output.print_result("Channel already reviewed", False)
+        if has_children_voice:
+            self.output.print_result("Video contains children's voice")
         else:
             self.output.print_result("No children's voice detected", False)
     
@@ -539,6 +536,8 @@ class ErrorReporter:
     def report_audio_download_failure(self) -> None:
         """Report audio download failure."""
         self.output.print_error("Failed to download or convert audio.")
+        print("💡 Both yt-dlp (Android client) and pytube methods failed")
+        print("   This may indicate video access restrictions or network issues")
     
     def report_quota_exceeded_error(self, current_collected: int, total_target: int) -> None:
         """Report YouTube API quota exceeded error with guidance."""
@@ -748,20 +747,15 @@ class YouTubeVideoCrawler:
             config (CrawlerConfig, optional): Configuration object. If not provided, will load from file.
             config_file_path (str, optional): Path to configuration file. Uses default if not provided.
         """
-        # Initialize output management
         self.output = OutputManager()
         self.reporter = CollectionReporter(self.output)
         self.error_reporter = ErrorReporter(self.output)
         
-        # Load configuration from file if not provided
         if config is None:
             config_loader = ConfigLoader(self.output, config_file_path)
             config = config_loader.load_config()
         
-        # Store configuration
         self.config = config
-        
-        # Initialize output analyzer
         self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
         
         self.debug = DebugLogger(enabled=config.debug_mode)
@@ -770,22 +764,20 @@ class YouTubeVideoCrawler:
         self.api_key = self.api_keys[0] if self.api_keys else None
         self.base_url = Config.YOUTUBE_API_BASE_URL
         
-        # Configure parallel processing from environment config
         from env_config import config as env_config
         self.max_workers = env_config.MAX_WORKERS
-        # Configurable polling interval for quota restoration checks
         self.poll_interval_seconds = getattr(env_config, 'POLL_INTERVAL_SECONDS', 300)
         
         if config.debug_mode:
             self.debug.log(f"Parallel processing configured with max_workers: {self.max_workers}")
         
-        # API quota and rate limiting management
+        # API quota and rate limiting
         self.api_quota_exceeded = False
         self.api_requests_made = 0
         self.last_api_request_time = 0
-        self.min_request_interval = 0.1  # Minimum seconds between API requests
+        self.min_request_interval = 0.1
         self.max_retries = 3
-        self.retry_delays = [1, 2, 4]  # Exponential backoff delays in seconds
+        self.retry_delays = [1, 2, 4]
         
         # Initialize audio downloaders based on priority configuration
         # Extract cookie settings from config if available
@@ -815,18 +807,15 @@ class YouTubeVideoCrawler:
         # Set audio downloader (always use alternative downloader which provides both methods)
         self.audio_downloader = self.alternative_downloader
         
-        # Log the configured priority
-        if config.yt_dlp_primary:
-            print(f"🔧 Audio downloader priority: yt-dlp fallback method (working), pytube fallback")
-        else:  # pytube primary
-            print(f"🔧 Audio downloader priority: pytube primary, yt-dlp fallback method")
+        # Log the download strategy
+        print(f"🔧 Audio download strategy: yt-dlp (Android client) → pytube fallback")
+        print(f"🔧 Using reliable yt-dlp with Android client to bypass YouTube restrictions")
         
         # Initialize YouTube Data API service for enhanced metadata retrieval
         self.youtube_service = None
         self._init_youtube_data_api()
         
         # Global variables for multiple query processing
-        self.reviewed_channels: List[str] = []
         self.total_video_urls: List[str] = []
         self.collected_url_set: Set[str] = set()  # For fast duplicate checking
         
@@ -876,7 +865,8 @@ class YouTubeVideoCrawler:
     
     def _download_audio_with_fallback(self, url: str, index: int) -> Optional[Tuple[str, float]]:
         """
-        Download audio using primary downloader with automatic fallback.
+        Download audio using the reliable yt-dlp method with Android client configuration.
+        Falls back to pytube only if yt-dlp completely fails.
         
         Args:
             url (str): YouTube video URL
@@ -885,49 +875,39 @@ class YouTubeVideoCrawler:
         Returns:
             Optional[Tuple[str, float]]: (wav_file_path, duration) or None if both fail
         """
-        # Try primary download method
-        primary_method = "yt-dlp" if self.config.yt_dlp_primary else "pytube"
+        # Always try yt-dlp with Android client first (most reliable method)
         try:
-            print(f"🔄 Attempting download with primary method: {primary_method}")
-            
-            if self.config.yt_dlp_primary:
-                # Use the working yt-dlp fallback method as primary
-                result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
-            else:
-                # Use pytube method as primary
-                result = self.alternative_downloader.download_audio_pytube(url, index)
+            print(f"🔄 Downloading with yt-dlp (Android client)")
+            print(f"📡 Using proven method that bypasses YouTube restrictions")
+            result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
             
             if result and result[0]:  # Check if we got a valid result with file path
-                print(f"✅ Primary download method ({primary_method}) succeeded")
+                print(f"✅ Primary yt-dlp download successful")
                 return result
             else:
-                print(f"❌ Primary download method ({primary_method}) returned no result")
+                print(f"❌ yt-dlp method returned no result")
                 
         except Exception as e:
-            print(f"❌ Primary download method ({primary_method}) failed: {str(e)[:100]}...")
+            print(f"❌ yt-dlp method failed: {str(e)[:100]}...")
         
-        # Fallback to secondary download method
-        fallback_method = "pytube" if self.config.yt_dlp_primary else "yt-dlp"
+        # Fallback to pytube only if yt-dlp fails
         try:
-            print(f"🔄 Attempting fallback method: {fallback_method}")
-            
-            if self.config.yt_dlp_primary:
-                # Fallback to pytube method
-                result = self.alternative_downloader.download_audio_pytube(url, index)
-            else:
-                # Fallback to yt-dlp method
-                result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
+            print(f"🔄 FALLBACK: Attempting pytube download as last resort")
+            print(f"⚠️  Note: pytube may have issues with YouTube's recent restrictions")
+            result = self.alternative_downloader.download_audio_pytube(url, index)
             
             if result and result[0]:  # Check if we got a valid result with file path
-                print(f"✅ Fallback download method ({fallback_method}) succeeded")
+                print(f"✅ Fallback pytube download successful (despite restrictions)")
                 return result
             else:
-                print(f"❌ Fallback download method ({fallback_method}) returned no result")
+                print(f"❌ Pytube fallback returned no result")
                 
         except Exception as e:
-            print(f"❌ Fallback download method ({fallback_method}) failed: {str(e)[:100]}...")
+            print(f"❌ Pytube fallback failed: {str(e)[:100]}...")
         
-        print(f"❌ Both downloaders failed for URL: {url[:50]}...")
+        print(f"❌ DOWNLOAD FAILED: Both yt-dlp (Android client) and pytube failed")
+        print(f"🔗 URL: {url[:50]}...")
+        print(f"💡 This may indicate severe YouTube restrictions or network issues")
         return None
     
     def _ensure_video_duration_seconds(self, video: Dict) -> None:
@@ -1405,7 +1385,58 @@ class YouTubeVideoCrawler:
                 # Fallback to default chunk size if no limit configured
                 chunk_duration = 300  # 5 minutes
             
-            print(f"🧩 Starting chunk analysis for {video_duration:.1f}s video (chunk size: {chunk_duration}s)")
+            print(f"🧩 Starting chunk analysis for {video_duration:.1f}s video")
+            print(f"📏 Chunk size: {chunk_duration}s ({chunk_duration//60}m {chunk_duration%60}s)")
+            print(f"🎯 Will analyze chunks sequentially with early exit on success or 3 consecutive non-children chunks")
+            
+            # OPTIMIZATION: Determine video language ONCE before chunk processing using transcript-based detection
+            is_video_vietnamese = True  # Default assumption
+            detected_language = 'vi'
+            language_detection_time = 0.0
+            
+            if self.config.enable_language_detection:
+                print(f"🌐 Determining video language once before chunk analysis using transcript...")
+                language_start_time = time.time()
+                
+                # Get shared classifier for transcript-based language detection
+                classifier = self._get_shared_classifier()
+                
+                # Use transcript-based language detection (much faster and more reliable than audio-based)
+                try:
+                    is_video_vietnamese = classifier.is_vietnamese_from_youtube_url(video['url'])
+                    detected_language = 'vi' if is_video_vietnamese else 'other'
+                    language_detection_time = time.time() - language_start_time
+                    
+                    print(f"📋 Video language determined via transcript: {'Vietnamese' if is_video_vietnamese else f'Not Vietnamese ({detected_language})'}")
+                    
+                    # If video is not Vietnamese, we can exit early without processing chunks
+                    if not is_video_vietnamese:
+                        print(f"⏭️  EARLY EXIT: Video is not Vietnamese - skipping all chunk analysis")
+                        print(f"⚡ Time saved: Avoided processing chunks and audio analysis")
+                        
+                        total_analysis_time = time.time() - analysis_start_time
+                        return AnalysisResult(
+                            is_vietnamese=False,
+                            detected_language=detected_language,
+                            has_children_voice=False,
+                            confidence=0.0,
+                            error=None,
+                            total_analysis_time=total_analysis_time,
+                            children_detection_time=0.0,
+                            video_length_seconds=video_duration,
+                            chunks_analyzed=0,
+                            positive_chunk_index=None,
+                            was_chunked=True
+                        )
+                        
+                except Exception as lang_error:
+                    print(f"⚠️  Transcript-based language detection failed: {lang_error}")
+                    print(f"🔄 Assuming video is Vietnamese and proceeding with chunk analysis")
+                    is_video_vietnamese = True
+                    detected_language = 'vi'
+                    language_detection_time = time.time() - language_start_time
+            else:
+                print(f"⚠️  Language detection disabled - assuming video is Vietnamese")
             
             # Split audio into chunks
             chunk_files = self._split_audio_into_chunks(audio_file_path, chunk_duration)
@@ -1413,8 +1444,8 @@ class YouTubeVideoCrawler:
             if not chunk_files:
                 print("❌ Failed to create audio chunks")
                 return AnalysisResult(
-                    is_vietnamese=False,
-                    detected_language='error',
+                    is_vietnamese=is_video_vietnamese,
+                    detected_language=detected_language,
                     has_children_voice=None,
                     confidence=0,
                     error='Failed to create audio chunks',
@@ -1426,19 +1457,19 @@ class YouTubeVideoCrawler:
                     was_chunked=True
                 )
             
-            print(f"📊 Analyzing {len(chunk_files)} chunks sequentially with early exit...")
+            total_chunks = len(chunk_files)
+            estimated_total_time = total_chunks * Config.CHUNK_ANALYSIS_TIME_ESTIMATE
+            print(f"📊 Created {total_chunks} chunks for children's voice analysis")
+            print(f"⏱️  Estimated analysis time: ~{estimated_total_time//60}m {estimated_total_time%60}s (with early exit optimization)")
             
-            # Get shared classifier
             classifier = self._get_shared_classifier()
-            
-            # Track consecutive disqualified chunks for early exit
-            consecutive_disqualified_count = 0
-            MAX_CONSECUTIVE_DISQUALIFIED = 3
-            chunk_index = 0  # Initialize in case loop exits early
+            consecutive_no_children_count = 0
+            chunk_index = 0
             
             # Analyze chunks sequentially with early exit
             for chunk_index, chunk_file in enumerate(chunk_files, 1):
-                print(f"\n🔍 Analyzing chunk {chunk_index}/{len(chunk_files)}...")
+                print(f"\n🔍 Analyzing chunk {chunk_index}/{total_chunks} for children's voice...")
+                print(f"📈 Progress: {((chunk_index-1)/total_chunks)*100:.1f}% complete")
                 
                 try:
                     # Clear GPU memory before each chunk
@@ -1450,58 +1481,41 @@ class YouTubeVideoCrawler:
                     except (ImportError, AttributeError):
                         pass  # torch or CUDA not available
                     
-                    # Analyze this chunk
+                    # OPTIMIZED: Only perform children's voice detection (no language detection per chunk)
                     children_detection_start_time = time.time()
-                    
-                    if self.config.enable_language_detection:
-                        # Combined analysis (language + children's voice)
-                        combined_result = classifier.get_combined_prediction(chunk_file, youtube_url=video['url'])
-                    else:
-                        # Children's voice only (assume Vietnamese)
-                        children_voice_result = classifier.is_child_audio(chunk_file)
-                        combined_result = {
-                            'is_vietnamese': True,
-                            'detected_language': 'vi',
-                            'is_child': children_voice_result,
-                            'confidence': 1.0 if children_voice_result is not None else 0.0
-                        }
-                    
+                    children_voice_result = classifier.is_child_audio(chunk_file)
                     children_detection_duration = time.time() - children_detection_start_time
                     
-                    # Check for critical errors
-                    if "error" in combined_result and "age_detection_failed" not in combined_result:
-                        print(f"❌ Chunk {chunk_index} analysis failed: {combined_result['error']}")
-                        consecutive_disqualified_count += 1
+                    # Check for critical errors in children's voice detection
+                    if children_voice_result is None:
+                        print(f"❌ Chunk {chunk_index} children's voice detection failed")
+                        consecutive_no_children_count += 1
                         
-                        # Check for consecutive failure threshold
-                        if consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED:
-                            print(f"⏭️  EARLY EXIT: {MAX_CONSECUTIVE_DISQUALIFIED} consecutive chunk analysis failures")
-                            print(f"⚡ Skipping remaining {len(chunk_files) - chunk_index} chunks to save time")
+                        if consecutive_no_children_count >= Config.MAX_CONSECUTIVE_NO_CHILDREN:
+                            remaining_chunks = total_chunks - chunk_index
+                            time_saved = remaining_chunks * Config.CHUNK_ANALYSIS_TIME_ESTIMATE
+                            print(f"⏭️  EARLY EXIT: {Config.MAX_CONSECUTIVE_NO_CHILDREN} consecutive chunk analysis failures")
+                            print(f"🔧 Technical issue detected - stopping analysis to prevent resource waste")
+                            print(f"⚡ Saving ~{time_saved//60}m {time_saved%60}s by skipping {remaining_chunks} remaining chunks")
                             break
                         
                         continue  # Try next chunk
                     
-                    # Extract results
-                    is_vietnamese = combined_result.get('is_vietnamese', False)
-                    children_voice_result = combined_result.get('is_child', None)
-                    confidence = combined_result.get('confidence', 0.0)
+                    print(f"📋 Chunk {chunk_index} children's voice detection: {children_voice_result}")
                     
-                    # Handle age detection failures gracefully
-                    if "age_detection_failed" in combined_result:
-                        print(f"⚠️  Chunk {chunk_index}: Age detection failed ({combined_result['age_detection_failed']}) but language detection succeeded")
-                        if is_vietnamese:
-                            children_voice_result = None  # Unknown due to age detection failure
-                            confidence = 0.5  # Moderate confidence
-                    
-                    print(f"📋 Chunk {chunk_index} results: Vietnamese={is_vietnamese}, Children={children_voice_result}, Confidence={confidence:.2f}")
-                    
-                    # Check if this chunk meets our criteria (Vietnamese + children's voice)
-                    if is_vietnamese and children_voice_result:
-                        print(f"🎯 SUCCESS! Chunk {chunk_index} contains Vietnamese children's voice")
-                        print(f"⚡ Early exit: Found positive match, skipping remaining {len(chunk_files) - chunk_index} chunks")
+                    if children_voice_result:
+                        remaining_chunks = total_chunks - chunk_index
+                        time_saved = remaining_chunks * Config.CHUNK_ANALYSIS_TIME_ESTIMATE
+                        print(f"🎯 SUCCESS! Chunk {chunk_index} contains children's voice")
+                        print(f"⚡ Early exit: Found positive match in {chunk_index}/{total_chunks} chunks")
+                        if remaining_chunks > 0:
+                            print(f"⏱️  Time saved: ~{time_saved//60}m {time_saved%60}s by skipping {remaining_chunks} remaining chunks")
                         
                         # Clean up chunk files
                         self._cleanup_chunk_files(chunk_files)
+                        
+                        # Clean up any temporary download files
+                        self.audio_downloader.cleanup_all_temp_files()
                         
                         # Report successful early exit
                         self.reporter.report_chunk_analysis_result(
@@ -1510,13 +1524,13 @@ class YouTubeVideoCrawler:
                             True
                         )
                         
-                        # Return positive result
+                        # Return positive result (language already determined)
                         total_analysis_time = time.time() - analysis_start_time
                         return AnalysisResult(
-                            is_vietnamese=True,
-                            detected_language='vi',
+                            is_vietnamese=is_video_vietnamese,
+                            detected_language=detected_language,
                             has_children_voice=True,
-                            confidence=confidence,
+                            confidence=1.0,  # High confidence since we found children's voice
                             error=None,
                             total_analysis_time=total_analysis_time,
                             children_detection_time=children_detection_duration,
@@ -1526,66 +1540,61 @@ class YouTubeVideoCrawler:
                             was_chunked=True
                         )
                     else:
-                        # This chunk doesn't meet full criteria
-                        reasons = []
-                        if not is_vietnamese:
-                            reasons.append(f"not Vietnamese (detected: {combined_result.get('detected_language', 'unknown')})")
-                        if not children_voice_result:
-                            reasons.append("no children's voice detected")
+                        # This chunk doesn't contain children's voice
+                        print(f"❌ Chunk {chunk_index}: no children's voice detected")
                         
-                        print(f"❌ Chunk {chunk_index}: {', '.join(reasons)}")
+                        # OPTIMIZED: Count consecutive chunks without children's voice
+                        consecutive_no_children_count += 1
                         
-                        # Only count as disqualified if not Vietnamese
-                        # Vietnamese content without children's voice still shows promise
-                        if not is_vietnamese:
-                            consecutive_disqualified_count += 1
-                        else:
-                            # Reset counter for Vietnamese content (shows video has potential)
-                            print(f"🔄 Vietnamese content detected - resetting consecutive counter")
-                            consecutive_disqualified_count = 0
-                        
-                        # Check for consecutive disqualification threshold
-                        if consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED:
-                            print(f"⏭️  EARLY EXIT: {MAX_CONSECUTIVE_DISQUALIFIED} consecutive non-Vietnamese chunks")
-                            print(f"📊 Pattern suggests video unlikely to contain Vietnamese children's content")
-                            print(f"⚡ Skipping remaining {len(chunk_files) - chunk_index} chunks to save time")
+                        if consecutive_no_children_count >= Config.MAX_CONSECUTIVE_NO_CHILDREN:
+                            remaining_chunks = total_chunks - chunk_index
+                            time_saved = remaining_chunks * Config.CHUNK_ANALYSIS_TIME_ESTIMATE
+                            print(f"⏭️  EARLY EXIT: {Config.MAX_CONSECUTIVE_NO_CHILDREN} consecutive chunks without children's voice")
+                            print(f"📊 Pattern analysis: Video unlikely to contain children's voice")
+                            print(f"⚡ Intelligent skip: Saving ~{time_saved//60}m {time_saved%60}s by skipping {remaining_chunks} remaining chunks")
+                            print(f"📈 Analyzed {chunk_index}/{total_chunks} chunks ({(chunk_index/total_chunks)*100:.1f}%) before exit")
                             break
                         
                         continue
                         
                 except Exception as e:
                     print(f"❌ Error analyzing chunk {chunk_index}: {e}")
-                    consecutive_disqualified_count += 1
+                    consecutive_no_children_count += 1
                     
-                    # Check for consecutive error threshold
-                    if consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED:
-                        print(f"⏭️  EARLY EXIT: {MAX_CONSECUTIVE_DISQUALIFIED} consecutive chunk errors")
-                        print(f"⚡ Skipping remaining {len(chunk_files) - chunk_index} chunks due to persistent errors")
+                    if consecutive_no_children_count >= Config.MAX_CONSECUTIVE_NO_CHILDREN:
+                        remaining_chunks = total_chunks - chunk_index
+                        time_saved = remaining_chunks * Config.CHUNK_ANALYSIS_TIME_ESTIMATE
+                        print(f"⏭️  EARLY EXIT: {Config.MAX_CONSECUTIVE_NO_CHILDREN} consecutive chunk analysis errors")
+                        print(f"🔧 Technical issue detected - stopping analysis to prevent resource waste")
+                        print(f"⚡ Saving ~{time_saved//60}m {time_saved%60}s by skipping {remaining_chunks} remaining chunks")
                         break
                     
                     continue  # Try next chunk
             
-            # If we get here, no chunk met the criteria or we had early exit
-            was_early_exit = consecutive_disqualified_count >= MAX_CONSECUTIVE_DISQUALIFIED
+            was_early_exit = consecutive_no_children_count >= Config.MAX_CONSECUTIVE_NO_CHILDREN
             
             if was_early_exit:
-                print(f"❌ Analysis terminated early due to {MAX_CONSECUTIVE_DISQUALIFIED} consecutive non-Vietnamese chunks")
-                print(f"📊 Analyzed {chunk_index}/{len(chunk_files)} chunks before early exit")
+                completion_rate = (chunk_index/total_chunks)*100
+                print(f"📊 CHUNK ANALYSIS SUMMARY:")
+                print(f"   └─ Early exit after analyzing {chunk_index}/{total_chunks} chunks ({completion_rate:.1f}%)")
+                print(f"   └─ Reason: {Config.MAX_CONSECUTIVE_NO_CHILDREN} consecutive chunks without children's voice")
+                print(f"   └─ Result: Video classified as not containing children's voice")
                 
-                # Report early exit
                 self.reporter.report_chunk_analysis_result(
                     chunk_index, 
                     None, 
                     False, 
                     was_early_exit=True, 
-                    early_exit_reason=f"{MAX_CONSECUTIVE_DISQUALIFIED} consecutive non-Vietnamese chunks"
+                    early_exit_reason=f"{Config.MAX_CONSECUTIVE_NO_CHILDREN} consecutive chunks without children's voice"
                 )
             else:
-                print(f"❌ No chunks contained Vietnamese children's voice ({len(chunk_files)} chunks analyzed)")
+                print(f"📊 CHUNK ANALYSIS SUMMARY:")
+                print(f"   └─ Completed full analysis of {total_chunks}/{total_chunks} chunks (100%)")
+                print(f"   └─ Result: No children's voice detected in any chunk")
                 
                 # Report normal completion
                 self.reporter.report_chunk_analysis_result(
-                    len(chunk_files), 
+                    total_chunks, 
                     None, 
                     False
                 )
@@ -1593,14 +1602,17 @@ class YouTubeVideoCrawler:
             # Clean up chunk files
             self._cleanup_chunk_files(chunk_files)
             
+            # Clean up any temporary download files
+            self.audio_downloader.cleanup_all_temp_files()
+            
             total_analysis_time = time.time() - analysis_start_time
             
             # Use actual chunks analyzed for the result
-            chunks_actually_analyzed = chunk_index if was_early_exit else len(chunk_files)
+            chunks_actually_analyzed = chunk_index if was_early_exit else total_chunks
             
             return AnalysisResult(
-                is_vietnamese=False,  # No chunk met full criteria
-                detected_language='mixed_or_unknown',
+                is_vietnamese=is_video_vietnamese,  # Keep the originally determined language result
+                detected_language=detected_language,
                 has_children_voice=False,
                 confidence=0.0,
                 error=None,
@@ -1619,10 +1631,13 @@ class YouTubeVideoCrawler:
             if chunk_files:
                 self._cleanup_chunk_files(chunk_files)
             
+            # Clean up any temporary download files
+            self.audio_downloader.cleanup_all_temp_files()
+            
             total_analysis_time = time.time() - analysis_start_time
             return AnalysisResult(
-                is_vietnamese=False,
-                detected_language='error',
+                is_vietnamese=is_video_vietnamese if 'is_video_vietnamese' in locals() else False,
+                detected_language=detected_language if 'detected_language' in locals() else 'error',
                 has_children_voice=None,
                 confidence=0,
                 error=str(e),
@@ -1731,7 +1746,12 @@ class YouTubeVideoCrawler:
             
             # Check if we should use chunking for this video
             if should_use_chunking or (video_duration and MAX_VIDEO_DURATION_SECONDS and video_duration > MAX_VIDEO_DURATION_SECONDS):
-                print(f"🧩 Using chunk analysis for long video ({video_duration:.1f}s)")
+                duration_minutes = int(video_duration // 60)
+                duration_seconds = int(video_duration % 60)
+                limit_minutes = int(MAX_VIDEO_DURATION_SECONDS // 60) if MAX_VIDEO_DURATION_SECONDS else 0
+                
+                print(f"🧩 LONG VIDEO DETECTED: {duration_minutes}m {duration_seconds}s (limit: {limit_minutes}m)")
+                print(f"📋 Switching to intelligent chunk analysis with early exit optimization")
                 
                 # Use chunk-based analysis (ensure video_duration is not None)
                 actual_duration = video_duration or estimated_duration or 0.0
@@ -1742,11 +1762,11 @@ class YouTubeVideoCrawler:
                 
                 return result
             
-            # Debug: Print the audio file path being passed to classifier
-            print(f"🔍 DEBUG: Audio file path for analysis: {wav_file_path}")
-            print(f"🔍 DEBUG: File exists: {Path(wav_file_path).exists()}")
-            if Path(wav_file_path).exists():
-                print(f"🔍 DEBUG: File size: {Path(wav_file_path).stat().st_size} bytes")
+            # Standard video analysis (not chunked)
+            duration_minutes = int(video_duration // 60) if video_duration else 0
+            duration_seconds = int(video_duration % 60) if video_duration else 0
+            print(f"🎵 STANDARD ANALYSIS: {duration_minutes}m {duration_seconds}s video")
+            print(f"📋 Using optimized combined prediction (language + children's voice detection)")
             
             # OPTIMIZED: Use shared classifier instance and combined prediction
             classifier = self._get_shared_classifier()
@@ -1856,14 +1876,12 @@ class YouTubeVideoCrawler:
             self.debug.log_timing(f"Children's voice detection for video {display_index}", children_detection_duration)
             
             # Report timing information
-            was_chunked = getattr(self, '_last_analysis_was_chunked', False)
-            chunks_analyzed = getattr(self, '_last_analysis_chunks', None)
             self.reporter.report_audio_analysis_timing(
                 video['title'], 
                 total_analysis_time, 
                 children_detection_duration,
-                was_chunked=was_chunked,
-                chunks_analyzed=chunks_analyzed
+                was_chunked=False,
+                chunks_analyzed=None
             )
             
             # Update timing statistics
@@ -1874,6 +1892,9 @@ class YouTubeVideoCrawler:
             
             # Force memory cleanup after analysis
             self._force_memory_cleanup()
+            
+            # Clean up any temporary download files
+            self.audio_downloader.cleanup_all_temp_files()
             
             return AnalysisResult(
                 is_vietnamese=is_vietnamese,
@@ -1899,6 +1920,9 @@ class YouTubeVideoCrawler:
             
             # Force memory cleanup on error
             self._force_memory_cleanup()
+            
+            # Clean up any temporary download files
+            self.audio_downloader.cleanup_all_temp_files()
             
             return AnalysisResult(
                 is_vietnamese=False,
@@ -2382,9 +2406,7 @@ class YouTubeVideoCrawler:
             self.total_videos_with_children_voice += 1
         
         # Check collection criteria
-        is_new_channel = video['channel_id'] not in self.reviewed_channels
-        
-        if evaluation_result and is_new_channel:
+        if evaluation_result:
             self.reporter.report_evaluation_result(True, True)
             
             # Add current video to collection
@@ -2401,14 +2423,13 @@ class YouTubeVideoCrawler:
                     result['was_collected'] = True
                     break
             
-            # Mark channel as reviewed and process similar videos with PARALLEL processing
+            # Process similar videos with PARALLEL processing
             added_count = self._process_similar_videos_parallel(video, query_stats)
-            self.reviewed_channels.append(video['channel_id'])
             self.reporter.report_channel_added_count(added_count)
             
             return True
         else:
-            self.reporter.report_evaluation_result(evaluation_result or False, is_new_channel)
+            self.reporter.report_evaluation_result(evaluation_result or False, True)
             return False
     
     def _process_similar_videos(self, main_video: Dict, query_stats: Dict) -> int:
@@ -2723,7 +2744,7 @@ class YouTubeVideoCrawler:
                 'videos_vietnamese': 0,
                 'videos_not_vietnamese': 0
             }
-            video_index_current = 0
+            current_video_index = 0
             
             # Get initial video list for current query
             video_list = self.search_videos_by_query(current_query)
@@ -2744,25 +2765,24 @@ class YouTubeVideoCrawler:
             
             # Collection loop for current query
             while (query_stats['videos_collected'] < self.target_video_count_per_query and 
-                   video_index_current < len(video_list) and 
+                   current_video_index < len(video_list) and 
                    self.current_session_collected_count < self.total_target_count):
                 # If quota hits mid-loop, pause and resume without losing position
                 if self.api_quota_exceeded:
                     self.output.print_warning("⚠️  API quota exceeded during processing - waiting to resume...")
                     self.wait_until_any_key_restored()
                 
-                current_video_processing = video_list[video_index_current]
+                current_video_processing = video_list[current_video_index]
                 query_stats['videos_reviewed'] += 1
                 
                 self.reporter.report_video_processing(
-                    video_index_current, 
+                    current_video_index, 
                     len(video_list),
                     current_video_processing['title'],
                     current_video_processing['channel_title']
                 )
                 
-                # Set current video index for debugging
-                self.current_video_index = video_index_current
+                self.current_video_index = current_video_index
                 
                 # Process the video
                 video_added = self._process_main_video(current_video_processing, query_stats)
@@ -2773,7 +2793,7 @@ class YouTubeVideoCrawler:
                     query_stats['videos_collected'], 
                     self.target_video_count_per_query
                 )
-                video_index_current += 1
+                current_video_index += 1
             
             # Create and save statistics for current query
             current_query_stats = self._create_query_statistics(current_query, query_stats)
@@ -2809,7 +2829,7 @@ class YouTubeVideoCrawler:
             self.total_videos_not_vietnamese,
             self.query_list,
             self.query_statistics,
-            self.reviewed_channels
+            []
         )
         print(final_report)
         
@@ -2833,7 +2853,7 @@ class YouTubeVideoCrawler:
             self.total_videos_not_vietnamese,
             self.query_list,
             self.query_statistics,
-            self.reviewed_channels,
+            [],
             self.current_session_collected_urls,
             self.start_time,
             self.start_datetime,
@@ -2867,9 +2887,8 @@ class YouTubeVideoCrawler:
     
     def _count_new_channels_for_query(self, query: str) -> int:
         """Count new channels found for a specific query."""
-        # This is a simplified implementation
-        # In a full implementation, you would track which channels were found for each query
-        return len(self.reviewed_channels)
+        # Channel tracking removed - return 0
+        return 0
     
     def save_results(self, filename: str = Config.DEFAULT_URLS_FILE) -> None:
         """
@@ -2945,13 +2964,10 @@ def main():
             searcher.validate_collected_urls(main_urls_filename)
         else:
             output_manager.print_warning("No videos were collected")
-        
-        # Log completion information
                 
     except Exception as e:
         error_reporter.report_unexpected_error(e)
 
-    # Final message
     print("✅ YouTube Video Crawler execution completed")
     
 if __name__ == "__main__":
