@@ -3,7 +3,7 @@
 TikTok Video Crawler for Children's Voice Content Collection
 
 This module provides comprehensive functionality for collecting and analyzing TikTok videos
-onta            \"description\": \"Default configuration for TikTok Children's Voice Crawler with Keyword Search\"ning Vietese children's voices. It integrates with TikTok RapidAPI to search
+onta            \"description\": \"Default configuration for TikTok Children's Voice Crawler with Keyword Search\"ning Vietese children's voices. It integrates with TikTok RapidA        self.output.print_progress(f\"Collecting videos from keyword: '{keyword}' (EXHAUSTIVE mode)\")       self.output.print_progress(f\"Collecting videos from keyword: '{keyword}' (EXHAUSTIVE mode)\")I to search
 for videos, downloads and analyzes adio content using machine learning models, and provides
 detailed reporting and statistics.
 
@@ -365,13 +365,15 @@ class TikTokVideoCollector:
         self.output.print_progress(f"Collecting videos from keyword: '{keyword}'")
         
         try:
-            # Use the paginated search method for better results
-            if max_videos > 50:
-                # For large requests, use pagination
-                videos = self.api_client.search_videos_by_keyword_with_pagination(keyword, max_videos)
+            # Always use exhaustive pagination for complete extraction
+            if max_videos > 50 or max_videos == 0:
+                # Use exhaustive pagination to get ALL available results
+                self.output.print_info(f"Using EXHAUSTIVE pagination for '{keyword}' (max: {max_videos if max_videos > 0 else 'ALL'})")
+                videos = self.api_client.search_videos_by_keyword_with_pagination(keyword, max_videos if max_videos > 0 else None)
             else:
                 # For smaller requests, use single request
-                videos = self.api_client.search_videos_by_keyword(keyword, count=max_videos)
+                response = self.api_client.search_videos_by_keyword(keyword, count=max_videos)
+                videos = response.get('data', {}).get('videos', []) if isinstance(response, dict) else []
             
             if not videos:
                 self.output.print_warning(f"No videos found for keyword: '{keyword}'")
