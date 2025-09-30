@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment files
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Output directories
+tiktok_url_outputs/
+temp_audio/
+final_audio_files/
+tiktok_audio_outputs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp_*
+temp_*
+
+# Audio/Video files
+*.wav
+*.mp3
+*.mp4
+*.webm
+*.m4a
+*.flac
+
+# Model files (these are large and downloaded automatically)
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Logs
+*.log
+crawler_output.log
+webserver.log
+webserver.txt
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Excel files (if used for testing)
+*.xlsx
+*.xls
+
+# Backup files
+backup_*
+*_backup_*
+
+# Cookies and session data
+cookies.txt
+session_*
+
+# API keys and sensitive data
+api_keys.txt
+keys.json
+
+# Test files
+test_*.wav
+test_*.mp4
+sample_*
