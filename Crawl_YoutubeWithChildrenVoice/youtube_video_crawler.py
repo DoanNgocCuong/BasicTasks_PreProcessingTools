@@ -85,6 +85,7 @@ class CrawlerConfig:
     max_recommended_per_query: int = 100
     min_target_count: int = 1
     download_method: str = "api_assisted"
+    yt_dlp_primary: bool = True
     cookie_settings: Optional[Dict[str, Any]] = None
     enable_language_detection: bool = True
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
@@ -152,6 +153,8 @@ class ConfigLoader:
                 search_queries=[q.strip() for q in config_data['search_queries']],
                 max_recommended_per_query=config_data.get('max_recommended_per_query', 100),
                 min_target_count=config_data.get('min_target_count', 1),
+                download_method=config_data.get('download_method', 'api_assisted'),
+                yt_dlp_primary=config_data.get('yt_dlp_primary', True),
                 cookie_settings=config_data.get('cookie_settings', None),
                 enable_language_detection=config_data.get('enable_language_detection', True)
             )
@@ -183,8 +186,10 @@ class ConfigLoader:
             ],
             "max_recommended_per_query": 100,
             "min_target_count": 1,
+            "download_method": "api_assisted",
+            "yt_dlp_primary": True,
             "enable_language_detection": True,
-            "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, and set enable_language_detection to false to disable language filtering and assume all videos are in Vietnamese."
+            "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, set yt_dlp_primary to true (uses yt-dlp as primary) or false (uses pytube as primary), and set enable_language_detection to false to disable language filtering and assume all videos are in Vietnamese."
         }
         
         with open(config_path, 'w', encoding='utf-8') as f:
@@ -198,6 +203,7 @@ class ConfigLoader:
         self.output.print_info(f"Language detection: {'Enabled' if config.enable_language_detection else 'Disabled (assuming all videos are Vietnamese)'}")
         self.output.print_info(f"Target videos per query: {config.target_videos_per_query}")
         self.output.print_info(f"Total queries: {len(config.search_queries)}")
+        self.output.print_info(f"Primary downloader: {'yt-dlp' if config.yt_dlp_primary else 'pytube'}")
         
         total_target_count = config.target_videos_per_query * len(config.search_queries)
         self.output.print_info(f"Total target videos: {total_target_count}")
@@ -778,8 +784,39 @@ class YouTubeVideoCrawler:
         self.max_retries = 3
         self.retry_delays = [1, 2, 4]  # Exponential backoff delays in seconds
         
-        # Initialize alternative audio downloader (using pytube instead of yt-dlp)
-        self.audio_downloader = YouTubeAudioDownloaderAlternative(output_dir="youtube_audio_outputs")
+        # Initialize audio downloaders based on priority configuration
+        # Extract cookie settings from config if available
+        cookies_file = None
+        cookies_from_browser = None
+        
+        if config.cookie_settings and config.cookie_settings.get('enabled', False):
+            method = config.cookie_settings.get('method', 'file')
+            
+            if method == 'file':
+                cookies_file_path = config.cookie_settings.get('cookies_file_path', 'cookies.txt')
+                # Ensure we have the full path
+                if not os.path.isabs(cookies_file_path):
+                    cookies_file_path = os.path.join(os.path.dirname(__file__), cookies_file_path)
+                cookies_file = cookies_file_path
+                
+            elif method == 'browser':
+                cookies_from_browser = config.cookie_settings.get('browser_name', 'chrome')
+        
+        # Initialize alternative downloader (provides both pytube and yt-dlp methods)
+        self.alternative_downloader = YouTubeAudioDownloaderAlternative(
+            output_dir="youtube_audio_outputs",
+            cookies_file=cookies_file,
+            cookies_from_browser=cookies_from_browser
+        )
+        
+        # Set audio downloader (always use alternative downloader which provides both methods)
+        self.audio_downloader = self.alternative_downloader
+        
+        # Log the configured priority
+        if config.yt_dlp_primary:
+            print(f"🔧 Audio downloader priority: yt-dlp fallback method (working), pytube fallback")
+        else:  # pytube primary
+            print(f"🔧 Audio downloader priority: pytube primary, yt-dlp fallback method")
         
         # Initialize YouTube Data API service for enhanced metadata retrieval
         self.youtube_service = None
@@ -833,7 +870,63 @@ class YouTubeVideoCrawler:
         self.download_index_lock = threading.Lock()  # Thread-safe lock for index assignment
         self.start_time = time.time()
         self.start_datetime = datetime.now()
+    
+    def _download_audio_with_fallback(self, url: str, index: int) -> Optional[Tuple[str, float]]:
+        """
+        Download audio using primary downloader with automatic fallback.
         
+        Args:
+            url (str): YouTube video URL
+            index (int): Index for filename uniqueness
+            
+        Returns:
+            Optional[Tuple[str, float]]: (wav_file_path, duration) or None if both fail
+        """
+        # Try primary download method
+        primary_method = "yt-dlp" if self.config.yt_dlp_primary else "pytube"
+        try:
+            print(f"🔄 Attempting download with primary method: {primary_method}")
+            
+            if self.config.yt_dlp_primary:
+                # Use the working yt-dlp fallback method as primary
+                result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
+            else:
+                # Use pytube method as primary
+                result = self.alternative_downloader.download_audio_pytube(url, index)
+            
+            if result and result[0]:  # Check if we got a valid result with file path
+                print(f"✅ Primary download method ({primary_method}) succeeded")
+                return result
+            else:
+                print(f"❌ Primary download method ({primary_method}) returned no result")
+                
+        except Exception as e:
+            print(f"❌ Primary download method ({primary_method}) failed: {str(e)[:100]}...")
+        
+        # Fallback to secondary download method
+        fallback_method = "pytube" if self.config.yt_dlp_primary else "yt-dlp"
+        try:
+            print(f"🔄 Attempting fallback method: {fallback_method}")
+            
+            if self.config.yt_dlp_primary:
+                # Fallback to pytube method
+                result = self.alternative_downloader.download_audio_pytube(url, index)
+            else:
+                # Fallback to yt-dlp method
+                result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
+            
+            if result and result[0]:  # Check if we got a valid result with file path
+                print(f"✅ Fallback download method ({fallback_method}) succeeded")
+                return result
+            else:
+                print(f"❌ Fallback download method ({fallback_method}) returned no result")
+                
+        except Exception as e:
+            print(f"❌ Fallback download method ({fallback_method}) failed: {str(e)[:100]}...")
+        
+        print(f"❌ Both downloaders failed for URL: {url[:50]}...")
+        return None
+    
     def _ensure_video_duration_seconds(self, video: Dict) -> None:
         """Ensure the video dict has numeric 'duration' in seconds when a max limit is configured."""
         try:
@@ -1534,12 +1627,10 @@ class YouTubeVideoCrawler:
         try:
             # Convert YouTube video to .wav file once for both analyses
             # Use thread-safe global download index to prevent file overlap
-            # Get both audio file path and video duration
-            # Use alternative downloader (pytube) to bypass bot detection
             current_download_index = self._get_next_download_index()
             
-            # Use the alternative downloader's main method
-            result = self.audio_downloader.download_audio_pytube(video['url'], index=current_download_index)
+            # Use the configured download method with automatic fallback
+            result = self._download_audio_with_fallback(video['url'], current_download_index)
             
             if result:
                 wav_file_path, video_duration = result

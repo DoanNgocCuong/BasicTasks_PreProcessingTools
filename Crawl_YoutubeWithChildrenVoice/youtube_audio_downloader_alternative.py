@@ -14,6 +14,7 @@ import sys
 import time
 import subprocess
 import tempfile
+import random
 from pathlib import Path
 from typing import Optional, Tuple
 import ffmpeg
@@ -33,19 +34,38 @@ except ImportError:
 class YouTubeAudioDownloaderAlternative:
     """Alternative YouTube audio downloader using pytube."""
     
-    def __init__(self, output_dir: str = "youtube_audio_outputs"):
+    def __init__(self, output_dir: str = "youtube_audio_outputs", cookies_file: Optional[str] = None, cookies_from_browser: Optional[str] = None):
         """
         Initialize the alternative downloader.
         
         Args:
             output_dir (str): Directory to save audio files
+            cookies_file (Optional[str]): Path to cookies file (for future yt-dlp fallback)
+            cookies_from_browser (Optional[str]): Browser name for cookies (for future yt-dlp fallback)
         """
         self.base_dir = Path(__file__).parent
         self.output_dir = self.base_dir / output_dir
         self.output_dir.mkdir(exist_ok=True)
         self._current_basename: Optional[str] = None  # For custom basenames when run as script
         
+        # Cookie settings (stored for potential yt-dlp fallback usage)
+        self.cookies_file = cookies_file
+        self.cookies_from_browser = cookies_from_browser
+        
         print(f"📁 Alternative downloader initialized. Output dir: {self.output_dir}")
+        
+        # Report cookie status
+        if cookies_file:
+            if os.path.exists(cookies_file):
+                file_size = os.path.getsize(cookies_file)
+                print(f"🍪 Cookie file configured: {cookies_file} ({file_size} bytes)")
+            else:
+                print(f"⚠️ Cookie file configured but not found: {cookies_file}")
+        elif cookies_from_browser:
+            print(f"🍪 Browser cookies configured: {cookies_from_browser}")
+        else:
+            print("⚠️ No cookies configured for alternative downloader")
+            print("💡 Note: pytube doesn't use cookies, but they're available for yt-dlp fallback")
     
     def test_pytube_download(self, url: str) -> bool:
         """
@@ -223,7 +243,14 @@ class YouTubeAudioDownloaderAlternative:
         except Exception as e:
             print(f"❌ Pytube download error: {e}")
             print(f"💔 PYTUBE FAILED: General download error for URL: {url[:50]}...")
-            return None
+            
+            # Try yt-dlp fallback with cookies if configured
+            if self.cookies_file or self.cookies_from_browser:
+                print("🔄 Attempting yt-dlp fallback with cookies...")
+                return self.download_audio_yt_dlp_fallback(url, index)
+            else:
+                print("⚠️ No cookies configured for yt-dlp fallback")
+                return None
             
         finally:
             # Clean up temporary audio file (keeping WAV file for inspection)
@@ -233,6 +260,142 @@ class YouTubeAudioDownloaderAlternative:
                     print("🧹 Temporary audio file cleaned up (WAV file kept)")
                 except Exception as cleanup_error:
                     print(f"⚠️ Could not clean up temp file: {cleanup_error}")
+    
+    def download_audio_yt_dlp_fallback(self, url: str, index: int = 0) -> Optional[Tuple[str, float]]:
+        """
+        Fallback method using yt-dlp with cookies when pytube fails.
+        
+        Args:
+            url (str): YouTube video URL
+            index (int): Index for filename uniqueness
+            
+        Returns:
+            Optional[Tuple[str, float]]: (wav_file_path, duration) or None if failed
+        """
+        print("🔧 ============================================")
+        print("🔧 YT-DLP FALLBACK METHOD ACTIVATED")
+        print("🔧 pytube failed, trying yt-dlp with cookies")
+        print("🔧 ============================================")
+        print(f"🎵 Starting yt-dlp fallback for video {index}")
+        
+        # Generate output filename
+        custom_base = getattr(self, '_current_basename', None)
+        if custom_base:
+            wav_file = self.output_dir / f"{custom_base}.wav"
+            temp_audio_name = f"{custom_base}_temp"
+        else:
+            timestamp = int(time.time() * 1000)
+            wav_file = self.output_dir / f"ytdlp_{index}_{timestamp}.wav"
+            temp_audio_name = f"ytdlp_{index}_{timestamp}_temp"
+        
+        try:
+            # Step 1: Use yt-dlp to download audio with cookies
+            print("⏬ Downloading with yt-dlp...")
+            
+            # Build yt-dlp command
+            cmd = [
+                "yt-dlp",
+                "-f", "bestaudio/best",
+                "--extract-audio",
+                "--audio-format", "wav",
+                "--audio-quality", "0",  # Best quality
+                "--output", str(self.output_dir / f"{temp_audio_name}.%(ext)s"),
+                url
+            ]
+            
+            # Add cookie support
+            if self.cookies_file and os.path.exists(self.cookies_file):
+                cmd.extend(["--cookies", self.cookies_file])
+                print(f"🍪 Using cookies from file: {self.cookies_file}")
+            elif self.cookies_from_browser:
+                cmd.extend(["--cookies-from-browser", self.cookies_from_browser])
+                print(f"🍪 Using cookies from browser: {self.cookies_from_browser}")
+            else:
+                print("⚠️ No cookies available for yt-dlp fallback")
+            
+            # Add user agent for anti-detection
+            user_agents = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+            ]
+            cmd.extend(["--user-agent", random.choice(user_agents)])
+            
+            # Execute yt-dlp
+            print(f"🔄 Running yt-dlp with cookies...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode != 0:
+                print(f"❌ yt-dlp failed: {result.stderr.strip()}")
+                return None
+            
+            # Find the downloaded file
+            temp_wav_file = None
+            for file in self.output_dir.glob(f"{temp_audio_name}.*"):
+                if file.suffix.lower() in ['.wav', '.m4a', '.mp3', '.webm']:
+                    temp_wav_file = file
+                    break
+            
+            if not temp_wav_file or not temp_wav_file.exists():
+                print("❌ yt-dlp download failed - no output file found")
+                return None
+            
+            print(f"✅ yt-dlp download successful: {temp_wav_file}")
+            
+            # Step 2: Convert to final WAV format if needed
+            if temp_wav_file.suffix.lower() != '.wav':
+                print("🎵 Converting to WAV format...")
+                try:
+                    stream = ffmpeg.input(str(temp_wav_file))
+                    stream = ffmpeg.output(
+                        stream, 
+                        str(wav_file),
+                        acodec='pcm_s16le',  # WAV PCM format
+                        ar=16000,  # 16kHz sample rate
+                        ac=1  # Mono
+                    )
+                    ffmpeg.run(stream, quiet=True, overwrite_output=True)
+                    
+                    # Clean up temporary file
+                    temp_wav_file.unlink()
+                    
+                except Exception as ffmpeg_error:
+                    print(f"❌ FFmpeg conversion failed: {ffmpeg_error}")
+                    return None
+            else:
+                # Just rename the file
+                temp_wav_file.rename(wav_file)
+            
+            if not wav_file.exists():
+                print("❌ Final WAV file not created")
+                return None
+            
+            # Get audio duration
+            try:
+                probe = ffmpeg.probe(str(wav_file))
+                duration = float(probe['streams'][0]['duration'])
+            except Exception:
+                duration = None
+            
+            print("🎉 ============================================")
+            print("🎉 YT-DLP FALLBACK METHOD SUCCESSFUL!")
+            print("🎉 Downloaded with cookies when pytube failed")
+            print("🎉 ============================================")
+            print(f"✅ Successfully downloaded via yt-dlp fallback: {wav_file}")
+            
+            if duration:
+                minutes = int(duration // 60)
+                seconds = int(duration % 60)
+                print(f"📏 Audio duration: {minutes}:{seconds:02d}")
+            
+            return str(wav_file), duration
+            
+        except subprocess.TimeoutExpired:
+            print("❌ yt-dlp timeout")
+            return None
+        except Exception as e:
+            print(f"❌ yt-dlp fallback error: {e}")
+            return None
 
 
 def test_with_sample_video():
@@ -354,9 +517,17 @@ if __name__ == "__main__":
     def _backfill_missing_titles_by_download():
         updated = False
         updated_count = 0
+        failed_count = 0
+        skipped_count = 0
         total_missing = sum(1 for r in manifest_records if r.get('status') == 'success' and not r.get('title'))
+        
         if total_missing:
             print(f"🔧 Backfilling titles for {total_missing} records without titles...")
+            print("=" * 60)
+        else:
+            print("✅ All records already have titles - no backfilling needed")
+            return
+            
         for idx_bf, rec in enumerate(manifest_records, start=1):
             try:
                 if rec.get('status') == 'success' and not rec.get('title'):
@@ -366,57 +537,100 @@ if __name__ == "__main__":
                         vid_local = rec.get('video_id')
                         if vid_local:
                             url_val = f"https://www.youtube.com/watch?v={vid_local}"
+                    
                     if not url_val:
+                        vid_print = rec.get('video_id') or 'unknown'
+                        print(f"⏭️  [{idx_bf}/{len(manifest_records)}] Skipping record {vid_print}: No URL available")
+                        skipped_count += 1
                         continue
+                    
+                    vid_print = rec.get('video_id') or url_val[:50] + "..."
+                    print(f"🔍 [{idx_bf}/{len(manifest_records)}] Processing: {vid_print}")
+                    
                     title_val = None
                     # Download to a temporary directory and delete afterward
                     with tempfile.TemporaryDirectory() as tmpdir:
                         try:
+                            print(f"   📡 Creating YouTube object for {vid_print}...")
                             yt_tmp2 = YouTube(url_val)
+                            print(f"   🎯 Found video: {yt_tmp2.title[:50]}...")
+                            
                             audio_stream = yt_tmp2.streams.filter(only_audio=True).order_by('abr').desc().first()
                             if audio_stream is not None:
+                                print(f"   ⏬ Downloading temporary file to fetch title...")
                                 temp_name = f"tmp_title_fetch.{audio_stream.subtype}"
                                 temp_path = Path(tmpdir) / temp_name
                                 audio_stream.download(output_path=tmpdir, filename=temp_name)
                                 # We only needed to perform a download; we don't keep the file
                                 title_val = yt_tmp2.title
+                                print(f"   🧹 Cleaning up temporary file...")
                                 try:
                                     if temp_path.exists():
                                         temp_path.unlink()
-                                except Exception:
-                                    pass
+                                except Exception as cleanup_error:
+                                    print(f"   ⚠️  Cleanup warning: {cleanup_error}")
                             else:
                                 # Even if no stream, try to use the title if accessible
+                                print(f"   ⚠️  No audio streams found, but title is accessible")
                                 title_val = yt_tmp2.title
-                        except Exception:
+                                
+                        except Exception as download_error:
+                            print(f"   ❌ Download failed: {str(download_error)[:100]}...")
                             title_val = None
+                    
                     if title_val:
                         rec['title'] = title_val
                         updated = True
                         updated_count += 1
-                        try:
-                            vid_print = rec.get('video_id') or url_val
-                            print(f"📝 Title added for {vid_print}: {title_val}")
-                        except Exception:
-                            pass
+                        print(f"   ✅ SUCCESS: Title added - {title_val[:50]}...")
+                        
                         # Persist incrementally so progress is visible
                         try:
                             manifest_data['records'] = manifest_records
                             _save_manifest(manifest_path, manifest_data)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                            print(f"   💾 Manifest updated incrementally")
+                        except Exception as save_error:
+                            print(f"   ⚠️  Incremental save failed: {save_error}")
+                    else:
+                        failed_count += 1
+                        print(f"   ❌ FAILED: Could not retrieve title for {vid_print}")
+                        
+            except Exception as record_error:
+                failed_count += 1
+                vid_print = rec.get('video_id', 'unknown') if rec else 'unknown'
+                print(f"❌ [{idx_bf}/{len(manifest_records)}] Record processing failed for {vid_print}: {str(record_error)[:100]}...")
+        
+        # Final summary and cleanup
+        print("=" * 60)
+        print("📊 BACKFILL SUMMARY:")
+        print(f"   📋 Total records processed: {len(manifest_records)}")
+        print(f"   🔍 Records needing titles: {total_missing}")
+        print(f"   ✅ Successfully updated: {updated_count}")
+        print(f"   ❌ Failed to update: {failed_count}")
+        print(f"   ⏭️  Skipped (no URL): {skipped_count}")
+        
         if updated:
             try:
+                print("💾 Finalizing manifest update...")
                 manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
-            except Exception:
-                manifest_data['total_duration_seconds'] = 0.0
-            manifest_data['records'] = manifest_records
-            _save_manifest(manifest_path, manifest_data)
-            print(f"✅ Backfill complete. Updated titles for {updated_count} record(s).")
-        elif total_missing:
+                manifest_data['records'] = manifest_records
+                _save_manifest(manifest_path, manifest_data)
+                print(f"✅ Backfill complete! Updated titles for {updated_count}/{total_missing} record(s).")
+                
+                if failed_count > 0:
+                    print(f"⚠️  Note: {failed_count} record(s) could not be updated (network issues, deleted videos, etc.)")
+                    
+            except Exception as final_save_error:
+                print(f"❌ Final manifest save failed: {final_save_error}")
+                
+        elif total_missing > 0:
             print("⚠️ Backfill attempted, but no titles could be updated.")
+            if failed_count == total_missing:
+                print("💡 All attempts failed - check network connection or try again later")
+            elif skipped_count == total_missing:
+                print("💡 All records were skipped due to missing URLs")
+        
+        print("=" * 60)
 
     _backfill_missing_titles_by_download()
 
