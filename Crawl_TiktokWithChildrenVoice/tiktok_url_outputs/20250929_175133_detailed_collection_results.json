@@ -1,0 +1,40 @@
+{
+  "collection_summary": {
+    "total_analyzed": 25,
+    "total_collected": 0,
+    "vietnamese_videos": 0,
+    "children_voice_videos": 0,
+    "collection_time": "2025-09-29T17:51:33.838942"
+  },
+  "configuration": {
+    "target_per_query": 50,
+    "search_queries": [
+      "moxierobot",
+      "farmeesvietnam",
+      "popskids",
+      "nidovietnam",
+      "babyccinotv",
+      "vinacartoon",
+      "HeoPeppaTiengVietChinhThuc",
+      "mykingdom",
+      "LearningForKidz",
+      "FunGameforKids",
+      "BabyBusVN",
+      "SuperJoJoVietnam"
+    ],
+    "hashtag_queries": [
+      "thiếunhi",
+      "nhacthieunhi",
+      "truyencotich",
+      "behattiengviet",
+      "giongbetietviet",
+      "dongdao",
+      "hocchucai",
+      "bejhoc",
+      "hoathinhtietviet",
+      "behatmua"
+    ],
+    "enable_language_detection": true
+  },
+  "collected_videos": []
+}

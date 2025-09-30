@@ -167,20 +167,40 @@ class TikTokAPIClient:
                     # Rate limit exceeded
                     self.quota_exceeded_count += 1
                     retry_after = int(response.getheader('Retry-After', 60))
-                    self._log(f"⚠️ Rate limit exceeded, waiting {retry_after}s", "warning")
-                    conn.close()
-                    time.sleep(retry_after)
-                    continue
+                    
+                    # Try rotating to next API key first before waiting
+                    if len(self.api_keys) > 1 and self._switch_to_next_api_key():
+                        self._log(f"⚠️ Rate limited, rotated to next API key", "warning")
+                        conn.close()
+                        # Add small delay even after rotation to avoid hammering APIs
+                        time.sleep(2)
+                        continue
+                    else:
+                        # If rotation failed or only one key, wait
+                        self._log(f"⚠️ Rate limit exceeded, waiting {retry_after}s", "warning")
+                        conn.close()
+                        time.sleep(retry_after)
+                        continue
                 elif response.status == 403:
                     # Quota exceeded or invalid key
                     self._log(f"❌ API quota exceeded or invalid key (HTTP {response.status})", "error")
                     conn.close()
                     
-                    # Try switching to next API key
-                    if self._switch_to_next_api_key():
+                    # Try switching to next API key with circular rotation
+                    if len(self.api_keys) > 1 and self._switch_to_next_api_key():
+                        self._log(f"🔄 Trying next API key after 403 error...", "info")
+                        # Add small delay after key rotation to avoid hammering APIs
+                        time.sleep(2)
                         continue
                     else:
-                        raise TikTokAPIError(f"All API keys exhausted (HTTP {response.status})", response.status)
+                        # If only one key or rotation failed, retry with delay
+                        if attempt < self.max_retries - 1:
+                            delay = 30  # Wait 30s before retrying with same key
+                            self._log(f"⚠️ Waiting {delay}s before retrying (no key rotation available)", "warning")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            raise TikTokAPIError(f"API key exhausted after retries (HTTP {response.status})", response.status)
                 else:
                     # Other HTTP errors
                     error_data = response.read().decode("utf-8")
@@ -208,20 +228,43 @@ class TikTokAPIClient:
         return None
     
     def _switch_to_next_api_key(self) -> bool:
-        """Switch to next available API key."""
-        if self.current_api_key_index + 1 < len(self.api_keys):
-            self.current_api_key_index += 1
-            old_key = self.api_key
-            self.api_key = self.api_keys[self.current_api_key_index]
-            
-            self._log(f"🔄 Switching to API Key {self.current_api_key_index + 1}", "info")
-            self._log(f"   Previous: {'*' * 10}...{old_key[-4:]}", "info")
-            self._log(f"   Current:  {'*' * 10}...{self.api_key[-4:]}", "info")
-            
-            return True
-        else:
-            self._log(f"❌ No more API keys available ({len(self.api_keys)}/{len(self.api_keys)} used)", "error")
+        """Switch to next available API key using circular rotation."""
+        if len(self.api_keys) <= 1:
+            self._log(f"❌ Only one API key available, cannot rotate", "warning")
             return False
+        
+        old_index = self.current_api_key_index
+        old_key = self.api_key
+        
+        # Circular rotation: go to next key, wrap around if at end
+        self.current_api_key_index = (self.current_api_key_index + 1) % len(self.api_keys)
+        self.api_key = self.api_keys[self.current_api_key_index]
+        
+        self._log(f"🔄 Rotating API key from index {old_index} to {self.current_api_key_index}", "info")
+        self._log(f"   Previous: {'*' * 10}...{old_key[-4:]}", "info")
+        self._log(f"   Current:  {'*' * 10}...{self.api_key[-4:]}", "info")
+        
+        return True
+    
+    def is_quota_exhausted(self) -> bool:
+        """Check if all API keys are exhausted based on recent errors."""
+        # If we have multiple keys and recent errors suggest exhaustion
+        if len(self.api_keys) > 1:
+            # Check if quota exceeded count is high relative to requests
+            if self.requests_made > 0:
+                error_rate = self.quota_exceeded_count / self.requests_made
+                # If more than 80% of recent requests are quota errors, likely exhausted
+                return error_rate > 0.8 and self.quota_exceeded_count > 5
+        else:
+            # Single key - if we've had quota errors recently, likely exhausted
+            return self.quota_exceeded_count > 3
+        
+        return False
+    
+    def reset_quota_stats(self) -> None:
+        """Reset quota statistics when keys become available again."""
+        self.quota_exceeded_count = 0
+        # Don't reset total requests_made as that's cumulative
     
     def get_user_info(self, username: str) -> Optional[Dict]:
         """

@@ -32,7 +32,6 @@ env.bak/
 venv.bak/
 
 # Output directories
-tiktok_url_outputs/
 temp_audio/
 final_audio_files/
 tiktok_audio_outputs/

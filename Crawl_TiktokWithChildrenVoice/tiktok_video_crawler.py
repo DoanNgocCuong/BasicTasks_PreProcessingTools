@@ -18,7 +18,10 @@ import os
 import time
 import threading
 import tempfile
-from datetime import datetime
+import csv
+import shutil
+import pickle
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Set, Any, Tuple
 from dataclasses import dataclass, field
@@ -54,6 +57,11 @@ MIN_VALID_VIDEO_DURATION = 1.0  # Minimum duration for valid videos
 DEFAULT_OUTPUT_DIR = "./tiktok_url_outputs"
 DEFAULT_FINAL_AUDIO_DIR = "./final_audio_files"
 
+# Forever running constants
+KEY_TEST_INTERVAL = 300  # Test keys every 5 minutes when exhausted
+STATE_SAVE_INTERVAL = 60  # Save state every minute
+QUOTA_RESET_WAIT = 3600  # Wait 1 hour before retesting exhausted keys
+
 
 # Configuration constants
 class Config:
@@ -69,9 +77,11 @@ class Config:
     
     # Additional file paths
     DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "tiktok_url_outputs"
+    DEFAULT_FINAL_AUDIO_DIR = _SCRIPT_DIR / "final_audio_files"
     DEFAULT_MAIN_URLS_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_collected_video_urls.txt")
     DEFAULT_MAIN_DETAILED_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_detailed_results.json")
     DEFAULT_BACKUP_FILE_PREFIX = str(DEFAULT_OUTPUT_DIR / "backup")
+    DEFAULT_MANIFEST_CSV = str(DEFAULT_FINAL_AUDIO_DIR / "manifest.csv")
     
     # Processing constants
     MAX_RESULTS_PER_REQUEST = 50
@@ -93,7 +103,7 @@ class CrawlerConfig:
     keyword_queries: List[str] = field(default_factory=list)
     max_recommended_per_query: int = 100
     min_target_count: int = 1
-    download_method: str = "direct_api"
+    download_method: str = "yt_dlp"
     enable_language_detection: bool = True
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
     rate_limiting: Optional[Dict[str, Any]] = None
@@ -106,6 +116,12 @@ class CrawlerConfig:
     channel_quality_threshold: float = 0.3
     max_channel_videos: int = 50
     exhaustive_channel_analysis: bool = True
+    # Forever running configuration
+    enable_forever_mode: bool = False
+    quota_monitoring: bool = True
+    auto_resume: bool = True
+    key_test_interval: int = 300
+    state_save_interval: int = 60
 
 
 class ConfigLoader:
@@ -141,7 +157,7 @@ class ConfigLoader:
                 keyword_queries=config_data.get('keyword_queries', []),
                 max_recommended_per_query=config_data.get('max_recommended_per_query', 100),
                 min_target_count=config_data.get('min_target_count', 1),
-                download_method=config_data.get('download_method', 'direct_api'),
+                download_method=config_data.get('download_method', 'yt_dlp'),
                 enable_language_detection=config_data.get('enable_language_detection', True),
                 user_agent=config_data.get('user_agent', ''),
                 rate_limiting=config_data.get('rate_limiting', {}),
@@ -153,7 +169,13 @@ class ConfigLoader:
                 auto_add_promising_channels=config_data.get('auto_add_promising_channels', True),
                 channel_quality_threshold=config_data.get('channel_quality_threshold', 0.3),
                 max_channel_videos=config_data.get('max_channel_videos', 50),
-                exhaustive_channel_analysis=config_data.get('exhaustive_channel_analysis', True)
+                exhaustive_channel_analysis=config_data.get('exhaustive_channel_analysis', True),
+                # Forever running configuration
+                enable_forever_mode=config_data.get('enable_forever_mode', False),
+                quota_monitoring=config_data.get('quota_monitoring', True),
+                auto_resume=config_data.get('auto_resume', True),
+                key_test_interval=config_data.get('key_test_interval', 300),
+                state_save_interval=config_data.get('state_save_interval', 60)
             )
             
             self.output.print_info(f"✅ Configuration loaded from: {self.config_file_path}")
@@ -181,7 +203,7 @@ class ConfigLoader:
 
             "max_recommended_per_query": 100,
             "min_target_count": 1,
-            "download_method": "direct_api",
+            "download_method": "yt_dlp",
             "rate_limiting": {
                 "enabled": True,
                 "min_delay_ms": 1000,
@@ -201,7 +223,12 @@ class ConfigLoader:
             "channel_quality_threshold": 0.3,
             "max_channel_videos": 50,
             "exhaustive_channel_analysis": True,
-            "description": "Default configuration for TikTok Children's Voice Crawler with Channel Discovery"
+            "enable_forever_mode": False,
+            "quota_monitoring": True,
+            "auto_resume": True,
+            "key_test_interval": 300,
+            "state_save_interval": 60,
+            "description": "Default configuration for TikTok Children's Voice Crawler with Channel Discovery and Forever Running Mode"
         }
         
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -302,10 +329,15 @@ class TikTokVideoCollector:
         
         # Create output directory
         Config.DEFAULT_OUTPUT_DIR.mkdir(exist_ok=True)
+        Config.DEFAULT_FINAL_AUDIO_DIR.mkdir(exist_ok=True)
+        
+        # Initialize manifest tracking
+        self.manifest_file = Config.DEFAULT_MANIFEST_CSV
+        self.downloaded_urls = self._load_manifest()
         
         # Collection tracking
         self.collected_videos: List[Dict] = []
-        self.collected_urls: Set[str] = set()
+        self.collected_urls: Set[str] = self._load_existing_collected_urls()  # Load existing URLs to prevent duplicates
         self.total_videos_analyzed = 0
         self.total_videos_collected = 0
         
@@ -322,6 +354,21 @@ class TikTokVideoCollector:
         self.total_vietnamese_videos = 0
         self.total_children_voice_videos = 0
         self.total_processing_time = 0.0
+        
+        # Failure tracking for graceful degradation
+        self.consecutive_download_failures = 0
+        self.max_consecutive_failures = 10  # Stop if too many consecutive failures
+        self.total_download_failures = 0
+        
+        # Forever running and quota monitoring
+        self.is_running = False
+        self.quota_exhausted = False
+        self.exhausted_keys = set()  # Track which keys are exhausted
+        self.last_key_test = datetime.now()
+        self.state_file = Config.DEFAULT_OUTPUT_DIR / "crawler_state.json"
+        self.quota_monitor_thread = None
+        self.state_save_thread = None
+        self.resume_checkpoint = None  # Store current processing position
         
         # Threading
         self.download_index_lock = threading.Lock()
@@ -341,6 +388,336 @@ class TikTokVideoCollector:
             self.output.print_info(f"🎯 Channel discovery: Disabled")
         
         self.output.print_success("TikTok Video Collector initialized successfully")
+    
+    def _load_manifest(self) -> Set[str]:
+        """Load existing manifest CSV and return set of downloaded URLs."""
+        downloaded_urls = set()
+        
+        if Path(self.manifest_file).exists():
+            try:
+                with open(self.manifest_file, 'r', encoding='utf-8', newline='') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row.get('status') == 'success':
+                            downloaded_urls.add(row.get('url', ''))
+                self.output.print_info(f"📋 Loaded {len(downloaded_urls)} existing downloads from manifest")
+            except Exception as e:
+                self.output.print_error(f"Error loading manifest: {e}")
+        else:
+            # Create manifest file with headers
+            self._create_manifest_headers()
+            self.output.print_info("📋 Created new manifest file")
+        
+        return downloaded_urls
+    
+    def _load_existing_collected_urls(self) -> Set[str]:
+        """Load existing URLs from multi_query_collected_video_urls.txt to prevent duplicates."""
+        existing_urls = set()
+        urls_file = Path(Config.DEFAULT_MAIN_URLS_FILE)
+        
+        if urls_file.exists():
+            try:
+                with open(urls_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        url = line.strip()
+                        if url:
+                            existing_urls.add(url)
+                self.output.print_info(f"📋 Loaded {len(existing_urls)} existing URLs from {urls_file.name}")
+            except Exception as e:
+                self.output.print_warning(f"Error loading existing URLs: {e}")
+        else:
+            self.output.print_info(f"📋 No existing URLs file found at {urls_file}")
+        
+        return existing_urls
+    
+    def _generate_unique_audio_filename(self, video: Dict, from_channel_discovery: bool = False) -> str:
+        """Generate a unique, consistent filename for audio files.
+        
+        Format: {timestamp}_{sequential_id}_{username}_{video_id}.wav
+        This ensures chronological ordering, uniqueness, and traceability.
+        
+        Args:
+            video (Dict): Video information
+            from_channel_discovery (bool): Whether from channel discovery
+            
+        Returns:
+            str: Unique filename for the audio file
+        """
+        # Get current timestamp for chronological ordering
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Get next sequential ID (thread-safe)
+        sequential_id = self._get_next_download_index()
+        
+        # Extract and clean video info
+        video_id = video.get('video_id', 'unknown')[:12]  # Limit length
+        username = video.get('author_username', 'unknown')
+        
+        # Clean username for filename (keep alphanumeric, hyphens, underscores)
+        safe_username = "".join(c for c in username if c.isalnum() or c in ('-', '_'))[:15]
+        
+        # Add channel discovery indicator
+        discovery_suffix = "_CD" if from_channel_discovery else ""
+        
+        # Generate filename: timestamp_sequentialId_username_videoId[_CD].wav
+        filename = f"{timestamp}_{sequential_id:04d}_{safe_username}_{video_id}{discovery_suffix}.wav"
+        
+        return filename
+    
+    def _save_crawler_state(self) -> None:
+        """Save current crawler state for resumption."""
+        try:
+            state = {
+                'timestamp': datetime.now().isoformat(),
+                'current_keyword_index': getattr(self, 'current_keyword_index', 0),
+                'current_video_index': getattr(self, 'current_video_index', 0),
+                'total_videos_analyzed': self.total_videos_analyzed,
+                'total_videos_collected': self.total_videos_collected,
+                'collected_urls': list(self.collected_urls),
+                'processed_channels': list(self.processed_channels),
+                'promising_channels': list(self.promising_channels),
+                'exhausted_keys': list(self.exhausted_keys),
+                'quota_exhausted': self.quota_exhausted,
+                'channel_discovery_stats': self.channel_discovery_stats,
+                'resume_checkpoint': self.resume_checkpoint
+            }
+            
+            with open(self.state_file, 'w', encoding='utf-8') as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+                
+        except Exception as e:
+            self.output.print_error(f"Error saving crawler state: {e}")
+    
+    def _load_crawler_state(self) -> bool:
+        """Load previous crawler state for resumption."""
+        try:
+            if not self.state_file.exists():
+                return False
+                
+            with open(self.state_file, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+            
+            # Restore state
+            self.current_keyword_index = state.get('current_keyword_index', 0)
+            self.current_video_index = state.get('current_video_index', 0)
+            self.total_videos_analyzed = state.get('total_videos_analyzed', 0)
+            self.total_videos_collected = state.get('total_videos_collected', 0)
+            self.collected_urls.update(state.get('collected_urls', []))
+            self.processed_channels.update(state.get('processed_channels', []))
+            self.promising_channels.update(state.get('promising_channels', []))
+            self.exhausted_keys.update(state.get('exhausted_keys', []))
+            self.quota_exhausted = state.get('quota_exhausted', False)
+            self.channel_discovery_stats.update(state.get('channel_discovery_stats', {}))
+            self.resume_checkpoint = state.get('resume_checkpoint')
+            
+            saved_time = datetime.fromisoformat(state['timestamp'])
+            self.output.print_info(f"📥 Restored crawler state from {saved_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            self.output.print_info(f"📊 Resuming from keyword {self.current_keyword_index + 1}/{len(self.config.keyword_queries)}")
+            
+            return True
+            
+        except Exception as e:
+            self.output.print_error(f"Error loading crawler state: {e}")
+            return False
+    
+    def _test_api_key_availability(self) -> bool:
+        """Test if any API keys are available for use."""
+        try:
+            # Get fresh API usage stats
+            api_stats = self.api_client.get_api_usage_stats()
+            
+            # Test a simple API call
+            test_result = self.api_client.search_videos_by_keyword("test", count=1)
+            
+            if test_result and len(test_result.get('data', {}).get('videos', [])) >= 0:
+                self.quota_exhausted = False
+                self.exhausted_keys.clear()
+                self.output.print_success("✅ API keys are available again!")
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            self.output.debug_log(f"API key test failed: {e}")
+            return False
+    
+    def _start_quota_monitor(self) -> None:
+        """Start background thread to monitor API quota availability."""
+        if not self.config.enable_forever_mode or not self.config.quota_monitoring:
+            return
+            
+        def quota_monitor_worker():
+            while self.is_running:
+                if self.quota_exhausted:
+                    # Test if keys are available again
+                    time_since_last_test = (datetime.now() - self.last_key_test).total_seconds()
+                    
+                    if time_since_last_test >= self.config.key_test_interval:
+                        self.output.print_info("🔍 Testing API key availability...")
+                        
+                        if self._test_api_key_availability():
+                            self.output.print_success("🎉 API quota restored! Resuming collection...")
+                            # Signal main thread to resume
+                            self.quota_exhausted = False
+                        else:
+                            self.output.print_info(f"⏳ Keys still exhausted. Next test in {self.config.key_test_interval}s")
+                        
+                        self.last_key_test = datetime.now()
+                
+                time.sleep(30)  # Check every 30 seconds
+        
+        self.quota_monitor_thread = threading.Thread(target=quota_monitor_worker, daemon=True)
+        self.quota_monitor_thread.start()
+        self.output.print_info("🔄 Started quota monitoring thread")
+    
+    def _start_state_saver(self) -> None:
+        """Start background thread to periodically save crawler state."""
+        if not self.config.enable_forever_mode:
+            return
+            
+        def state_saver_worker():
+            while self.is_running:
+                time.sleep(self.config.state_save_interval)
+                if self.is_running:  # Check again after sleep
+                    self._save_crawler_state()
+        
+        self.state_save_thread = threading.Thread(target=state_saver_worker, daemon=True)
+        self.state_save_thread.start()
+        self.output.debug_log("💾 Started state saver thread")
+    
+    def _handle_quota_exhaustion(self) -> None:
+        """Handle when all API keys are exhausted."""
+        self.quota_exhausted = True
+        self._save_crawler_state()  # Save current progress
+        
+        self.output.print_header("🚫 ALL API KEYS EXHAUSTED", 60)
+        self.output.print_warning("All API keys have reached their quota limits.")
+        
+        if self.config.enable_forever_mode:
+            self.output.print_info("🔄 Forever mode enabled - will wait for quota restoration")
+            self.output.print_info(f"⏰ Will test keys every {self.config.key_test_interval} seconds")
+            self.output.print_info("💾 Current progress has been saved and will resume automatically")
+            
+            # Wait for quota restoration
+            while self.quota_exhausted and self.is_running:
+                time.sleep(60)  # Check every minute
+                
+        else:
+            self.output.print_warning("Forever mode disabled - stopping crawler")
+            self.output.print_info("💡 Enable forever_mode in config to auto-resume when quota restores")
+    
+    def _create_manifest_headers(self) -> None:
+        """Create manifest CSV file with headers."""
+        try:
+            with open(self.manifest_file, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'url', 'video_id', 'title', 'author_username', 'duration_seconds',
+                    'confidence', 'is_vietnamese', 'has_children_voice', 
+                    'output_path', 'status', 'timestamp', 'from_channel_discovery'
+                ])
+        except Exception as e:
+            self.output.print_error(f"Error creating manifest: {e}")
+    
+    def _update_manifest(self, video: Dict, audio_path: str, analysis_result: Any, from_channel_discovery: bool = False) -> None:
+        """Update manifest CSV with new download entry."""
+        try:
+            with open(self.manifest_file, 'a', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    video.get('url', ''),
+                    video.get('video_id', ''),
+                    video.get('title', '').replace('"', "'"),  # Clean quotes
+                    video.get('author_username', ''),
+                    video.get('duration', 0),
+                    getattr(analysis_result, 'confidence', 0.0),
+                    getattr(analysis_result, 'is_vietnamese', False),
+                    getattr(analysis_result, 'has_children_voice', False),
+                    audio_path,
+                    'success',
+                    datetime.now().isoformat(),
+                    from_channel_discovery
+                ])
+        except Exception as e:
+            self.output.print_error(f"Error updating manifest: {e}")
+    
+    def _save_to_final_audio_and_manifest(self, audio_path: str, video: Dict, analysis_result: Any, from_channel_discovery: bool = False) -> str:
+        """Save validated audio to final_audio_files directory and update manifest."""
+        try:
+            if not audio_path or not Path(audio_path).exists():
+                self.output.print_error(f"Audio file not found: {audio_path}")
+                return ""
+            
+            # Create final audio directory
+            final_audio_dir = Path("./final_audio_files")
+            final_audio_dir.mkdir(exist_ok=True)
+            
+            # Generate filename based on video info
+            video_id = video.get('video_id', 'unknown')
+            username = video.get('author_username', 'unknown')
+            safe_username = "".join(c for c in username if c.isalnum() or c in ('-', '_'))[:20]
+            
+            final_filename = f"{safe_username}_{video_id}.wav"
+            final_audio_path = final_audio_dir / final_filename
+            
+            # Copy audio file to final directory
+            import shutil
+            shutil.copy2(audio_path, final_audio_path)
+            
+            # Update manifest
+            self._update_manifest(video, str(final_audio_path), analysis_result, from_channel_discovery)
+            
+            self.output.print_success(f"💾 Saved to final_audio_files: {final_filename}")
+            return str(final_audio_path)
+            
+        except Exception as e:
+            self.output.print_error(f"Error saving to final audio: {e}")
+            return ""
+    
+    def _get_next_audio_filename(self) -> str:
+        """Generate next sequential audio filename."""
+        audio_dir = Path(Config.DEFAULT_FINAL_AUDIO_DIR)
+        existing_files = list(audio_dir.glob("*.wav"))
+        
+        # Find the highest existing number
+        max_num = 0
+        for file in existing_files:
+            try:
+                # Extract number from filename like "0001_video_title.wav"
+                num_str = file.stem.split('_')[0]
+                if num_str.isdigit():
+                    max_num = max(max_num, int(num_str))
+            except (IndexError, ValueError):
+                continue
+        
+        # Return next number
+        return f"{max_num + 1:04d}"
+    
+    def _save_final_audio(self, temp_audio_path: str, video: Dict, analysis_result: Any, from_channel_discovery: bool = False) -> Optional[str]:
+        """Save validated audio to final_audio_files directory with consistent naming."""
+        try:
+            if not temp_audio_path or not Path(temp_audio_path).exists():
+                self.output.print_error(f"Audio file not found: {temp_audio_path}")
+                return None
+            
+            # Create final audio directory
+            final_audio_dir = Path(Config.DEFAULT_FINAL_AUDIO_DIR)
+            final_audio_dir.mkdir(exist_ok=True)
+            
+            # Generate unique, consistent filename
+            filename = self._generate_unique_audio_filename(video, from_channel_discovery)
+            final_audio_path = final_audio_dir / filename
+            
+            # Copy audio file to final directory
+            import shutil
+            shutil.copy2(temp_audio_path, final_audio_path)
+            
+            self.output.print_success(f"💾 Saved final audio: {filename}")
+            return str(final_audio_path)
+            
+        except Exception as e:
+            self.output.print_error(f"Error saving final audio: {e}")
+            return None
     
     def _get_next_download_index(self) -> int:
         """Get next unique download index (thread-safe)."""
@@ -588,7 +965,22 @@ class TikTokVideoCollector:
         try:
             # Download and convert video to audio
             download_index = self._get_next_download_index()
-            audio_path, duration = self.video_downloader.download_and_convert_audio(video, download_index)
+            download_result = self.video_downloader.download_and_convert_audio(video, download_index)
+            
+            # Handle graceful skip for failed downloads
+            if download_result is None or download_result == (None, None):
+                return AudioAnalysisResult(
+                    is_vietnamese=False,
+                    detected_language=None,
+                    has_children_voice=False,
+                    confidence=0.0,
+                    total_analysis_time=0.0,
+                    children_detection_time=0.0,
+                    video_length_seconds=0.0,
+                    error="Failed to download/convert video"
+                )
+            
+            audio_path, duration = download_result
             
             if not audio_path:
                 return AudioAnalysisResult(
@@ -605,8 +997,12 @@ class TikTokVideoCollector:
             # Analyze audio
             analysis_result = self.audio_classifier.analyze_audio(audio_path)
             
-            # Clean up temporary audio file
-            self.video_downloader.cleanup_audio_file(audio_path)
+            # Store temp audio path in result for later use
+            analysis_result.temp_audio_path = audio_path
+            
+            # Clean up temporary audio file only if analysis failed
+            if analysis_result.error:
+                self.video_downloader.cleanup_audio_file(audio_path)
             
             return analysis_result
             
@@ -636,9 +1032,14 @@ class TikTokVideoCollector:
         """
         self.total_videos_analyzed += 1
         
-        # Skip duplicates
+        # Skip duplicates - check if URL is already in collected URLs (from multi_query_collected_video_urls.txt)
         if video['url'] in self.collected_urls:
-            self.output.debug_log("Skipping duplicate video")
+            self.output.debug_log("Skipping duplicate video (already in collected URLs)")
+            return False
+        
+        # Check if already downloaded (manifest check)
+        if video['url'] in self.downloaded_urls:
+            self.output.debug_log("Skipping already downloaded video (in manifest)")
             return False
         
         # Analyze audio
@@ -650,6 +1051,26 @@ class TikTokVideoCollector:
         # Check if analysis failed
         if analysis_result.error:
             self.output.print_warning(f"Analysis failed: {analysis_result.error}")
+            
+            # Track consecutive download failures
+            if "Failed to download" in analysis_result.error:
+                self.consecutive_download_failures += 1
+                self.total_download_failures += 1
+                
+                # Provide guidance if too many consecutive failures
+                if self.consecutive_download_failures >= self.max_consecutive_failures:
+                    self.output.print_error(f"⚠️ Too many consecutive download failures ({self.consecutive_download_failures})")
+                    self.output.print_error("🔧 Suggestions:")
+                    self.output.print_error("   - Check your internet connection")
+                    self.output.print_error("   - TikTok may have updated their anti-bot measures")
+                    self.output.print_error("   - Try using a VPN or different IP address")
+                    self.output.print_error("   - Consider running during different hours")
+                    self.output.print_error("   - Update yt-dlp: pip install --upgrade yt-dlp")
+                    self.output.print_error("💡 The crawler will continue with the next videos...")
+            else:
+                # Reset consecutive failures if it's not a download issue
+                self.consecutive_download_failures = 0
+            
             return False
         
         # Check language detection (if enabled)
@@ -666,8 +1087,35 @@ class TikTokVideoCollector:
             self.output.debug_log(f"No children's voice detected (confidence: {analysis_result.confidence:.2f})")
             return False
         
+        # Check for quota exhaustion during processing
+        if self.config.enable_forever_mode and self.api_client.is_quota_exhausted():
+            self.output.print_warning("🚫 API quota exhaustion detected during video processing")
+            self.quota_exhausted = True
+            # Save current state before handling exhaustion
+            self._save_crawler_state()
+            raise Exception("API quota exhausted - triggering forever mode wait")
+        
         # Video meets criteria - collect it
         self.total_children_voice_videos += 1
+        
+        # Reset consecutive failures on successful processing
+        self.consecutive_download_failures = 0
+        
+        # Save URL immediately to prevent duplicates in channel discovery
+        self._save_url_to_file(video['url'])
+        self.collected_urls.add(video['url'])
+        
+        # Save audio to final directory
+        temp_audio_path = getattr(analysis_result, 'temp_audio_path', None)
+        final_audio_path = None
+        
+        if temp_audio_path and Path(temp_audio_path).exists():
+            final_audio_path = self._save_final_audio(temp_audio_path, video, analysis_result, is_from_channel_discovery)
+            if final_audio_path:
+                # Update manifest
+                self._update_manifest(video, final_audio_path, analysis_result, is_from_channel_discovery)
+                # Update downloaded URLs set
+                self.downloaded_urls.add(video['url'])
         
         # Add to collection
         video_record = {
@@ -681,11 +1129,11 @@ class TikTokVideoCollector:
                 'transcription': analysis_result.transcription
             },
             'collected_at': datetime.now().isoformat(),
-            'from_channel_discovery': is_from_channel_discovery
+            'from_channel_discovery': is_from_channel_discovery,
+            'final_audio_path': final_audio_path
         }
         
         self.collected_videos.append(video_record)
-        self.collected_urls.add(video['url'])
         self.total_videos_collected += 1
         
         # Channel discovery integration - only trigger for videos NOT from channel discovery
@@ -700,12 +1148,95 @@ class TikTokVideoCollector:
                 if additional_videos > 0:
                     self.output.print_success(f"🎉 Channel discovery found {additional_videos} additional qualifying videos!")
         
-        # Save URL immediately
-        self._save_url_to_file(video['url'])
-        
         discovery_note = " [FROM CHANNEL DISCOVERY]" if is_from_channel_discovery else ""
-        self.output.print_success(f"✓ Collected video: {video['title'][:50]}... (confidence: {analysis_result.confidence:.2f}){discovery_note}")
+        self.output.print_success(f"✅ Video collected successfully{discovery_note}: {video['title'][:50]}...")
+        
         return True
+    
+    def process_remaining_urls_from_file(self, urls_file: str) -> int:
+        """
+        Process remaining URLs from the collected URLs file that haven't been downloaded yet.
+        
+        Args:
+            urls_file (str): Path to file containing collected URLs
+            
+        Returns:
+            int: Number of videos processed
+        """
+        if not Path(urls_file).exists():
+            self.output.print_warning(f"URLs file not found: {urls_file}")
+            return 0
+        
+        # Read URLs from file
+        try:
+            with open(urls_file, 'r', encoding='utf-8') as f:
+                all_urls = [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            self.output.print_error(f"Error reading URLs file: {e}")
+            return 0
+        
+        # Filter out already downloaded URLs
+        remaining_urls = [url for url in all_urls if url not in self.downloaded_urls]
+        
+        if not remaining_urls:
+            self.output.print_info("✅ All URLs have already been processed")
+            return 0
+        
+        self.output.print_header(f"Processing {len(remaining_urls)} Remaining URLs")
+        self.output.print_info(f"📊 Total URLs: {len(all_urls)}")
+        self.output.print_info(f"📊 Already processed: {len(all_urls) - len(remaining_urls)}")
+        self.output.print_info(f"📊 Remaining to process: {len(remaining_urls)}")
+        
+        processed_count = 0
+        
+        for i, url in enumerate(remaining_urls, 1):
+            self.output.print_progress(f"[{i}/{len(remaining_urls)}] Processing URL: {url[:60]}...")
+            
+            try:
+                # Extract video info from URL (basic info for processing)
+                video_info = {
+                    'url': url,
+                    'video_id': self._extract_video_id_from_url(url),
+                    'title': 'Unknown',
+                    'author_username': 'unknown'
+                }
+                
+                # Process the video
+                if self.process_video(video_info, is_from_channel_discovery=False):
+                    processed_count += 1
+                    self.output.print_success(f"✅ Processed: {url[:60]}...")
+                else:
+                    self.output.debug_log(f"❌ Skipped: {url[:60]}...")
+                
+            except Exception as e:
+                self.output.print_error(f"Error processing {url}: {e}")
+                continue
+        
+        self.output.print_success(f"🎉 Completed processing {processed_count} videos from remaining URLs")
+        return processed_count
+    
+    def _extract_video_id_from_url(self, url: str) -> str:
+        """Extract video ID from TikTok URL."""
+        try:
+            import re
+            # Common TikTok URL patterns
+            patterns = [
+                r'tiktok\.com/@[^/]+/video/(\d+)',
+                r'tiktok\.com/.*?/video/(\d+)',
+                r'vm\.tiktok\.com/(\w+)',
+                r'vt\.tiktok\.com/(\w+)'
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, url)
+                if match:
+                    return match.group(1)
+            
+            # Fallback: use URL hash
+            return str(hash(url))[-8:]
+            
+        except Exception:
+            return 'unknown'
     
     def _save_url_to_file(self, url: str) -> None:
         """Save URL immediately to file."""
@@ -719,35 +1250,116 @@ class TikTokVideoCollector:
     
     def run_collection(self) -> List[Dict]:
         """
-        Run the complete video collection process.
+        Run the complete video collection process with forever mode support.
         
         Returns:
             List[Dict]: Collected videos with analysis results
         """
         self.output.print_header("Starting TikTok Children's Voice Collection")
         start_time = time.time()
+        self.is_running = True
         
         try:
-
-            # Process keyword queries
-            for i, keyword in enumerate(self.config.keyword_queries, 1):
-                self.output.print_header(f"Processing Keyword {i}/{len(self.config.keyword_queries)}: '{keyword}'")
+            # Load previous state if forever mode is enabled
+            if self.config.enable_forever_mode:
+                self.output.print_info("🔄 Forever mode enabled - checking for previous state...")
+                if self._load_crawler_state():
+                    self.output.print_success("📥 Previous state loaded - resuming from checkpoint")
+                else:
+                    self.output.print_info("🆕 No previous state found - starting fresh")
                 
-                # Collect videos from keyword
-                keyword_videos = self.collect_videos_from_keyword(keyword, self.config.target_videos_per_query)
-                
-                # Process each video
-                for video in keyword_videos:
-                    self.process_video(video)
-                    
-                    # Check if we've reached our target
-                    if self.total_videos_collected >= self.config.target_videos_per_query:
-                        self.output.print_info(f"Reached target for '{keyword}'")
-                        break
-                
-                # Progress report
-                self.output.print_info(f"Progress: {self.total_videos_collected} collected, {self.total_videos_analyzed} analyzed")
+                # Start background monitoring threads
+                self._start_quota_monitor()
+                self._start_state_saver()
             
+            # Main collection loop with resumption support
+            while self.is_running:
+                try:
+                    # Process keyword queries starting from checkpoint
+                    start_index = getattr(self, 'current_keyword_index', 0)
+                    
+                    for i in range(start_index, len(self.config.keyword_queries)):
+                        if not self.is_running:
+                            break
+                            
+                        self.current_keyword_index = i
+                        keyword = self.config.keyword_queries[i]
+                        
+                        self.output.print_header(f"Processing Keyword {i+1}/{len(self.config.keyword_queries)}: '{keyword}'")
+                        
+                        # Check for quota exhaustion before processing
+                        if self.quota_exhausted:
+                            self.output.print_warning("⏸️ Quota exhausted - waiting for restoration...")
+                            self._handle_quota_exhaustion()
+                            continue
+                        
+                        # Collect videos from keyword with resumption support
+                        try:
+                            keyword_videos = self.collect_videos_from_keyword(keyword, self.config.target_videos_per_query)
+                            
+                            # Process each video with checkpoint tracking
+                            video_start_index = getattr(self, 'current_video_index', 0) if i == start_index else 0
+                            
+                            for j, video in enumerate(keyword_videos[video_start_index:], video_start_index):
+                                if not self.is_running or self.quota_exhausted:
+                                    break
+                                    
+                                self.current_video_index = j
+                                self.resume_checkpoint = {
+                                    'keyword_index': i,
+                                    'video_index': j,
+                                    'keyword': keyword,
+                                    'video_url': video.get('url', 'unknown')
+                                }
+                                
+                                try:
+                                    self.process_video(video)
+                                except Exception as e:
+                                    # Handle quota exhaustion during video processing
+                                    if "quota" in str(e).lower() or "rate" in str(e).lower():
+                                        self.output.print_warning("🚫 Quota exhaustion detected during processing")
+                                        self._handle_quota_exhaustion()
+                                        break
+                                    else:
+                                        self.output.print_error(f"Error processing video: {e}")
+                                        continue
+                                
+                                # Check if we've reached our target
+                                if self.total_videos_collected >= self.config.target_videos_per_query:
+                                    self.output.print_info(f"Reached target for '{keyword}'")
+                                    break
+                            
+                            # Reset video index for next keyword
+                            self.current_video_index = 0
+                            
+                        except Exception as e:
+                            if "quota" in str(e).lower() or "rate" in str(e).lower():
+                                self.output.print_warning(f"🚫 Quota exhaustion on keyword '{keyword}'")
+                                self._handle_quota_exhaustion()
+                                continue
+                            else:
+                                self.output.print_error(f"Error processing keyword '{keyword}': {e}")
+                                continue
+                        
+                        # Progress report
+                        self.output.print_info(f"Progress: {self.total_videos_collected} collected, {self.total_videos_analyzed} analyzed")
+                    
+                    # If we completed all keywords, check if forever mode should continue
+                    if self.config.enable_forever_mode and self.current_keyword_index >= len(self.config.keyword_queries) - 1:
+                        self.output.print_info("🔄 Completed all keywords - restarting from beginning in forever mode")
+                        self.current_keyword_index = 0
+                        self.current_video_index = 0
+                        time.sleep(60)  # Brief pause before restarting
+                    else:
+                        break  # Exit main loop if not in forever mode
+                        
+                except KeyboardInterrupt:
+                    self.output.print_warning("⏸️ Collection paused by user")
+                    self._save_crawler_state()
+                    if self.config.enable_forever_mode:
+                        self.output.print_info("💾 State saved - you can resume later")
+                    break
+                    
             # Final processing
             total_time = time.time() - start_time
             
@@ -766,13 +1378,16 @@ class TikTokVideoCollector:
             
         except KeyboardInterrupt:
             self.output.print_warning("Collection interrupted by user")
+            self._save_crawler_state()
             self._generate_final_report(time.time() - start_time)
             self._save_results()
             return self.collected_videos
         except Exception as e:
             self.output.print_error(f"Collection failed: {e}")
+            self._save_crawler_state()
             raise
         finally:
+            self.is_running = False
             # Cleanup
             self.video_downloader.cleanup_temp_files()
     
@@ -806,6 +1421,13 @@ class TikTokVideoCollector:
         print(f"   Downloads Attempted: {download_stats['total_downloads']}")
         print(f"   Downloads Successful: {download_stats['successful_downloads']}")
         print(f"   Download Success Rate: {download_stats['success_rate']:.1f}%")
+        print(f"   Total Download Failures: {self.total_download_failures}")
+        
+        # Add recommendations if success rate is low
+        if 'recommendations' in download_stats and download_stats['recommendations']:
+            print(f"\n💡 Recommendations:")
+            for rec in download_stats['recommendations']:
+                print(f"   - {rec}")
         
         # Audio analysis statistics
         print(f"\n🎵 Audio Analysis:")
@@ -823,6 +1445,16 @@ class TikTokVideoCollector:
             print(f"   Promising Channels Found: {len(self.promising_channels)}")
             if self.promising_channels:
                 print(f"   Promising Channels: {', '.join(['@' + ch for ch in list(self.promising_channels)[:5]])}{'...' if len(self.promising_channels) > 5 else ''}")
+        
+        # Final audio files statistics
+        print(f"\n💾 Final Audio Files:")
+        print(f"   Audio Directory: {Config.DEFAULT_FINAL_AUDIO_DIR}")
+        print(f"   Manifest File: {self.manifest_file}")
+        print(f"   Total Downloaded: {len(self.downloaded_urls)}")
+        if Path(Config.DEFAULT_FINAL_AUDIO_DIR).exists():
+            audio_files = list(Path(Config.DEFAULT_FINAL_AUDIO_DIR).glob("*.wav"))
+            total_size = sum(f.stat().st_size for f in audio_files) / (1024*1024)  # MB
+            print(f"   Audio Files: {len(audio_files)} files ({total_size:.1f} MB)")
     
     def _save_results(self) -> None:
         """Save collection results to files."""

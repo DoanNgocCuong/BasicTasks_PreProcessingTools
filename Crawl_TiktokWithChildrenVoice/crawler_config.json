@@ -420,7 +420,7 @@
   ],
   "max_recommended_per_query": 100,
   "min_target_count": 1,
-  "download_method": "direct_api",
+  "download_method": "yt_dlp",
   "user_agent_settings": {
     "default_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
     "rotation_user_agents": [
@@ -453,5 +453,10 @@
     "whisper_model": "tiny",
     "description": "Configuration for transcription services. Groq is preferred for speed, Whisper as fallback."
   },
-  "description": "Configuration file for TikTok Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size per search query, modify channel_queries array for TikTok usernames to crawl, add keyword_queries for keyword-based searches, set user_agent to specify browser user agent string, configure rate_limiting to control request frequency, set video_filters to control which videos are analyzed, and configure transcription_services for audio analysis preferences."
+  "enable_forever_mode": false,
+  "quota_monitoring": true,
+  "auto_resume": true,
+  "key_test_interval": 300,
+  "state_save_interval": 60,
+  "description": "Configuration file for TikTok Video Crawler with Forever Running Mode. Set enable_forever_mode to true for continuous operation with automatic quota monitoring and resumption. The crawler will save its state periodically and resume exactly where it left off when API quotas are restored."
 }

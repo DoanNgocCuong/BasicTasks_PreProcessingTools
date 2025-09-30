@@ -11,9 +11,21 @@ Features:
     - Audio extraction and conversion
     - Error handling and retry logic
     - Temporary file management
-    - Multiple download methods with yt-dlp fallback
+    - Enhanced API key rotation for better rate limit handling
+    - Multiple download methods with API23 fallback
+    - Automatic audio conversion with FFmpeg
+    - Comprehensive error handling and statistics
 
-Author: Generated for TikTok Children's Voice Crawler
+Author: Generated fo            # Method 1: Try yt-dlp first (primary method - most reliable)
+            tiktok_url = video_info.get('url')
+            if tiktok_url and self.has_ytdlp:
+                self._log("🐍 Method 1: yt-dlp download (primary method)...")
+                download_success = self.download_video_ytdlp(tiktok_url, str(temp_video_path))
+            
+            # Method 2: Try TikTok API23 fallback
+            if not download_success and tiktok_url:
+                self._log("🚀 Method 2: TikTok API23 download fallback...")
+                download_success = self.download_video_api23(tiktok_url, str(temp_video_path))hildren's Voice Crawler
 Version: 1.0
 """
 
@@ -26,12 +38,17 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 import urllib.parse as urlparse
+import json
 
 # Constants
 MIN_FILE_SIZE_BYTES = 1000
 DEFAULT_CHUNK_SIZE = 8192
 AUDIO_CONVERSION_TIMEOUT = 60
 DEPENDENCY_CHECK_TIMEOUT = 10
+
+# TikTok API23 Configuration
+TIKTOK_API23_HOST = "tiktok-api23.p.rapidapi.com"
+TIKTOK_API23_ENDPOINT = "/api/download/video"
 
 # TikTok-specific request headers for video downloads
 TIKTOK_HEADERS_CONFIGS = [
@@ -105,11 +122,79 @@ class TikTokVideoDownloader:
         self.successful_downloads = 0
         self.failed_downloads = 0
         
+        # API key management for API23
+        self.api_keys = self._load_api_keys()
+        self.current_key_index = 0
+        
         # Check dependencies
         self.has_ffmpeg = self._check_ffmpeg()
         self.has_ytdlp = self._check_ytdlp()
         
         self._log("✅ TikTok Video Downloader initialized")
+    
+    def _load_api_keys(self) -> List[str]:
+        """Load and validate API keys from environment configuration."""
+        api_keys = []
+        
+        if USE_ENV_CONFIG and config:
+            # Try to get multiple API keys first
+            keys_data = getattr(config, 'TIKTOK_API_KEYS', None)
+            if keys_data:
+                if isinstance(keys_data, list):
+                    # Already a list
+                    keys = [key.strip() for key in keys_data if key and key.strip()]
+                elif isinstance(keys_data, str):
+                    # String that needs splitting
+                    keys = [key.strip() for key in keys_data.split(',') if key.strip()]
+                else:
+                    keys = []
+                
+                api_keys.extend(keys)
+                self._log(f"✅ Loaded {len(keys)} API keys from TIKTOK_API_KEYS")
+            
+            # Also check single key configurations (with error handling)
+            single_key_names = ['RAPIDAPI_KEY', 'TIKTOK_RAPIDAPI_KEY', 'TIKTOK_API_KEY']
+            
+            for key_name in single_key_names:
+                try:
+                    key = getattr(config, key_name, None)
+                    if key and key not in api_keys:
+                        api_keys.append(key)
+                except (ValueError, AttributeError):
+                    # Skip if the key is required but not set
+                    continue
+        
+        # Fallback to hardcoded key if no keys found
+        if not api_keys:
+            fallback_key = "eaf976b22dmsh29e0ce2fce2c011p1f0438jsn5acabaf9a18d"
+            api_keys.append(fallback_key)
+            self._log("⚠️ No API keys in config, using fallback key", "warning")
+        
+        # Mask keys for logging
+        masked_keys = [f"{key[:10]}...{key[-4:]}" for key in api_keys]
+        self._log(f"🔑 API keys loaded: {masked_keys}")
+        
+        return api_keys
+    
+    def _get_next_api_key(self) -> str:
+        """Get the next API key in rotation."""
+        if not self.api_keys:
+            return "eaf976b22dmsh29e0ce2fce2c011p1f0438jsn5acabaf9a18d"  # Fallback
+        
+        key = self.api_keys[self.current_key_index]
+        self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+        return key
+    
+    def _rotate_api_key(self) -> str:
+        """Rotate to the next API key when current one fails."""
+        if len(self.api_keys) > 1:
+            old_index = (self.current_key_index - 1) % len(self.api_keys)
+            new_key = self._get_next_api_key()
+            self._log(f"🔄 Rotating API key from index {old_index} to {self.current_key_index}")
+            return new_key
+        else:
+            self._log("⚠️ Only one API key available, cannot rotate", "warning")
+            return self.api_keys[0] if self.api_keys else "eaf976b22dmsh29e0ce2fce2c011p1f0438jsn5acabaf9a18d"
     
     def _log(self, message: str, level: str = "info") -> None:
         """Log message through output manager if available."""
@@ -144,7 +229,7 @@ class TikTokVideoDownloader:
             return False
     
     def _check_ytdlp(self) -> bool:
-        """Check if yt-dlp is available as fallback downloader."""
+        """Check if yt-dlp is available as primary downloader."""
         try:
             result = subprocess.run(['yt-dlp', '--version'], 
                                   capture_output=True, 
@@ -203,6 +288,149 @@ class TikTokVideoDownloader:
             self._log(f"❌ Error extracting video ID: {e}", "error")
             return None
     
+    def download_video_api23(self, tiktok_url: str, output_path: str) -> bool:
+        """
+        Download video using TikTok API23 RapidAPI endpoint with key rotation.
+        
+        Args:
+            tiktok_url (str): Original TikTok URL
+            output_path (str): Output file path
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        max_attempts = min(3, len(self.api_keys))  # Try up to 3 keys or all available keys
+        
+        for attempt in range(max_attempts):
+            try:
+                self._log(f"🚀 Trying TikTok API23 endpoint (attempt {attempt + 1}/{max_attempts})...")
+                
+                # Get current API key
+                if attempt == 0:
+                    api_key = self._get_next_api_key()
+                else:
+                    api_key = self._rotate_api_key()
+                
+                # Prepare request
+                encoded_url = urlparse.quote(tiktok_url, safe='')
+                api_url = f"https://{TIKTOK_API23_HOST}{TIKTOK_API23_ENDPOINT}?url={encoded_url}"
+                
+                headers = {
+                    'x-rapidapi-host': TIKTOK_API23_HOST,
+                    'x-rapidapi-key': api_key,
+                    'Accept': 'application/json'
+                }
+                
+                self._log(f"📡 Making API request to TikTok API23 (key ending ...{api_key[-4:]})...")
+                
+                # Make API request
+                response = requests.get(api_url, headers=headers, timeout=30)
+                response.raise_for_status()
+                
+                api_data = response.json()
+                
+                if not api_data.get('success', False):
+                    error_msg = api_data.get('message', 'Unknown error')
+                    self._log(f"❌ API23 request failed: {error_msg}", "warning")
+                    if 'rate' in error_msg.lower() or 'limit' in error_msg.lower():
+                        self._log(f"🔄 Rate limit detected, trying next API key...", "warning")
+                        continue  # Try next key
+                    return False
+                
+                # Extract download URL from API response
+                data = api_data.get('data', {})
+                download_url = None
+                
+                # Try different possible download URL fields
+                for url_field in ['download_url', 'downloadUrl', 'play_url', 'playUrl', 'video_url', 'videoUrl']:
+                    if data.get(url_field):
+                        download_url = data[url_field]
+                        break
+                
+                # Also check if data itself is the download URL
+                if not download_url and isinstance(data, str) and data.startswith('http'):
+                    download_url = data
+                
+                if not download_url:
+                    self._log(f"❌ No download URL in API23 response", "warning")
+                    continue  # Try next key
+                
+                self._log(f"✅ Got download URL from API23: {download_url[:60]}...")
+                
+                # Download the video file
+                return self._download_from_url(download_url, output_path, "API23")
+                
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 403:
+                    self._log(f"❌ API23 Forbidden - invalid/expired key (attempt {attempt + 1})", "warning")
+                elif e.response.status_code == 429:
+                    self._log(f"❌ API23 rate limited (attempt {attempt + 1})", "warning")
+                else:
+                    self._log(f"❌ API23 HTTP error {e.response.status_code} (attempt {attempt + 1})", "warning")
+                
+                # If this is not the last attempt, try next key
+                if attempt < max_attempts - 1:
+                    self._log(f"🔄 Trying next API key...", "warning")
+                    continue
+                else:
+                    break
+                    
+            except Exception as e:
+                self._log(f"❌ API23 download error (attempt {attempt + 1}): {e}", "warning")
+                if attempt < max_attempts - 1:
+                    continue
+                else:
+                    break
+        
+        self._log(f"❌ All API23 attempts failed with {len(self.api_keys)} available keys", "warning")
+        return False
+    
+    def _download_from_url(self, download_url: str, output_path: str, source_name: str = "Direct") -> bool:
+        """
+        Helper method to download video from a URL with optimized headers.
+        
+        Args:
+            download_url (str): Direct download URL
+            output_path (str): Output file path
+            source_name (str): Name of the download source for logging
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self._log(f"📥 {source_name} downloading from: {download_url[:60]}...")
+            
+            # Use TikTok-optimized headers
+            headers = {
+                'User-Agent': 'TikTok 26.2.0 rv:262018 (iPhone; iOS 14.4.2; en_US) Cronet',
+                'Accept': '*/*',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': 'https://www.tiktok.com/'
+            }
+            
+            response = requests.get(download_url, headers=headers, timeout=self.download_timeout, stream=True)
+            response.raise_for_status()
+            
+            downloaded_bytes = 0
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=DEFAULT_CHUNK_SIZE):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_bytes += len(chunk)
+            
+            # Verify download
+            if Path(output_path).exists() and Path(output_path).stat().st_size > MIN_FILE_SIZE_BYTES:
+                self._log(f"✅ {source_name} download successful ({downloaded_bytes:,} bytes)")
+                return True
+            else:
+                self._log(f"❌ {source_name} download too small ({downloaded_bytes} bytes)", "warning")
+                return False
+                
+        except Exception as e:
+            self._log(f"❌ {source_name} download error: {e}", "warning")
+            return False
+    
     def download_video_direct(self, download_url: str, output_path: str) -> bool:
         """
         Download video directly from download URL with enhanced headers.
@@ -214,13 +442,10 @@ class TikTokVideoDownloader:
         Returns:
             bool: True if successful, False otherwise
         """
-        # TikTok-specific headers that work better
-        self._log(f"📥 Downloading video from: {download_url[:60]}...")
-        
         # Try each header configuration
         for i, headers in enumerate(TIKTOK_HEADERS_CONFIGS, 1):
             try:
-                self._log(f"🔄 Attempt {i}/{len(TIKTOK_HEADERS_CONFIGS)} with TikTok-optimized headers...")
+                self._log(f"🔄 Direct attempt {i}/{len(TIKTOK_HEADERS_CONFIGS)}...")
                 
                 session = requests.Session()
                 session.headers.update(headers)
@@ -245,9 +470,19 @@ class TikTokVideoDownloader:
                     
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 403:
-                    self._log(f"⚠️ 403 Forbidden (attempt {i}) - trying different headers...", "warning")
+                    self._log(f"⚠️ ⚠️ 403 Forbidden (attempt {i}) - trying different headers...", "warning")
+                    if i < 3:  # Exponential backoff for 403 errors
+                        wait_time = 2 ** i  # 2, 4, 8 seconds
+                        time.sleep(wait_time)
+                elif e.response.status_code == 429:  # Rate limiting
+                    self._log(f"⚠️ Rate limited (attempt {i}) - backing off...", "warning")
+                    if i < 3:
+                        wait_time = 10 * (2 ** (i-1))  # 10, 20, 40 seconds
+                        time.sleep(wait_time)
                 else:
                     self._log(f"⚠️ HTTP {e.response.status_code} (attempt {i})", "warning")
+                    if i < 3:
+                        time.sleep(2)
                 continue
             except requests.exceptions.Timeout:
                 self._log(f"⚠️ Timeout on attempt {i}", "warning")
@@ -280,11 +515,12 @@ class TikTokVideoDownloader:
             return False
     
     def _download_video_ytdlp_python(self, tiktok_url: str, output_path: str) -> bool:
-        """Try downloading using yt-dlp Python module."""
+        """Try downloading using yt-dlp Python module with retry logic."""
         try:
             import yt_dlp
             self._log("🐍 Trying yt-dlp Python module...")
             
+            # Enhanced options for better TikTok compatibility
             ydl_opts = {
                 'format': 'best[ext=mp4][filesize<100M]/best[ext=mp4]/best',
                 'outtmpl': output_path,
@@ -292,19 +528,39 @@ class TikTokVideoDownloader:
                 'referer': 'https://www.tiktok.com/',
                 'noplaylist': True,
                 'quiet': True,
-                'no_warnings': True
+                'no_warnings': True,
+                'retries': 3,
+                'fragment_retries': 3,
+                'extractor_args': {
+                    'tiktok': {
+                        'webpage_url_basename': 'video'
+                    }
+                }
             }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([tiktok_url])
+            # Try multiple times with exponential backoff
+            max_attempts = 2
+            for attempt in range(max_attempts):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([tiktok_url])
+                    
+                    if Path(output_path).exists() and Path(output_path).stat().st_size > 1000:
+                        file_size = Path(output_path).stat().st_size
+                        self._log(f"✅ yt-dlp Python module successful ({file_size:,} bytes)")
+                        return True
+                    
+                except Exception as e:
+                    if attempt < max_attempts - 1:
+                        wait_time = (attempt + 1) * 2  # 2, 4 seconds
+                        self._log(f"⏳ yt-dlp attempt {attempt + 1} failed, retrying in {wait_time}s..., error: {str(e)[:100]}")
+                        time.sleep(wait_time)
+                    else:
+                        self._log(f"❌ yt-dlp Python module error: {e}", "warning")
+                        return False
             
-            if Path(output_path).exists() and Path(output_path).stat().st_size > 1000:
-                file_size = Path(output_path).stat().st_size
-                self._log(f"✅ yt-dlp Python module successful ({file_size:,} bytes)")
-                return True
-            else:
-                self._log("❌ yt-dlp Python module failed - no output file", "warning")
-                return False
+            self._log("❌ yt-dlp Python module failed - no output file", "warning")
+            return False
                 
         except ImportError:
             self._log("⚠️ yt-dlp Python module not available", "warning")
@@ -409,6 +665,11 @@ class TikTokVideoDownloader:
         """
         Download TikTok video and convert to audio with multiple fallback methods.
         
+        Priority order:
+        1. yt-dlp (primary method - most reliable for long-term use)
+        2. TikTok API23 (fallback - API-based but subject to rate limits)
+        3. Direct download (last resort)
+        
         Args:
             video_info (Dict): Video information containing download URLs and metadata
             index (Optional[int]): Index for unique file naming
@@ -439,24 +700,31 @@ class TikTokVideoDownloader:
             
             download_success = False
             
-            # Method 1: Try yt-dlp first (more reliable for TikTok)
-            if self.has_ytdlp:
-                tiktok_url = video_info.get('url')
-                if tiktok_url:
-                    self._log("� Method 1: yt-dlp download (recommended)...")
-                    download_success = self.download_video_ytdlp(tiktok_url, str(temp_video_path))
+            # Method 1: Try yt-dlp first (primary method - most reliable)
+            tiktok_url = video_info.get('url')
+            if tiktok_url and self.has_ytdlp:
+                self._log("� Method 1: yt-dlp download (primary method)...")
+                download_success = self.download_video_ytdlp(tiktok_url, str(temp_video_path))
             
-            # Method 2: Direct download fallback (for when yt-dlp fails)
+            # Method 2: Try TikTok API23 fallback
+            if not download_success and tiktok_url:
+                self._log("� Method 2: TikTok API23 download fallback...")
+                download_success = self.download_video_api23(tiktok_url, str(temp_video_path))
+            
+            # Method 3: Direct download fallback (for when API and yt-dlp fail)
             if not download_success:
                 download_url = video_info.get('download_url') or video_info.get('play_url')
                 if download_url:
-                    self._log("� Method 2: Direct download fallback...")
+                    self._log("📥 Method 3: Direct download fallback...")
                     download_success = self.download_video_direct(download_url, str(temp_video_path))
             
             # If download failed completely
             if not download_success:
-                self._log("❌ All download methods failed", "error")
+                self._log("❌ ❌ All download methods failed", "error")
                 self.failed_downloads += 1
+                
+                # Implement graceful skip - don't crash the entire process
+                self._log("⏭️ Skipping this video and continuing with the next one...", "warning")
                 return None, None
             
             # Convert to audio
@@ -548,7 +816,9 @@ class TikTokVideoDownloader:
             'failed_downloads': self.failed_downloads,
             'success_rate': success_rate,
             'has_ffmpeg': self.has_ffmpeg,
-            'has_ytdlp': self.has_ytdlp
+            'has_ytdlp': self.has_ytdlp,
+            'api_keys_available': len(self.api_keys),
+            'current_key_index': self.current_key_index
         }
     
     def print_download_statistics(self) -> None:
@@ -562,6 +832,8 @@ class TikTokVideoDownloader:
         print(f"Success Rate: {stats['success_rate']:.1f}%")
         print(f"FFmpeg Available: {stats['has_ffmpeg']}")
         print(f"yt-dlp Available: {stats['has_ytdlp']}")
+        print(f"API Keys Available: {stats['api_keys_available']}")
+        print(f"Current Key Index: {stats['current_key_index']}")
         print("=" * 40)
 
 

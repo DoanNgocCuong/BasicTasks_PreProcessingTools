@@ -1,0 +1,37 @@
+TikTok Children's Voice Collection Report
+==================================================
+
+Collection Date: 2025-09-30 09:51:56
+Total Videos Analyzed: 4
+Total Videos Collected: 0
+Vietnamese Videos: 0
+Children's Voice Videos: 0
+Collection Rate: 0.0%
+
+Search Queries:
+  1. @moxierobot
+  2. @farmeesvietnam
+  3. @popskids
+  4. @nidovietnam
+  5. @babyccinotv
+  6. @vinacartoon
+  7. @HeoPeppaTiengVietChinhThuc
+  8. @mykingdom
+  9. @LearningForKidz
+  10. @FunGameforKids
+  11. @BabyBusVN
+  12. @SuperJoJoVietnam
+
+Hashtag Queries:
+  1. #thiếunhi
+  2. #nhacthieunhi
+  3. #truyencotich
+  4. #behattiengviet
+  5. #giongbetietviet
+  6. #dongdao
+  7. #hocchucai
+  8. #bejhoc
+  9. #hoathinhtietviet
+  10. #behatmua
+
+Collected Video URLs:
