@@ -100,6 +100,12 @@ class CrawlerConfig:
     video_filters: Optional[Dict[str, Any]] = None
     transcription_services: Optional[Dict[str, Any]] = None
     user_agent_settings: Optional[Dict[str, Any]] = None
+    # Channel discovery configuration
+    enable_channel_discovery: bool = True
+    auto_add_promising_channels: bool = True
+    channel_quality_threshold: float = 0.3
+    max_channel_videos: int = 50
+    exhaustive_channel_analysis: bool = True
 
 
 class ConfigLoader:
@@ -141,7 +147,13 @@ class ConfigLoader:
                 rate_limiting=config_data.get('rate_limiting', {}),
                 video_filters=config_data.get('video_filters', {}),
                 transcription_services=config_data.get('transcription_services', {}),
-                user_agent_settings=config_data.get('user_agent_settings', {})
+                user_agent_settings=config_data.get('user_agent_settings', {}),
+                # Channel discovery configuration
+                enable_channel_discovery=config_data.get('enable_channel_discovery', True),
+                auto_add_promising_channels=config_data.get('auto_add_promising_channels', True),
+                channel_quality_threshold=config_data.get('channel_quality_threshold', 0.3),
+                max_channel_videos=config_data.get('max_channel_videos', 50),
+                exhaustive_channel_analysis=config_data.get('exhaustive_channel_analysis', True)
             )
             
             self.output.print_info(f"✅ Configuration loaded from: {self.config_file_path}")
@@ -188,6 +200,7 @@ class ConfigLoader:
             "auto_add_promising_channels": True,
             "channel_quality_threshold": 0.3,
             "max_channel_videos": 50,
+            "exhaustive_channel_analysis": True,
             "description": "Default configuration for TikTok Children's Voice Crawler with Channel Discovery"
         }
         
@@ -296,6 +309,15 @@ class TikTokVideoCollector:
         self.total_videos_analyzed = 0
         self.total_videos_collected = 0
         
+        # Channel discovery tracking
+        self.processed_channels: Set[str] = set()  # Track channels we've already processed
+        self.promising_channels: Set[str] = set()  # Channels with qualifying videos
+        self.channel_discovery_stats = {
+            'channels_discovered': 0,
+            'channels_processed': 0,
+            'videos_from_channel_discovery': 0
+        }
+        
         # Statistics tracking
         self.total_vietnamese_videos = 0
         self.total_children_voice_videos = 0
@@ -309,6 +331,14 @@ class TikTokVideoCollector:
         all_queries = [f"'{kw}'" for kw in self.config.keyword_queries]
         total_target = self.config.target_videos_per_query * len(all_queries)
         self.output.report_configuration(self.config.target_videos_per_query, total_target, all_queries)
+        
+        # Report channel discovery configuration
+        if self.config.enable_channel_discovery:
+            self.output.print_info(f"🎯 Channel discovery: Enabled")
+            self.output.print_info(f"🎯 Exhaustive channel analysis: {'Yes' if self.config.exhaustive_channel_analysis else f'Max {self.config.max_channel_videos} videos per channel'}")
+            self.output.print_info(f"🎯 Channel quality threshold: {self.config.channel_quality_threshold}")
+        else:
+            self.output.print_info(f"🎯 Channel discovery: Disabled")
         
         self.output.print_success("TikTok Video Collector initialized successfully")
     
@@ -348,6 +378,113 @@ class TikTokVideoCollector:
         except Exception as e:
             self.output.print_error(f"Failed to collect videos from @{username}: {e}")
             return []
+    
+    def process_channel_exhaustively(self, username: str, source_video: Dict) -> int:
+        """
+        Exhaustively process all videos from a promising channel.
+        
+        Args:
+            username (str): TikTok username (without @)
+            source_video (Dict): The original video that led to this channel discovery
+            
+        Returns:
+            int: Number of additional qualifying videos found
+        """
+        if not self.config.enable_channel_discovery:
+            return 0
+        
+        # Check if we've already processed this channel
+        if username in self.processed_channels:
+            self.output.debug_log(f"Channel @{username} already processed, skipping")
+            return 0
+        
+        # Mark channel as processed
+        self.processed_channels.add(username)
+        self.channel_discovery_stats['channels_processed'] += 1
+        
+        self.output.print_header(f"🎯 CHANNEL DISCOVERY: @{username}", 70)
+        self.output.print_info(f"📺 Exhaustively analyzing channel @{username}")
+        self.output.print_info(f"💡 Triggered by video: {source_video['title'][:50]}...")
+        
+        try:
+            # Collect all videos from this channel
+            max_videos = self.config.max_channel_videos if not self.config.exhaustive_channel_analysis else 0
+            
+            # Get user videos in batches for exhaustive analysis
+            all_channel_videos = []
+            cursor = 0
+            page_size = 50
+            max_pages = 20  # Safety limit
+            
+            for page in range(max_pages):
+                videos_batch = self.api_client.get_user_videos(username, count=page_size, cursor=cursor)
+                
+                if not videos_batch:
+                    self.output.debug_log(f"No more videos found at cursor {cursor}")
+                    break
+                
+                all_channel_videos.extend(videos_batch)
+                self.output.debug_log(f"Page {page + 1}: +{len(videos_batch)} videos (total: {len(all_channel_videos)})")
+                
+                # If we got less than page_size, we've reached the end
+                if len(videos_batch) < page_size:
+                    break
+                
+                # Update cursor (TikTok uses time-based pagination)
+                if videos_batch:
+                    last_video = videos_batch[-1]
+                    cursor = last_video.get('create_time', cursor + page_size)
+                
+                # Respect max_videos limit if exhaustive is disabled
+                if max_videos > 0 and len(all_channel_videos) >= max_videos:
+                    all_channel_videos = all_channel_videos[:max_videos]
+                    break
+            
+            if not all_channel_videos:
+                self.output.print_warning(f"No videos found in channel @{username}")
+                return 0
+            
+            self.output.print_info(f"📊 Found {len(all_channel_videos)} total videos in @{username}")
+            
+            # Filter out videos we've already processed
+            new_videos = [v for v in all_channel_videos if v['url'] not in self.collected_urls]
+            self.output.print_info(f"🆕 {len(new_videos)} new videos to analyze (skipped {len(all_channel_videos) - len(new_videos)} duplicates)")
+            
+            # Process each video
+            channel_qualifications = 0
+            channel_processed = 0
+            
+            for i, video in enumerate(new_videos, 1):
+                self.output.print_progress(f"📹 [{i}/{len(new_videos)}] Analyzing: {video['title'][:40]}...")
+                
+                # Process video through the normal pipeline
+                if self.process_video(video, is_from_channel_discovery=True):
+                    channel_qualifications += 1
+                    self.channel_discovery_stats['videos_from_channel_discovery'] += 1
+                
+                channel_processed += 1
+                
+                # Progress update every 10 videos
+                if i % 10 == 0:
+                    self.output.print_info(f"📊 Channel progress: {channel_qualifications} qualified from {channel_processed} analyzed")
+            
+            # Channel analysis complete
+            qualification_rate = (channel_qualifications / max(channel_processed, 1)) * 100
+            
+            self.output.print_success(f"✅ Channel @{username} analysis complete!")
+            self.output.print_info(f"📊 Results: {channel_qualifications} qualified videos from {channel_processed} analyzed")
+            self.output.print_info(f"📊 Channel qualification rate: {qualification_rate:.1f}%")
+            
+            # Mark as promising channel if it meets threshold
+            if qualification_rate >= (self.config.channel_quality_threshold * 100):
+                self.promising_channels.add(username)
+                self.output.print_success(f"⭐ @{username} marked as promising channel ({qualification_rate:.1f}% qualification rate)")
+            
+            return channel_qualifications
+            
+        except Exception as e:
+            self.output.print_error(f"Failed to process channel @{username}: {e}")
+            return 0
     
 
 
@@ -486,12 +623,13 @@ class TikTokVideoCollector:
                 error=str(e)
             )
     
-    def process_video(self, video: Dict) -> bool:
+    def process_video(self, video: Dict, is_from_channel_discovery: bool = False) -> bool:
         """
         Process a single video through the analysis pipeline.
         
         Args:
             video (Dict): Video information
+            is_from_channel_discovery (bool): Whether this video came from channel discovery
             
         Returns:
             bool: True if video was collected, False otherwise
@@ -526,15 +664,10 @@ class TikTokVideoCollector:
         # Check children's voice detection
         if not analysis_result.has_children_voice:
             self.output.debug_log(f"No children's voice detected (confidence: {analysis_result.confidence:.2f})")
-            
-            # Still track channel for discovery (as non-qualified)
-
-            
             return False
         
         # Video meets criteria - collect it
         self.total_children_voice_videos += 1
-        is_qualified = True  # Mark as qualified video
         
         # Add to collection
         video_record = {
@@ -547,20 +680,31 @@ class TikTokVideoCollector:
                 'analysis_time': analysis_result.total_analysis_time,
                 'transcription': analysis_result.transcription
             },
-            'collected_at': datetime.now().isoformat()
+            'collected_at': datetime.now().isoformat(),
+            'from_channel_discovery': is_from_channel_discovery
         }
         
         self.collected_videos.append(video_record)
         self.collected_urls.add(video['url'])
         self.total_videos_collected += 1
         
-        # Channel discovery integration
-
+        # Channel discovery integration - only trigger for videos NOT from channel discovery
+        if not is_from_channel_discovery and self.config.enable_channel_discovery:
+            username = video.get('author_username')
+            if username and username not in self.processed_channels:
+                self.output.print_info(f"🎯 Triggering channel discovery for @{username}")
+                self.channel_discovery_stats['channels_discovered'] += 1
+                
+                # Process the channel exhaustively in the background or immediately
+                additional_videos = self.process_channel_exhaustively(username, video)
+                if additional_videos > 0:
+                    self.output.print_success(f"🎉 Channel discovery found {additional_videos} additional qualifying videos!")
         
         # Save URL immediately
         self._save_url_to_file(video['url'])
         
-        self.output.print_success(f"✓ Collected video: {video['title'][:50]}... (confidence: {analysis_result.confidence:.2f})")
+        discovery_note = " [FROM CHANNEL DISCOVERY]" if is_from_channel_discovery else ""
+        self.output.print_success(f"✓ Collected video: {video['title'][:50]}... (confidence: {analysis_result.confidence:.2f}){discovery_note}")
         return True
     
     def _save_url_to_file(self, url: str) -> None:
@@ -607,9 +751,13 @@ class TikTokVideoCollector:
             # Final processing
             total_time = time.time() - start_time
             
-            # Channel discovery post-processing
-
-
+            # Channel discovery summary
+            if self.config.enable_channel_discovery:
+                self.output.print_header("Channel Discovery Summary")
+                self.output.print_info(f"📊 Channels discovered: {self.channel_discovery_stats['channels_discovered']}")
+                self.output.print_info(f"📊 Channels processed: {self.channel_discovery_stats['channels_processed']}")
+                self.output.print_info(f"📊 Additional videos from channel discovery: {self.channel_discovery_stats['videos_from_channel_discovery']}")
+                self.output.print_info(f"⭐ Promising channels identified: {len(self.promising_channels)}")
             
             self._generate_final_report(total_time)
             self._save_results()
@@ -667,8 +815,14 @@ class TikTokVideoCollector:
         print(f"   Processing Device: {classifier_stats['device']}")
         
         # Channel discovery statistics
-
-
+        if self.config.enable_channel_discovery:
+            print(f"\n🎯 Channel Discovery Statistics:")
+            print(f"   Channels Discovered: {self.channel_discovery_stats['channels_discovered']}")
+            print(f"   Channels Processed: {self.channel_discovery_stats['channels_processed']}")
+            print(f"   Videos from Channel Discovery: {self.channel_discovery_stats['videos_from_channel_discovery']}")
+            print(f"   Promising Channels Found: {len(self.promising_channels)}")
+            if self.promising_channels:
+                print(f"   Promising Channels: {', '.join(['@' + ch for ch in list(self.promising_channels)[:5]])}{'...' if len(self.promising_channels) > 5 else ''}")
     
     def _save_results(self) -> None:
         """Save collection results to files."""
@@ -684,13 +838,18 @@ class TikTokVideoCollector:
                         'total_collected': self.total_videos_collected,
                         'vietnamese_videos': self.total_vietnamese_videos,
                         'children_voice_videos': self.total_children_voice_videos,
-                        'collection_time': datetime.now().isoformat()
+                        'collection_time': datetime.now().isoformat(),
+                        'channel_discovery_stats': self.channel_discovery_stats,
+                        'promising_channels': list(self.promising_channels)
                     },
                     'configuration': {
                         'target_per_query': self.config.target_videos_per_query,
-
                         'keyword_queries': self.config.keyword_queries,
-                        'enable_language_detection': self.config.enable_language_detection
+                        'enable_language_detection': self.config.enable_language_detection,
+                        'enable_channel_discovery': self.config.enable_channel_discovery,
+                        'exhaustive_channel_analysis': self.config.exhaustive_channel_analysis,
+                        'max_channel_videos': self.config.max_channel_videos,
+                        'channel_quality_threshold': self.config.channel_quality_threshold
                     },
                     'collected_videos': self.collected_videos
                 }, f, indent=2, ensure_ascii=False)
@@ -709,9 +868,16 @@ class TikTokVideoCollector:
                 f.write(f"Children's Voice Videos: {self.total_children_voice_videos}\n")
                 f.write(f"Collection Rate: {(self.total_videos_collected / max(self.total_videos_analyzed, 1)) * 100:.1f}%\n\n")
                 
-                
-
-                    
+                # Channel discovery statistics
+                if self.config.enable_channel_discovery:
+                    f.write("Channel Discovery Results:\n")
+                    f.write(f"  Channels Discovered: {self.channel_discovery_stats['channels_discovered']}\n")
+                    f.write(f"  Channels Processed: {self.channel_discovery_stats['channels_processed']}\n")
+                    f.write(f"  Videos from Channel Discovery: {self.channel_discovery_stats['videos_from_channel_discovery']}\n")
+                    f.write(f"  Promising Channels: {len(self.promising_channels)}\n")
+                    if self.promising_channels:
+                        f.write(f"  Promising Channel List: {', '.join(['@' + ch for ch in self.promising_channels])}\n")
+                    f.write("\n")
                 
                 if self.config.keyword_queries:
                     f.write("\nKeyword Queries:\n")
