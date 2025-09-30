@@ -303,51 +303,81 @@ class TikTokAPIClient:
             self._log(f"❌ Failed to get videos for {username}: {e.message}", "error")
             return []
     
-    def search_videos_by_keyword_with_pagination(self, keyword: str, total_count: int = 100) -> List[Dict]:
+    def search_videos_by_keyword_with_pagination(self, keyword: str, max_total_count: Optional[int] = None) -> List[Dict]:
         """
-        Search videos by keyword with automatic pagination to get more results.
+        Search videos by keyword with EXHAUSTIVE pagination - gets ALL available results.
         
         Args:
             keyword (str): Keyword or phrase to search for
-            total_count (int): Total number of videos to fetch across all pages
+            max_total_count (int, optional): Maximum total videos to fetch (None = get ALL available)
             
         Returns:
-            List[Dict]: List of video information dictionaries
+            List[Dict]: List of ALL available video information dictionaries
         """
         all_videos = []
         cursor = 0
         search_id = 0
-        per_page = min(50, total_count)  # TikTok API typically returns max 50 per request
+        page_num = 1
+        max_pages = 100  # Safety limit to prevent infinite loops
         
-        while len(all_videos) < total_count:
-            remaining = total_count - len(all_videos)
-            fetch_count = min(per_page, remaining)
+        self._log(f"🚀 Starting EXHAUSTIVE keyword search for: '{keyword}'")
+        self._log(f"📊 Max total count: {max_total_count if max_total_count else 'UNLIMITED (get all)'}")
+        
+        while page_num <= max_pages:
+            self._log(f"\n� Page {page_num} - Cursor: {cursor}")
             
-            self._log(f"🔄 Fetching page with cursor {cursor} (requesting {fetch_count} videos)")
-            videos = self.search_videos_by_keyword(keyword, fetch_count, cursor, search_id)
+            # Fetch current page
+            result = self.search_videos_by_keyword(keyword, count=50, cursor=cursor, search_id=search_id)
+            
+            videos = result.get('videos', [])
+            has_more = result.get('has_more', False)
+            next_cursor = result.get('next_cursor')
             
             if not videos:
-                self._log(f"ℹ️ No more videos found, stopping pagination")
+                self._log(f"❌ No videos found on page {page_num}, stopping pagination")
                 break
             
+            # Add videos to collection
             all_videos.extend(videos)
+            current_total = len(all_videos)
             
-            # Update cursor for next page
-            # TikTok API typically uses the last video's timestamp or ID as cursor
-            if len(videos) < fetch_count:
-                # If we got fewer videos than requested, we've likely reached the end
-                self._log(f"ℹ️ Received {len(videos)} videos (requested {fetch_count}), likely reached end")
+            self._log(f"✅ Page {page_num}: +{len(videos)} videos | Total: {current_total}")
+            
+            # Check if we've reached our max limit
+            if max_total_count and current_total >= max_total_count:
+                all_videos = all_videos[:max_total_count]  # Trim to exact limit
+                self._log(f"🎯 Reached max limit of {max_total_count} videos")
                 break
             
-            cursor += len(videos)  # Simple increment approach
+            # Check if API says there are more results
+            if not has_more:
+                self._log(f"✅ API indicates no more results (has_more: {has_more})")
+                break
             
-            # Rate limiting between pages
-            time.sleep(1)
+            # Check if we have a valid next cursor
+            if next_cursor is None:
+                self._log(f"❌ No next_cursor provided by API, stopping pagination")
+                break
+            
+            # Update cursor for next iteration using API's next_cursor
+            cursor = next_cursor
+            page_num += 1
+            
+            # Rate limiting between pages (be respectful to API)
+            self._log(f"⏳ Sleeping 2 seconds before next page...")
+            time.sleep(2)
         
-        self._log(f"✅ Keyword search completed: {len(all_videos)} total videos for '{keyword}'")
+        # Final summary
+        self._log(f"\n🎉 EXHAUSTIVE search completed for '{keyword}'!")
+        self._log(f"📊 Total pages fetched: {page_num - 1}")
+        self._log(f"📊 Total videos collected: {len(all_videos)}")
+        
+        if page_num > max_pages:
+            self._log(f"⚠️ Reached safety limit of {max_pages} pages")
+        
         return all_videos
 
-    def search_videos_by_keyword(self, keyword: str, count: int = 30, cursor: int = 0, search_id: int = 0) -> List[Dict]:
+    def search_videos_by_keyword(self, keyword: str, count: int = 30, cursor: int = 0, search_id: int = 0) -> Dict[str, Any]:
         """
         Search videos by general keyword/query using TikTok's video search API.
         
@@ -358,7 +388,7 @@ class TikTokAPIClient:
             search_id (int): Search ID for TikTok API (default: 0)
             
         Returns:
-            List[Dict]: List of video information dictionaries
+            Dict: Dictionary containing videos list and pagination info
         """
         from urllib.parse import quote_plus
         
@@ -376,7 +406,7 @@ class TikTokAPIClient:
                 videos = []
                 items = response.get('item_list', [])
                 
-                # Check if we have more results for pagination
+                # Extract pagination info from API response
                 has_more = response.get('has_more', 0)
                 next_cursor = response.get('cursor', None)
                 
@@ -388,14 +418,30 @@ class TikTokAPIClient:
                         videos.append(video_info)
                 
                 self._log(f"✅ Found {len(videos)} videos for keyword '{keyword}'")
-                return videos
+                
+                return {
+                    'videos': videos,
+                    'has_more': bool(has_more),
+                    'next_cursor': next_cursor,
+                    'total_items': len(videos)
+                }
             else:
                 self._log(f"⚠️ No videos found for keyword: '{keyword}' - Response: {response}", "warning")
-                return []
+                return {
+                    'videos': [],
+                    'has_more': False,
+                    'next_cursor': None,
+                    'total_items': 0
+                }
                 
         except TikTokAPIError as e:
             self._log(f"❌ Failed to search keyword '{keyword}': {e.message}", "error")
-            return []
+            return {
+                'videos': [],
+                'has_more': False,
+                'next_cursor': None,
+                'total_items': 0
+            }
 
 
     
