@@ -35,10 +35,14 @@ import time
 import requests
 import subprocess
 import tempfile
+import csv
+import shutil
+import argparse
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 import urllib.parse as urlparse
 import json
+from datetime import datetime
 
 # Constants
 MIN_FILE_SIZE_BYTES = 1000
@@ -131,6 +135,337 @@ class TikTokVideoDownloader:
         self.has_ytdlp = self._check_ytdlp()
         
         self._log("✅ TikTok Video Downloader initialized")
+    
+    def resync_manifest_csv(self, manifest_path: str, audio_directory: str) -> None:
+        """
+        Resync the manifest.csv with actual audio files in the final_audio_files directory.
+        
+        Args:
+            manifest_path: Path to the manifest.csv file
+            audio_directory: Path to the final_audio_files directory
+        """
+        self._log("🔄 Starting manifest CSV resync process...")
+        
+        # Create backup
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{manifest_path}.backup_{timestamp}"
+        shutil.copy2(manifest_path, backup_path)
+        self._log(f"📁 Backup created: {backup_path}")
+        
+        # Load original manifest
+        self._log("📖 Loading original manifest...")
+        manifest_records = []
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            manifest_records = list(reader)
+        
+        original_count = len(manifest_records)
+        self._log(f"📊 Original manifest has {original_count} records")
+        
+        # Get actual audio files
+        self._log("🔍 Scanning for actual audio files...")
+        actual_audio_files = set()
+        audio_directory_path = Path(audio_directory)
+        
+        if not audio_directory_path.exists():
+            self._log(f"❌ Directory {audio_directory} does not exist", "error")
+            return
+        
+        for file_path in audio_directory_path.glob("*.wav"):
+            actual_audio_files.add(file_path.name)
+        
+        actual_count = len(actual_audio_files)
+        self._log(f"📁 Found {actual_count} actual audio files")
+        
+        # Filter manifest records to only include those with actual audio files
+        self._log("🔧 Filtering manifest records...")
+        filtered_records = []
+        removed_count = 0
+        
+        for record in manifest_records:
+            output_path = record.get('output_path', '')
+            if output_path:
+                # Extract just the filename from the full path
+                original_filename = Path(output_path).name
+                
+                # Check if this exact filename exists in our actual audio files
+                if original_filename in actual_audio_files:
+                    # Update the output_path to the current directory structure
+                    record['output_path'] = str(audio_directory_path / original_filename)
+                    filtered_records.append(record)
+                else:
+                    self._log(f"⚠️ Audio file not found: {original_filename}")
+                    removed_count += 1
+            else:
+                self._log(f"⚠️ Manifest record has no output_path")
+                removed_count += 1
+        
+        # Save updated manifest
+        self._log("💾 Saving updated manifest...")
+        with open(manifest_path, 'w', encoding='utf-8', newline='') as f:
+            if filtered_records:
+                fieldnames = filtered_records[0].keys()
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(filtered_records)
+        
+        # Check for audio files without manifest records
+        used_audio_files = set()
+        for record in filtered_records:
+            output_path = record.get('output_path', '')
+            if output_path:
+                used_audio_files.add(Path(output_path).name)
+        
+        unused_audio_files = []
+        for filename in actual_audio_files:
+            if filename not in used_audio_files:
+                unused_audio_files.append(filename)
+        
+        unused_audio_files.sort()
+        
+        # Print summary
+        self._log("\n" + "="*50)
+        self._log("📊 MANIFEST RESYNC SUMMARY")
+        self._log("="*50)
+        self._log(f"Original records: {original_count}")
+        self._log(f"Actual audio files: {actual_count}")
+        self._log(f"Records after filtering: {len(filtered_records)}")
+        self._log(f"Records removed: {removed_count}")
+        self._log(f"Audio files without manifest records: {len(unused_audio_files)}")
+        self._log(f"Backup created: {backup_path}")
+        self._log(f"Updated manifest saved: {manifest_path}")
+        
+        if unused_audio_files:
+            self._log("\n" + "="*50)
+            self._log("⚠️ WARNING: AUDIO FILES WITHOUT MANIFEST RECORDS")
+            self._log("="*50)
+            self._log(f"Found {len(unused_audio_files)} audio files without corresponding manifest records:")
+            for i, filename in enumerate(unused_audio_files[:20]):  # Show first 20
+                self._log(f"  {i+1:2d}. {filename}")
+            if len(unused_audio_files) > 20:
+                self._log(f"  ... and {len(unused_audio_files) - 20} more files")
+            self._log("="*50)
+        
+        self._log("="*50)
+        self._log("✅ Manifest resync completed successfully!")
+    
+    def load_urls_from_file(self, urls_file: str) -> List[str]:
+        """
+        Load URLs from a text file.
+        
+        Args:
+            urls_file: Path to the URLs file
+            
+        Returns:
+            List of URLs
+        """
+        urls = []
+        try:
+            with open(urls_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and line.startswith('http'):
+                        urls.append(line)
+            self._log(f"📋 Loaded {len(urls)} URLs from {urls_file}")
+            return urls
+        except Exception as e:
+            self._log(f"❌ Error loading URLs from {urls_file}: {e}", "error")
+            return []
+    
+    def load_manifest_urls(self, manifest_path: str) -> set:
+        """
+        Load URLs from manifest CSV file.
+        
+        Args:
+            manifest_path: Path to the manifest CSV file
+            
+        Returns:
+            Set of URLs from manifest
+        """
+        urls = set()
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for record in reader:
+                    url = record.get('url', '').strip()
+                    if url:
+                        urls.add(url)
+            self._log(f"📋 Loaded {len(urls)} URLs from manifest")
+            return urls
+        except Exception as e:
+            self._log(f"❌ Error loading URLs from manifest: {e}", "error")
+            return set()
+    
+    def find_missing_urls(self, collected_urls: List[str], manifest_urls: set) -> List[str]:
+        """
+        Find URLs that are in collected_urls but not in manifest_urls.
+        
+        Args:
+            collected_urls: List of URLs from collected file
+            manifest_urls: Set of URLs from manifest
+            
+        Returns:
+            List of missing URLs
+        """
+        missing_urls = []
+        for url in collected_urls:
+            if url not in manifest_urls:
+                missing_urls.append(url)
+        
+        self._log(f"🔍 Found {len(missing_urls)} URLs to download")
+        return missing_urls
+    
+    def process_missing_videos(self, missing_urls: List[str], output_directory: str, manifest_path: str) -> None:
+        """
+        Process missing videos by downloading and converting them to audio.
+        
+        Args:
+            missing_urls: List of URLs to process
+            output_directory: Directory to save audio files
+            manifest_path: Path to manifest CSV file
+        """
+        if not missing_urls:
+            self._log("✅ No missing videos to process!")
+            return
+        
+        self._log(f"🎬 Processing {len(missing_urls)} missing videos...")
+        
+        # Load existing manifest to append new records
+        existing_records = []
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                existing_records = list(reader)
+        except Exception as e:
+            self._log(f"⚠️ Could not load existing manifest: {e}", "warning")
+        
+        # Process each missing URL
+        new_records = []
+        for i, url in enumerate(missing_urls, 1):
+            self._log(f"\n🎬 Processing {i}/{len(missing_urls)}: {url}")
+            
+            try:
+                # Extract video ID for filename
+                video_id = self.extract_tiktok_id(url)
+                if not video_id:
+                    self._log(f"❌ Could not extract video ID from {url}", "warning")
+                    continue
+                
+                # Create video info dict
+                video_info = {
+                    'url': url,
+                    'video_id': video_id,
+                    'title': f"TikTok Video {video_id}",  # We'll update this if we can get it
+                    'author_username': 'unknown',
+                    'duration_seconds': 0,
+                    'confidence': 0.0,
+                    'is_vietnamese': True,
+                    'has_children_voice': True,
+                    'from_channel_discovery': False
+                }
+                
+                # Download and convert
+                audio_path, duration = self.download_and_convert_audio(video_info, i)
+                
+                if audio_path and duration:
+                    # Generate final filename
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    final_filename = f"{timestamp}_{i:04d}_{video_id}.wav"
+                    final_path = Path(output_directory) / final_filename
+                    
+                    # Move temp file to final location
+                    shutil.move(audio_path, final_path)
+                    
+                    # Create manifest record
+                    record = {
+                        'url': url,
+                        'video_id': video_id,
+                        'title': video_info['title'],
+                        'author_username': video_info['author_username'],
+                        'duration_seconds': duration,
+                        'confidence': video_info['confidence'],
+                        'is_vietnamese': video_info['is_vietnamese'],
+                        'has_children_voice': video_info['has_children_voice'],
+                        'output_path': str(final_path),
+                        'status': 'success',
+                        'timestamp': datetime.now().isoformat(),
+                        'from_channel_discovery': video_info['from_channel_discovery']
+                    }
+                    
+                    new_records.append(record)
+                    self._log(f"✅ Successfully processed: {final_filename}")
+                else:
+                    self._log(f"❌ Failed to process: {url}", "warning")
+                    
+            except Exception as e:
+                self._log(f"❌ Error processing {url}: {e}", "error")
+                continue
+        
+        # Append new records to manifest
+        if new_records:
+            self._log(f"💾 Adding {len(new_records)} new records to manifest...")
+            all_records = existing_records + new_records
+            
+            with open(manifest_path, 'w', encoding='utf-8', newline='') as f:
+                if all_records:
+                    fieldnames = all_records[0].keys()
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(all_records)
+            
+            self._log(f"✅ Added {len(new_records)} new records to manifest")
+        else:
+            self._log("⚠️ No new records to add to manifest")
+    
+    def run_full_process(self, manifest_path: str, audio_directory: str, urls_file: str) -> None:
+        """
+        Run the complete process: resync manifest, then download missing videos.
+        
+        Args:
+            manifest_path: Path to manifest CSV file
+            audio_directory: Path to final_audio_files directory
+            urls_file: Path to collected URLs file
+        """
+        self._log("🚀 Starting full TikTok processing pipeline...")
+        
+        # Step 1: Resync manifest with actual files
+        self._log("\n" + "="*60)
+        self._log("STEP 1: RESYNCING MANIFEST WITH ACTUAL FILES")
+        self._log("="*60)
+        self.resync_manifest_csv(manifest_path, audio_directory)
+        
+        # Step 2: Find missing URLs
+        self._log("\n" + "="*60)
+        self._log("STEP 2: FINDING MISSING VIDEOS")
+        self._log("="*60)
+        
+        # Load URLs from collected file
+        collected_urls = self.load_urls_from_file(urls_file)
+        if not collected_urls:
+            self._log("❌ No URLs found in collected file", "error")
+            return
+        
+        # Load URLs from manifest
+        manifest_urls = self.load_manifest_urls(manifest_path)
+        
+        # Find missing URLs
+        missing_urls = self.find_missing_urls(collected_urls, manifest_urls)
+        
+        if not missing_urls:
+            self._log("✅ All videos are already downloaded!")
+            return
+        
+        # Step 3: Download missing videos
+        self._log("\n" + "="*60)
+        self._log("STEP 3: DOWNLOADING MISSING VIDEOS")
+        self._log("="*60)
+        self.process_missing_videos(missing_urls, audio_directory, manifest_path)
+        
+        # Final summary
+        self._log("\n" + "="*60)
+        self._log("🎉 FULL PROCESS COMPLETED!")
+        self._log("="*60)
+        self.print_download_statistics()
     
     def _load_api_keys(self) -> List[str]:
         """Load and validate API keys from environment configuration."""
@@ -837,22 +1172,140 @@ class TikTokVideoDownloader:
         print("=" * 40)
 
 
-# Test function
-if __name__ == "__main__":
-    print("🧪 Testing TikTok Video Downloader...")
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="TikTok Video Downloader with Manifest Resync",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run full process with default paths
+  python tiktok_video_downloader.py
+
+  # Run with custom paths
+  python tiktok_video_downloader.py --manifest manifest.csv --audio-dir audio_files --urls urls.txt
+
+  # Only resync manifest (no downloads)
+  python tiktok_video_downloader.py --resync-only
+
+  # Test system dependencies
+  python tiktok_video_downloader.py --test
+        """
+    )
+    
+    parser.add_argument(
+        '--manifest', '-m',
+        default='final_audio_files/manifest.csv',
+        help='Path to manifest CSV file (default: final_audio_files/manifest.csv)'
+    )
+    
+    parser.add_argument(
+        '--audio-dir', '-a',
+        default='final_audio_files',
+        help='Path to audio files directory (default: final_audio_files)'
+    )
+    
+    parser.add_argument(
+        '--urls', '-u',
+        default='tiktok_url_outputs/multi_query_collected_video_urls.txt',
+        help='Path to collected URLs file (default: tiktok_url_outputs/multi_query_collected_video_urls.txt)'
+    )
+    
+    parser.add_argument(
+        '--resync-only',
+        action='store_true',
+        help='Only resync manifest with existing files (no downloads)'
+    )
+    
+    parser.add_argument(
+        '--test',
+        action='store_true',
+        help='Test system dependencies and exit'
+    )
+    
+    parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='Enable verbose logging'
+    )
+    
+    return parser.parse_args()
+
+def main():
+    """Main function for command-line usage."""
+    args = parse_arguments()
     
     try:
         # Initialize downloader
         downloader = TikTokVideoDownloader()
-        downloader.print_download_statistics()
         
-        print(f"\n📋 System Check:")
-        print(f"  FFmpeg: {'✅' if downloader.has_ffmpeg else '❌'}")
-        print(f"  yt-dlp: {'✅' if downloader.has_ytdlp else '❌'}")
+        # Test mode
+        if args.test:
+            print("🧪 Testing TikTok Video Downloader...")
+            downloader.print_download_statistics()
+            
+            print(f"\n📋 System Check:")
+            print(f"  FFmpeg: {'✅' if downloader.has_ffmpeg else '❌'}")
+            print(f"  yt-dlp: {'✅' if downloader.has_ytdlp else '❌'}")
+            print(f"  API Keys: {len(downloader.api_keys)} available")
+            
+            print("\n✅ System test completed")
+            return
         
-        print("\n✅ TikTok Video Downloader test completed")
+        # Check if files exist
+        manifest_path = Path(args.manifest)
+        audio_dir = Path(args.audio_dir)
+        urls_file = Path(args.urls)
         
+        if not manifest_path.exists():
+            print(f"❌ Manifest file not found: {manifest_path}")
+            print("💡 Use --manifest to specify the correct path")
+            return 1
+        
+        if not audio_dir.exists():
+            print(f"❌ Audio directory not found: {audio_dir}")
+            print("💡 Use --audio-dir to specify the correct path")
+            return 1
+        
+        if not args.resync_only and not urls_file.exists():
+            print(f"❌ URLs file not found: {urls_file}")
+            print("💡 Use --urls to specify the correct path")
+            return 1
+        
+        print("🚀 Starting TikTok Video Processing Pipeline...")
+        print(f"📁 Manifest: {manifest_path}")
+        print(f"📁 Audio Directory: {audio_dir}")
+        if not args.resync_only:
+            print(f"📁 URLs File: {urls_file}")
+        print()
+        
+        # Resync only mode
+        if args.resync_only:
+            print("🔄 Running manifest resync only...")
+            downloader.resync_manifest_csv(str(manifest_path), str(audio_dir))
+            print("\n✅ Manifest resync completed!")
+            return 0
+        
+        # Full process mode
+        downloader.run_full_process(
+            manifest_path=str(manifest_path),
+            audio_directory=str(audio_dir),
+            urls_file=str(urls_file)
+        )
+        
+        print("\n🎉 Processing completed successfully!")
+        return 0
+        
+    except KeyboardInterrupt:
+        print("\n⚠️ Process interrupted by user")
+        return 1
     except Exception as e:
-        print(f"❌ Test failed: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"\n❌ Processing failed: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+# Test function (for backward compatibility)
+if __name__ == "__main__":
+    sys.exit(main())
