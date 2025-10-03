@@ -1,0 +1,22 @@
+{
+  "local_proxy_host": "127.0.0.1",
+  "local_proxy_port": 8080,
+  "browser_type": "chrome",
+  "browser_pool_size": 3,
+  "headless": true,
+  "proxy_list": [],
+  "rotation_strategy": "request_based",
+  "rotation_interval": 10,
+  "health_check_interval": 60,
+  "health_check_timeout": 10,
+  "health_check_url": "https://httpbin.org/ip",
+  "browser_timeout": 30,
+  "page_load_timeout": 20,
+  "implicit_wait": 10,
+  "max_retries": 3,
+  "retry_delay": 1.0,
+  "request_timeout": 30,
+  "log_level": "INFO",
+  "log_requests": true,
+  "log_responses": false
+}
