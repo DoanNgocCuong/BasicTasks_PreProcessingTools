@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 import ffmpeg
 
+
+YTDLP_DOWNLOAD_WAIT_SECONDS = 180
+
 try:
     from pytubefix import YouTube
     print("✅ Using pytubefix (maintained fork)")
@@ -338,9 +341,9 @@ class YouTubeAudioDownloaderAlternative:
                 process.stdin.close()
                 
                 # Wait with shorter timeout and provide periodic status updates
-                print("⏳ Waiting for yt-dlp download (timeout: 2 minutes)...")
+                print(f"⏳ Waiting for yt-dlp download (timeout: {YTDLP_DOWNLOAD_WAIT_SECONDS} seconds)...")
                 try:
-                    stdout, stderr = process.communicate(timeout=120)
+                    stdout, stderr = process.communicate(timeout=YTDLP_DOWNLOAD_WAIT_SECONDS)
                 except subprocess.TimeoutExpired:
                     print("⚠️ Download taking longer than expected, forcing termination...")
                     process.terminate()
