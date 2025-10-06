@@ -1,5 +1,5 @@
 {
-  "total_duration_seconds": 2221978.629238,
+  "total_duration_seconds": 2355340.293967,
   "records": [
     {
       "video_id": "FcFypeosrJk",
@@ -73082,6 +73082,735 @@
       "timestamp": "2025-10-04T03:43:34Z",
       "duration_seconds": 620.924807,
       "title": "[Vinacartoon] Bài Toán Về Ít Hơn"
+    },
+    {
+      "video_id": "M5dHHt2lzPQ",
+      "url": "https://www.youtube.com/watch?v=M5dHHt2lzPQ",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8154_M5dHHt2l_ConLNCPhimHoTHNhConLNVuiNhNHayNhTLiNKhCC.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:02:24Z",
+      "duration_seconds": 1760.978141,
+      "title": "Con Lợn Éc - Phim Hoạt Hình Con Lợn Vui Nhộn Hay Nhất - Liên Khúc Ca Nhạc Thiếu Nhi Remix Vui Nhộn"
+    },
+    {
+      "video_id": "1t7L54TaMrY",
+      "url": "https://www.youtube.com/watch?v=1t7L54TaMrY",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8155_1t7L54Ta_VinacartoonCuCPhiULUCANhNgChGNh.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:02:41Z",
+      "duration_seconds": 630.537868,
+      "title": "[Vinacartoon] Cuộc Phiêu Lưu Của Những Chú Gà Nhí"
+    },
+    {
+      "video_id": "c0o_MQPra5U",
+      "url": "https://www.youtube.com/watch?v=c0o_MQPra5U",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8156_c0o_MQPr_GiICUHoNgHU.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:03:01Z",
+      "duration_seconds": 408.322902,
+      "title": "Giải Cứu Hoàng Hậu"
+    },
+    {
+      "video_id": "N2uM49bieUM",
+      "url": "https://www.youtube.com/watch?v=N2uM49bieUM",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8157_N2uM49bi_TruyNKMMNonMINgIMTViCKChuyNThiUNhiChoB.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:03:16Z",
+      "duration_seconds": 414.383311,
+      "title": "Truyện Kể Mầm Non - Mỗi Người Một Việc | Kể Chuyện Thiếu Nhi Cho Bé"
+    },
+    {
+      "video_id": "vTxTKKlRacs",
+      "url": "https://www.youtube.com/watch?v=vTxTKKlRacs",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8158_vTxTKKlR_VinacartoonNVOKhILNgKiLGam.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:03:33Z",
+      "duration_seconds": 774.826667,
+      "title": "[Vinacartoon] Đơn Vị Đo Khối Lượng Ki-Lô-Gam"
+    },
+    {
+      "video_id": "r8h0_hdGt4Q",
+      "url": "https://www.youtube.com/watch?v=r8h0_hdGt4Q",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8159_r8h0_hdG_MorphleCNVKhCMyPetMorphleMorphleTiNgViTP.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:03:58Z",
+      "duration_seconds": 2490.061497,
+      "title": "Morphle Cô Đơn Và Khóc | My Pet Morphle | Morphle Tiếng Việt | Phim hoạt hình giáo dục thiếu nhi"
+    },
+    {
+      "video_id": "2OFRhJkiEuw",
+      "url": "https://www.youtube.com/watch?v=2OFRhJkiEuw",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8160_2OFRhJki_TruyNCTChEoChuNgVOCMOKChuyNBNgheTruyNKMM.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:04:12Z",
+      "duration_seconds": 210.279909,
+      "title": "Truyện Cổ Tích Đeo Chuông Vào Cổ Mèo - Kể Chuyện Bé Nghe - Truyện Kể Mầm Non"
+    },
+    {
+      "video_id": "68reiN0BrmM",
+      "url": "https://www.youtube.com/watch?v=68reiN0BrmM",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8161_68reiN0B_CRKhNgVNgLIM.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:04:30Z",
+      "duration_seconds": 1020.633107,
+      "title": "Cá Rô Không Vâng Lời Mẹ"
+    },
+    {
+      "video_id": "BqJG6gq-Bro",
+      "url": "https://www.youtube.com/watch?v=BqJG6gq-Bro",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8162_BqJG6gq-_ThChINgoan.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:04:44Z",
+      "duration_seconds": 79.853424,
+      "title": "Thơ Chơi Ngoan"
+    },
+    {
+      "video_id": "a97gbhOMoSs",
+      "url": "https://www.youtube.com/watch?v=a97gbhOMoSs",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8163_a97gbhOM_VinacartoonChuyNCAHoaPhDung.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:04:59Z",
+      "duration_seconds": 531.969161,
+      "title": "[Vinacartoon] Chuyện Của Hoa Phù Dung"
+    },
+    {
+      "video_id": "boSQ6GjRxa8",
+      "url": "https://www.youtube.com/watch?v=boSQ6GjRxa8",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8164_boSQ6GjR_STChCYVSA.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:06:00Z",
+      "duration_seconds": 1455.194558,
+      "title": "Sự Tích Cây Vú Sữa"
+    },
+    {
+      "video_id": "Yu4DuXkWw8s",
+      "url": "https://www.youtube.com/watch?v=Yu4DuXkWw8s",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8165_Yu4DuXkW_ThGiNGiNgGiChI.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:06:15Z",
+      "duration_seconds": 317.5561,
+      "title": "Thơ Giờ Ăn, Giờ Ngủ, Giờ Chơi"
+    },
+    {
+      "video_id": "Wg32ZoF8OjA",
+      "url": "https://www.youtube.com/watch?v=Wg32ZoF8OjA",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8166_Wg32ZoF8_ThChMQuNgT.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:06:29Z",
+      "duration_seconds": 110.852063,
+      "title": "Thơ Chùm Quả Ngọt"
+    },
+    {
+      "video_id": "IuJr8YbpoDY",
+      "url": "https://www.youtube.com/watch?v=IuJr8YbpoDY",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8167_IuJr8Ybp_NNgTiNBNgM.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:06:53Z",
+      "duration_seconds": 977.258231,
+      "title": "Nàng Tiên Bóng Đêm"
+    },
+    {
+      "video_id": "1KAZAerNGto",
+      "url": "https://www.youtube.com/watch?v=1KAZAerNGto",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8168_1KAZAerN_EmBDNgCM.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:07:13Z",
+      "duration_seconds": 1332.314558,
+      "title": "Em Bé Dũng Cảm"
+    },
+    {
+      "video_id": "hATz6I5mVqM",
+      "url": "https://www.youtube.com/watch?v=hATz6I5mVqM",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8169_hATz6I5m_BYUHCTiNgAnh26ChCI.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:07:59Z",
+      "duration_seconds": 5571.303039,
+      "title": "Bé Yêu Học Tiếng Anh (26 Chữ Cái)"
+    },
+    {
+      "video_id": "vPMUhf5ebPo",
+      "url": "https://www.youtube.com/watch?v=vPMUhf5ebPo",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8170_vPMUhf5e_BHCS4.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:08:13Z",
+      "duration_seconds": 218.453333,
+      "title": "Bé Học Số 4"
+    },
+    {
+      "video_id": "AHwdHSBZPdY",
+      "url": "https://www.youtube.com/watch?v=AHwdHSBZPdY",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8171_AHwdHSBZ_BNhNBiTThGiIXungQuanhBNhNBiTChCI.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:08:30Z",
+      "duration_seconds": 343.14449,
+      "title": "Bé Nhận Biết Thế Giới Xung Quanh - Bé Nhận Biết Chữ Cái"
+    },
+    {
+      "video_id": "pPG6AM7Mksc",
+      "url": "https://www.youtube.com/watch?v=pPG6AM7Mksc",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8172_pPG6AM7M_VinacartoonLuyNTPThTT0N10.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:08:47Z",
+      "duration_seconds": 371.426395,
+      "title": "[Vinacartoon] Luyện Tập Thứ Tự Từ 0 Đến 10"
+    },
+    {
+      "video_id": "GACjHK_ZGVA",
+      "url": "https://www.youtube.com/watch?v=GACjHK_ZGVA",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8173_GACjHK_Z_BHCS5.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:09:02Z",
+      "duration_seconds": 251.564989,
+      "title": "Bé Học Số 5"
+    },
+    {
+      "video_id": "GIrTkwMVdQc",
+      "url": "https://www.youtube.com/watch?v=GIrTkwMVdQc",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8174_GIrTkwMV_BHCS9.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:09:20Z",
+      "duration_seconds": 270.651791,
+      "title": "Bé Học Số 9"
+    },
+    {
+      "video_id": "6KrhQFzPv4Q",
+      "url": "https://www.youtube.com/watch?v=6KrhQFzPv4Q",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8175_6KrhQFzP_BNhNBiTThGiIXungQuanhBNhNBiTS.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:09:35Z",
+      "duration_seconds": 200.922268,
+      "title": "Bé Nhận Biết Thế Giới Xung Quanh - Bé Nhận Biết Số"
+    },
+    {
+      "video_id": "qgPrM6om-JY",
+      "url": "https://www.youtube.com/watch?v=qgPrM6om-JY",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8176_qgPrM6om_BHCS14.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:09:51Z",
+      "duration_seconds": 187.988753,
+      "title": "Bé Học Số 14"
+    },
+    {
+      "video_id": "XRr9oUTr_Zc",
+      "url": "https://www.youtube.com/watch?v=XRr9oUTr_Zc",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8177_XRr9oUTr_BYUHCTiNgAnhPhTMTMR.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:10:10Z",
+      "duration_seconds": 908.875465,
+      "title": "Bé Yêu Học Tiếng Anh (Phát âm từ M-R)"
+    },
+    {
+      "video_id": "MFTzRS90oLY",
+      "url": "https://www.youtube.com/watch?v=MFTzRS90oLY",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8178_MFTzRS90_BHCS12.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:10:25Z",
+      "duration_seconds": 237.958095,
+      "title": "Bé Học Số 12"
+    },
+    {
+      "video_id": "BRp3-q3oWMs",
+      "url": "https://www.youtube.com/watch?v=BRp3-q3oWMs",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8179_BRp3-q3o_BHCS2.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:10:41Z",
+      "duration_seconds": 212.021406,
+      "title": "Bé Học Số 2"
+    },
+    {
+      "video_id": "hBuYQUnJOsk",
+      "url": "https://www.youtube.com/watch?v=hBuYQUnJOsk",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8180_hBuYQUnJ_BHCS15.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:10:56Z",
+      "duration_seconds": 149.768707,
+      "title": "Bé Học Số 15"
+    },
+    {
+      "video_id": "triRkRwiTn4",
+      "url": "https://www.youtube.com/watch?v=triRkRwiTn4",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8181_triRkRwi_BHCS17.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:11:10Z",
+      "duration_seconds": 242.462766,
+      "title": "Bé Học Số 17"
+    },
+    {
+      "video_id": "-ugIwn0vu08",
+      "url": "https://www.youtube.com/watch?v=-ugIwn0vu08",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8182_-ugIwn0v_BHCS6.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:11:24Z",
+      "duration_seconds": 275.063583,
+      "title": "Bé Học Số 6"
+    },
+    {
+      "video_id": "HmARdz3XnQw",
+      "url": "https://www.youtube.com/watch?v=HmARdz3XnQw",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8183_HmARdz3X_BHCS13.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:11:39Z",
+      "duration_seconds": 200.086349,
+      "title": "Bé Học Số 13"
+    },
+    {
+      "video_id": "uOODvUwMkeA",
+      "url": "https://www.youtube.com/watch?v=uOODvUwMkeA",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8184_uOODvUwM_DianaVRomaAngIHCVAngHCBNgChCI.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:12:00Z",
+      "duration_seconds": 1071.856327,
+      "title": "Diana và Roma đang đi học và đang học bảng chữ cái"
+    },
+    {
+      "video_id": "HpAzdmDO4n8",
+      "url": "https://www.youtube.com/watch?v=HpAzdmDO4n8",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8185_HpAzdmDO_DianaVRomaTuyNTPCCTrChIVuiNhNVThThChDNhC.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:12:29Z",
+      "duration_seconds": 2314.44898,
+      "title": "Diana và Roma - Tuyển tập các trò chơi vui nhộn và Thử thách dành cho trẻ em"
+    },
+    {
+      "video_id": "qvE9GJKpN08",
+      "url": "https://www.youtube.com/watch?v=qvE9GJKpN08",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8186_qvE9GJKp_AbcHCBNgChCITiNgAnhChoTrEmVIDianaAndRoma.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:12:57Z",
+      "duration_seconds": 1381.262222,
+      "title": "ABC Học bảng chữ cái tiếng Anh cho trẻ em với Diana and Roma"
+    },
+    {
+      "video_id": "Wd_XT1gnuUE",
+      "url": "https://www.youtube.com/watch?v=Wd_XT1gnuUE",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8187_Wd_XT1gn_DianaVRomaTiNgViTTNgHPVideoDNhChoTrEmHay.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:13:29Z",
+      "duration_seconds": 2810.078912,
+      "title": "Diana và Roma tiếng Việt - Tổng hợp video dành cho trẻ em hay nhất"
+    },
+    {
+      "video_id": "DuuuR0mWCv8",
+      "url": "https://www.youtube.com/watch?v=DuuuR0mWCv8",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8188_DuuuR0mW_DianaVRomaTrongThGiINgVTTNgHPVideo.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:13:57Z",
+      "duration_seconds": 2029.098957,
+      "title": "Diana và Roma trong thế giới động vật / Tổng hợp video"
+    },
+    {
+      "video_id": "l6LWTnG-vfg",
+      "url": "https://www.youtube.com/watch?v=l6LWTnG-vfg",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8189_l6LWTnG-_NhNgCUChuyNThVDNhRiNgChoConGIDianaVRomaT.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:14:27Z",
+      "duration_seconds": 2388.009796,
+      "title": "Những câu chuyện thú vị dành riêng cho con gái | Diana và Roma tieng viet"
+    },
+    {
+      "video_id": "iXwm6kxBAMQ",
+      "url": "https://www.youtube.com/watch?v=iXwm6kxBAMQ",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8190_iXwm6kxB_DianaVRomaBackToSchoolTruyNChoTrEm.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:14:59Z",
+      "duration_seconds": 1762.324898,
+      "title": "Diana và Roma BACK TO SCHOOL Truyện cho trẻ em"
+    },
+    {
+      "video_id": "e8qThaNruTQ",
+      "url": "https://www.youtube.com/watch?v=e8qThaNruTQ",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8191_e8qThaNr_NhCThiUNhiRemixBIHTAbcPhimHoTHNhThiUNhiV.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:15:20Z",
+      "duration_seconds": 1807.812789,
+      "title": "Nhạc Thiếu Nhi Remix: Bài Hát ABC | Phim Hoạt Hình Thiếu Nhi Về Bảng Chữ Cái Và Con Vật Cho Bé Yêu"
+    },
+    {
+      "video_id": "nws5dLyo4Lk",
+      "url": "https://www.youtube.com/watch?v=nws5dLyo4Lk",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8192_nws5dLyo_NhCThiUNhiKAConBMVNgPhimHoTHNhVBMVNgNgYU.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:15:37Z",
+      "duration_seconds": 577.875011,
+      "title": "Nhạc Thiếu Nhi: Kìa Con Bướm Vàng | Phim Hoạt Hình Về Bướm Vàng Đáng Yêu"
+    },
+    {
+      "video_id": "cJ7a3Gf6RCo",
+      "url": "https://www.youtube.com/watch?v=cJ7a3Gf6RCo",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8193_cJ7a3Gf6_ChBConNhCThiUNhiRemixVuiNhNChoBYUPhimHoT.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:16:04Z",
+      "duration_seconds": 1907.565714,
+      "title": "Chú Bò Con - Nhạc Thiếu Nhi Remix Vui Nhộn Cho Bé Yêu - Phim Hoạt Hình Vui Nhộn Cho Bé Yêu"
+    },
+    {
+      "video_id": "-zEcEXCr_3c",
+      "url": "https://www.youtube.com/watch?v=-zEcEXCr_3c",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8194_-zEcEXCr_BYUHCSS18.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:16:21Z",
+      "duration_seconds": 814.06839,
+      "title": "Bé Yêu Học Số - Số 18"
+    },
+    {
+      "video_id": "lN0CSyYeHgE",
+      "url": "https://www.youtube.com/watch?v=lN0CSyYeHgE",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8195_lN0CSyYe_BYUHCS0.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:17:03Z",
+      "duration_seconds": 5362.532426,
+      "title": "Bé Yêu Học Số 0"
+    },
+    {
+      "video_id": "M74MV15b3d0",
+      "url": "https://www.youtube.com/watch?v=M74MV15b3d0",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8196_M74MV15b_BYUHCSS19.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:17:24Z",
+      "duration_seconds": 822.590113,
+      "title": "Bé Yêu Học Số - Số 19"
+    },
+    {
+      "video_id": "V5NEVQ-aM0k",
+      "url": "https://www.youtube.com/watch?v=V5NEVQ-aM0k",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8197_V5NEVQ-a_BYUHCSS20.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:17:43Z",
+      "duration_seconds": 1084.627302,
+      "title": "Bé Yêu Học Số - Số 20"
+    },
+    {
+      "video_id": "Kd7PDK3XMVI",
+      "url": "https://www.youtube.com/watch?v=Kd7PDK3XMVI",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8198_Kd7PDK3X_BHCS18.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:18:00Z",
+      "duration_seconds": 272.253968,
+      "title": "Bé Học Số 18"
+    },
+    {
+      "video_id": "kbOiJ2bZN9o",
+      "url": "https://www.youtube.com/watch?v=kbOiJ2bZN9o",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8199_kbOiJ2bZ_VinacartoonBIToNVMTChCTiaS.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:18:22Z",
+      "duration_seconds": 741.134512,
+      "title": "[VinaCartoon] Bài Toán Về Một Chục, Tia Số"
+    },
+    {
+      "video_id": "63T85XUAljQ",
+      "url": "https://www.youtube.com/watch?v=63T85XUAljQ",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8200_63T85XUA_BHCS7.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:18:37Z",
+      "duration_seconds": 334.274467,
+      "title": "Bé Học Số 7"
+    },
+    {
+      "video_id": "-FQaZzCUnwY",
+      "url": "https://www.youtube.com/watch?v=-FQaZzCUnwY",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8201_-FQaZzCU_DNgTrongNhTMBNhNBiTThGiIXungQuanh.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:19:00Z",
+      "duration_seconds": 844.88127,
+      "title": "Đồ Dùng Trong Nhà Tắm - Bé Nhận Biết Thế Giới Xung Quanh"
+    },
+    {
+      "video_id": "Dq9feeKugWc",
+      "url": "https://www.youtube.com/watch?v=Dq9feeKugWc",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8202_Dq9feeKu_BHCS3.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:19:14Z",
+      "duration_seconds": 262.106848,
+      "title": "Bé Học Số 3"
+    },
+    {
+      "video_id": "6lqPqTre85M",
+      "url": "https://www.youtube.com/watch?v=6lqPqTre85M",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8203_6lqPqTre_BYUHCTiNgAnhPhTMTXZ.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:19:32Z",
+      "duration_seconds": 604.972698,
+      "title": "Bé Yêu Học Tiếng Anh  (Phát âm từ X-Z)"
+    },
+    {
+      "video_id": "n2TVPOM-nHM",
+      "url": "https://www.youtube.com/watch?v=n2TVPOM-nHM",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8204_n2TVPOM-_MNhLCYXCXCh.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:19:42Z",
+      "duration_seconds": 8.568163,
+      "title": "mình là cây xúc xích"
+    },
+    {
+      "video_id": "FPe2omTdlqM",
+      "url": "https://www.youtube.com/watch?v=FPe2omTdlqM",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8205_FPe2omTd_VinacartoonPhPChiaHTVPhPChiaCD.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:20:01Z",
+      "duration_seconds": 914.680454,
+      "title": "[Vinacartoon] Phép Chia Hết Và Phép Chia Có Dư"
+    },
+    {
+      "video_id": "g4L-23Oht3w",
+      "url": "https://www.youtube.com/watch?v=g4L-23Oht3w",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8206_g4L-23Oh_NhNgCUChuyNHayNhTVIVladVNikita.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:20:31Z",
+      "duration_seconds": 1892.612063,
+      "title": "Những câu chuyện hay nhất với Vlad và Nikita!"
+    },
+    {
+      "video_id": "TlwQ-4DXTGU",
+      "url": "https://www.youtube.com/watch?v=TlwQ-4DXTGU",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8207_TlwQ-4DX_BNgBNgBangBangTrNgCMNhCThiUNhiRemixSINg.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:20:48Z",
+      "duration_seconds": 765.585125,
+      "title": "Bống Bống Bang Bang, Trống Cơm, Nhạc thiếu nhi remix sôi động"
+    },
+    {
+      "video_id": "HJuTN7qgxAs",
+      "url": "https://www.youtube.com/watch?v=HJuTN7qgxAs",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8208_HJuTN7qg_BHCMUSCTiNgAnhColorsNhCThiUNhiTiNgAnhVui.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:21:02Z",
+      "duration_seconds": 136.394014,
+      "title": "Bé Học Màu Sắc Tiếng Anh - Colors | Nhạc Thiếu Nhi Tiếng Anh Vui Nhộn"
+    },
+    {
+      "video_id": "5NlClUB0-yI",
+      "url": "https://www.youtube.com/watch?v=5NlClUB0-yI",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8209_5NlClUB0_ForsakenAndDandySWorldCollabWhen11Dandys.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:21:14Z",
+      "duration_seconds": 7.424,
+      "title": "forsaken and dandy’s world collab when?1!1? | #dandysworld #forsaken #shorts |"
+    },
+    {
+      "video_id": "VKR6xw278FE",
+      "url": "https://www.youtube.com/watch?v=VKR6xw278FE",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8210_VKR6xw27_TharaveTharaveDuckSongForKids.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:21:29Z",
+      "duration_seconds": 151.417324,
+      "title": "THARAVE THARAVE DUCK SONG FOR KIDS"
+    },
+    {
+      "video_id": "mLPRBAzahkw",
+      "url": "https://www.youtube.com/watch?v=mLPRBAzahkw",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8211_mLPRBAza_IphoneOrKuda.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:21:40Z",
+      "duration_seconds": 14.582132,
+      "title": "iPhone or Kuda?"
+    },
+    {
+      "video_id": "fGvMWff83jA",
+      "url": "https://www.youtube.com/watch?v=fGvMWff83jA",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8212_fGvMWff8_SummerCampSongPopsico.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:21:53Z",
+      "duration_seconds": 21.733878,
+      "title": "summer camp song Popsico "
+    },
+    {
+      "video_id": "OrFQMYZcRwU",
+      "url": "https://www.youtube.com/watch?v=OrFQMYZcRwU",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8213_OrFQMYZc_WhatIfTheDisneyPrincessesDidnTGetTheirHa.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:22:04Z",
+      "duration_seconds": 22.430476,
+      "title": "What if the Disney Princesses didn't get their happily ever after? #shorts  #disney"
+    },
+    {
+      "video_id": "z2qYEQEEAoM",
+      "url": "https://www.youtube.com/watch?v=z2qYEQEEAoM",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8214_z2qYEQEE_VinaReportedThePoliceWhenSheSawAThiefSho.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:22:14Z",
+      "duration_seconds": 22.08,
+      "title": "VINA REPORTED THE POLICE WHEN SHE SAW A THIEF#shorts #cartoon #funny #shortfeed #gigachadtheme"
+    },
+    {
+      "video_id": "eJkSvDE3ydc",
+      "url": "https://www.youtube.com/watch?v=eJkSvDE3ydc",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8215_eJkSvDE3_CobaTebakNiSiapaYangHamilBeneranYakTikto.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:22:25Z",
+      "duration_seconds": 11.029478,
+      "title": "Coba tebak ni siapa yang hamil beneran yak?🤰|TIKTOK GOOD PONSEL #shorts"
+    },
+    {
+      "video_id": "ZcnhjCu_cug",
+      "url": "https://www.youtube.com/watch?v=ZcnhjCu_cug",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8216_ZcnhjCu__TrendCuteH1h4MCCHUGIShortsTrending.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:22:35Z",
+      "duration_seconds": 20.108481,
+      "title": "Trend Cute 😍 H1h4 Mặc đồ cô hầu gái #shorts #trending"
+    },
+    {
+      "video_id": "7a9F67G1h14",
+      "url": "https://www.youtube.com/watch?v=7a9F67G1h14",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8217_7a9F67G1_PilluVinaRangchNaayDanceByRisingStarsRos.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:22:46Z",
+      "duration_seconds": 8.173424,
+      "title": "Pillu Vina Rangch Naay | Dance by Rising Stars | Roshani and Sakshi #shorts"
+    },
+    {
+      "video_id": "-LsxBlY8i20",
+      "url": "https://www.youtube.com/watch?v=-LsxBlY8i20",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8218_-LsxBlY8_MajhaBappaAaheLaiBhariCuteKidsDanceRisin.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:22:56Z",
+      "duration_seconds": 60.000363,
+      "title": "Majha Bappa Aahe Lai Bhari | Cute kids dance | Rising Stars #Ganpati #shorts"
+    },
+    {
+      "video_id": "ijIAZpeeU8U",
+      "url": "https://www.youtube.com/watch?v=ijIAZpeeU8U",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8219_ijIAZpee_HeoPeppaIChNGYPhimHoTHNhChoTrEm.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:23:50Z",
+      "duration_seconds": 8364.083084,
+      "title": "Heo Peppa | Đôi chân gầy | Phim Hoạt Hình Cho Trẻ Em"
+    },
+    {
+      "video_id": "h4U7ho5LG0s",
+      "url": "https://www.youtube.com/watch?v=h4U7ho5LG0s",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8220_h4U7ho5L_HeoPeppaThRebeccaPhimHoTHNhChoTrEm.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:24:28Z",
+      "duration_seconds": 4112.834467,
+      "title": "Heo Peppa | Thỏ Rebecca | Phim Hoạt Hình Cho Trẻ Em"
+    },
+    {
+      "video_id": "Inwe290YO0s",
+      "url": "https://www.youtube.com/watch?v=Inwe290YO0s",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8221_Inwe290Y_HeoPeppaKhNgLongCBiTClipHeoPeppaTiNgViTP.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:24:53Z",
+      "duration_seconds": 3541.646803,
+      "title": "Heo Peppa | Khủng long đặc biệt | Clip | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "P2_tMWtYQ0E",
+      "url": "https://www.youtube.com/watch?v=P2_tMWtYQ0E",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8222_P2_tMWtY_HeoPeppaThRebeccaClipHeoPeppaTiNgViTPhim.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:25:20Z",
+      "duration_seconds": 4109.049615,
+      "title": "Heo Peppa | Thỏ Rebecca | Clip | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "-rZV3gzY4cg",
+      "url": "https://www.youtube.com/watch?v=-rZV3gzY4cg",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8223_-rZV3gzY_HeoPeppaMuaSMGiNgSinhTPYHeoPeppaTiNgViTP.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:25:47Z",
+      "duration_seconds": 3807.817143,
+      "title": "Heo Peppa | Mua sắm Giáng sinh  | Tập đầy đủ | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "AXdIhYTn9f4",
+      "url": "https://www.youtube.com/watch?v=AXdIhYTn9f4",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8224_AXdIhYTn_HeoPeppaTrNgMUGiOTPYHeoPeppaTiNgViTPhimH.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:26:10Z",
+      "duration_seconds": 3270.368073,
+      "title": "Heo Peppa | trường mẫu giáo | Tập đầy đủ | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "xQSXZqbBcG4",
+      "url": "https://www.youtube.com/watch?v=xQSXZqbBcG4",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8225_xQSXZqbB_HeoPeppaThuyNTrNgHeoBaClipHeoPeppaTiNgVi.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:26:38Z",
+      "duration_seconds": 3836.006168,
+      "title": "Heo Peppa | Thuyền trưởng Heo Ba. | Clip | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "hVGA0lLR9rg",
+      "url": "https://www.youtube.com/watch?v=hVGA0lLR9rg",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8226_hVGA0lLR_HeoPeppaLUIWindyTPYHeoPeppaTiNgViTPhimHo.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:27:03Z",
+      "duration_seconds": 3541.646803,
+      "title": "Heo Peppa | Lâu đài windy | Tập đầy đủ | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "QRUXdnpjAOc",
+      "url": "https://www.youtube.com/watch?v=QRUXdnpjAOc",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8227_QRUXdnpj_HeoPeppaPeppaCNKNhPhimHoTHNhChoTrEm.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:27:50Z",
+      "duration_seconds": 9719.455057,
+      "title": "Heo Peppa | peppa cần kính | Phim Hoạt Hình Cho Trẻ Em"
+    },
+    {
+      "video_id": "wji8GcSPZWU",
+      "url": "https://www.youtube.com/watch?v=wji8GcSPZWU",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8228_wji8GcSP_HeoPeppaThRebeccaClipHeoPeppaTiNgViTPhim.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:28:16Z",
+      "duration_seconds": 4107.981497,
+      "title": "Heo Peppa | Thỏ Rebecca | Clip | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "kPox4jy6V5c",
+      "url": "https://www.youtube.com/watch?v=kPox4jy6V5c",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8229_kPox4jy6_HeoPeppaMuaSMTPYHeoPeppaTiNgViTPhimHoTHN.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:28:42Z",
+      "duration_seconds": 3801.942494,
+      "title": "Heo Peppa | Mua sắm | Tập đầy đủ | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "hG_NOsZltDI",
+      "url": "https://www.youtube.com/watch?v=hG_NOsZltDI",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8230_hG_NOsZl_HeoPeppaVKChTrNgTPYHeoPeppaTiNgViTPhimHo.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:29:09Z",
+      "duration_seconds": 3811.021497,
+      "title": "Heo Peppa | Vở kịch ở trường | Tập đầy đủ | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "MseYDqMcvVY",
+      "url": "https://www.youtube.com/watch?v=MseYDqMcvVY",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8231_MseYDqMc_HeoPeppaNgYSNgMClipHeoPeppaTiNgViTPhimHo.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:29:34Z",
+      "duration_seconds": 3560.524626,
+      "title": "Heo Peppa | Ngày sương mù | Clip | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "axUr_6MfYGg",
+      "url": "https://www.youtube.com/watch?v=axUr_6MfYGg",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8232_axUr_6Mf_HeoPeppaQuNOTPYHeoPeppaTiNgViTPhimHoTHNh.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:29:49Z",
+      "duration_seconds": 288.461497,
+      "title": "Heo Peppa | Quần áo | Tập đầy đủ | Heo Peppa Tiếng Việt | Phim Hoạt Hình"
+    },
+    {
+      "video_id": "uK0m4XLNldA",
+      "url": "https://www.youtube.com/watch?v=uK0m4XLNldA",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8233_uK0m4XLN_HeoPeppaIChNGYPhimHoTHNhChoTrEm.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:30:32Z",
+      "duration_seconds": 8363.966984,
+      "title": "Heo Peppa | Đôi chân gầy | Phim Hoạt Hình Cho Trẻ Em"
+    },
+    {
+      "video_id": "2B1L3G0SMSo",
+      "url": "https://www.youtube.com/watch?v=2B1L3G0SMSo",
+      "output_path": "D:\\TRAE_PROJECT\\emMinhDZ\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\final_audio_files\\8234_2B1L3G0S_HeoPeppaNhMChIPhimHoTHNhChoTrEm.wav",
+      "status": "success",
+      "timestamp": "2025-10-06T02:31:33Z",
+      "duration_seconds": 9717.55102,
+      "title": "Heo Peppa | nhóm chơi | Phim Hoạt Hình Cho Trẻ Em"
     }
   ]
 }
