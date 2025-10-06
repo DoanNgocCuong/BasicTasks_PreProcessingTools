@@ -381,7 +381,7 @@ class BaseAudioClassifier:
             age_threshold: Age threshold for classifying as child (uses env config if None)
         """
         # Get configuration
-        config_manager = ConfigurationManager()
+        config_manager = Manager()
         self.model_name, self.child_threshold, self.age_threshold = config_manager.get_model_config(
             model_name, child_threshold, age_threshold
         )
@@ -677,7 +677,7 @@ class AudioClassifier:
     _shared_classifier: Optional['BaseAudioClassifier'] = None
     _shared_youtube_classifier: Optional[Any] = None
     _lock = threading.Lock()  # Thread safety for shared instances
-    _config_manager = ConfigurationManager()
+    _config_manager = Manager()
     
     def __init__(self, model_name: Optional[str] = None, child_threshold: Optional[float] = None, age_threshold: Optional[float] = None):
         """
