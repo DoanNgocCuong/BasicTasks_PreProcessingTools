@@ -6,23 +6,87 @@ This module provides functionality for downloading audio from YouTube videos and
 them to WAV format for further audio analysis. It uses yt-dlp for video downloading and
 FFmpeg for audio format conversion, with enhanced capabilities for video duration tracking.
 
+Key Features:
+- Anti-detection mechanisms with user agent rotation
+- Rate limiting to prevent bot detection
+- Multiple download methods (yt-dlp, pytube fallback, ffmpeg)
+- YouTube Data API integration for metadata
+- Cookie support for authenticated downloads
+- Language-based file organization
+- Comprehensive error handling and retry logic
+
 Author: Le Hoang Minh
 """
 
 from __future__ import unicode_literals
-import yt_dlp
-import ffmpeg
-import subprocess
-import sys
-import os
+
+# Core libraries
 import json
-import time
+import os
 import random
 import shutil
-import googleapiclient.discovery
+import subprocess
+import sys
+import time
 from urllib.parse import urlparse, parse_qs
+
+# External dependencies
+import ffmpeg
+import googleapiclient.discovery
+import yt_dlp
+
+# Local imports
 from youtube_audio_downloader_alternative import YouTubeAudioDownloaderAlternative
 
+
+# =================================================================
+# CONSTANTS AND CONFIGURATION
+# =================================================================
+
+# Default user agents and timeouts
+DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0'
+DEFAULT_CHROME_VERSION = '139'
+
+# Rate limiting and timing settings
+DEFAULT_SLEEP_INTERVAL = 8
+DEFAULT_MAX_SLEEP_INTERVAL = 15
+DEFAULT_RETRIES = 3
+DEFAULT_FRAGMENT_RETRIES = 3
+DEFAULT_EXTRACTOR_RETRIES = 3
+
+# Timeout settings (in seconds)
+FFMPEG_TIMEOUT_SECONDS = 180
+YT_DLP_TIMEOUT_SECONDS = 30
+CONVERSION_TIMEOUT_SECONDS = 180
+DEFAULT_MAX_AUDIO_DURATION = 300  # 5 minutes
+
+# YouTube URL patterns
+YOUTUBE_DOMAIN = 'youtube.com'
+YOUTUBE_SHORT_DOMAIN = 'youtu.be'
+
+# System paths and configurations
+FFMPEG_COMMON_PATHS = [
+    r"C:\ffmpeg\bin\ffmpeg.exe",
+    r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+    r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+]
+
+# Browser support
+SUPPORTED_BROWSERS = ['chrome', 'firefox', 'safari', 'edge', 'opera', 'brave']
+
+# Error detection patterns
+UNAVAILABLE_VIDEO_PATTERNS = [
+    'video unavailable', 'removed by the uploader', 'private video', 'copyright'
+]
+
+BOT_DETECTION_PATTERNS = [
+    'sign in', 'bot', 'automated', 'captcha', 'blocked'
+]
+
+
+# =================================================================
+# CONFIGURATION CLASS
+# =================================================================
 
 class Config:
     """Configuration class to store paths and settings."""
@@ -41,7 +105,7 @@ class Config:
             default_user_agent = user_agent
         else:
             user_agent_settings = self._load_user_agent_settings()
-            default_user_agent = user_agent_settings.get('default_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0')
+            default_user_agent = user_agent_settings.get('default_user_agent', DEFAULT_USER_AGENT)
         
         # Enhanced Audio format settings with anti-detection
         self.ydl_opts = {
@@ -62,15 +126,15 @@ class Config:
                 'Sec-Fetch-User': '?1',
             },
             # Rate limiting - much longer intervals to prevent detection
-            'sleep_interval': 8,  # Sleep 8 seconds between downloads (increased from 2)
-            'max_sleep_interval': 15,  # Increased from 5
+            'sleep_interval': DEFAULT_SLEEP_INTERVAL,  # Sleep 8 seconds between downloads (increased from 2)
+            'max_sleep_interval': DEFAULT_MAX_SLEEP_INTERVAL,  # Increased from 5
             # Retry settings
-            'retries': 3,
-            'fragment_retries': 3,
+            'retries': DEFAULT_RETRIES,
+            'fragment_retries': DEFAULT_FRAGMENT_RETRIES,
             # Bypass geo-blocking
             'geo_bypass': True,
             # Extractor settings
-            'extractor_retries': 3,
+            'extractor_retries': DEFAULT_EXTRACTOR_RETRIES,
         }
         
         # Ensure the output directory exists
@@ -94,7 +158,7 @@ class Config:
     def _get_chrome_version(self):
         """Extract Chrome version from user agent settings"""
         user_agent_settings = self._load_user_agent_settings()
-        return user_agent_settings.get('chrome_version', '139')
+        return user_agent_settings.get('chrome_version', DEFAULT_CHROME_VERSION)
     
     def get_output_path(self, filename):
         """Get the full path for an output file."""
@@ -132,8 +196,33 @@ class Config:
         return f'output_{index}.wav'
 
 
+# =================================================================
+# MAIN YOUTUBE AUDIO DOWNLOADER CLASS
+# =================================================================
+
 class YoutubeAudioDownloader:
-    """Class to handle YouTube audio downloading and conversion."""
+    """
+    Class to handle YouTube audio downloading and conversion.
+    
+    This class provides comprehensive functionality for downloading audio from YouTube
+    videos with anti-detection mechanisms, rate limiting, and multiple fallback methods.
+    
+    Features:
+    - Anti-bot detection with user agent rotation
+    - Intelligent rate limiting and delays
+    - Multiple download methods (yt-dlp, pytube, ffmpeg)
+    - YouTube Data API integration
+    - Cookie-based authentication
+    - Audio format conversion (M4A to WAV)
+    - Language-based file organization
+    - Comprehensive error handling
+    
+    Args:
+        config (Config): Configuration object with paths and settings
+        cookies_file (str, optional): Path to Netscape format cookies file
+        cookies_from_browser (str, optional): Browser name for cookie extraction
+        language_mapping (dict, optional): URL to language folder mapping
+    """
     
     def __init__(self, config, cookies_file=None, cookies_from_browser=None, language_mapping=None):
         self.config = config
@@ -170,6 +259,10 @@ class YoutubeAudioDownloader:
             print(f"⚠️ Could not initialize alternative downloader: {e}")
             self.alt_downloader = None
     
+    # =================================================================
+    # INITIALIZATION AND CONFIGURATION METHODS
+    # =================================================================
+    
     def _init_youtube_api(self):
         """Initialize YouTube Data API if available."""
         try:
@@ -190,6 +283,10 @@ class YoutubeAudioDownloader:
         except Exception as e:
             print(f"⚠️ Could not initialize YouTube Data API: {e}")
             self.youtube_service = None
+    
+    # =================================================================
+    # RATE LIMITING AND DELAY METHODS
+    # =================================================================
     
     def _reset_request_counter(self):
         """Reset request counter to get fresh delays when issues are detected"""
@@ -248,6 +345,10 @@ class YoutubeAudioDownloader:
         
         self.last_request_time = time.time()
         self.request_count += 1
+    
+    # =================================================================
+    # ANTI-DETECTION AND USER AGENT METHODS
+    # =================================================================
     
     def _add_anti_detection_headers(self, ydl_opts):
         """Add additional anti-detection headers to prevent bot detection"""
@@ -331,6 +432,10 @@ class YoutubeAudioDownloader:
         
         return opts
     
+    # =================================================================
+    # COOKIE AND VALIDATION METHODS
+    # =================================================================
+    
     def _ensure_cookies_available(self):
         """Ensure cookies are available and log status for debugging"""
         cookie_status = self.get_cookie_status()
@@ -365,13 +470,43 @@ class YoutubeAudioDownloader:
         """Bypass cookie usage when using Android client; return options unchanged."""
         return ydl_opts
     
+    # =================================================================
+    # UTILITY AND HELPER METHODS
+    # =================================================================
+    
+    def _is_video_unavailable(self, error_message):
+        """Check if error message indicates video is unavailable."""
+        error_msg_lower = error_message.lower()
+        return any(pattern in error_msg_lower for pattern in UNAVAILABLE_VIDEO_PATTERNS)
+    
+    def _is_bot_detection_error(self, error_message):
+        """Check if error message indicates bot detection."""
+        error_msg_lower = error_message.lower()
+        return any(pattern in error_msg_lower for pattern in BOT_DETECTION_PATTERNS)
+    
+    def _cleanup_files(self, file_paths):
+        """Clean up multiple files, ignoring errors."""
+        cleanup_count = 0
+        for file_path in file_paths:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    cleanup_count += 1
+                except OSError:
+                    pass  # File might be in use by another process
+        return cleanup_count
+    
+    # =================================================================
+    # YOUTUBE API AND METADATA METHODS
+    # =================================================================
+    
     def _extract_video_id(self, url):
         """Extract video ID from YouTube URL."""
         parsed_url = urlparse(url)
-        if 'youtube.com' in parsed_url.netloc:
+        if YOUTUBE_DOMAIN in parsed_url.netloc:
             query_params = parse_qs(parsed_url.query)
             return query_params.get('v', [None])[0]
-        elif 'youtu.be' in parsed_url.netloc:
+        elif YOUTUBE_SHORT_DOMAIN in parsed_url.netloc:
             return parsed_url.path[1:]
         return None
     
@@ -480,9 +615,7 @@ class YoutubeAudioDownloader:
                     'description': info.get('description', '')
                 }
         except Exception as e:
-            msg = str(e).lower()
-            # Mark as unavailable to allow caller to skip
-            if any(k in msg for k in ['video unavailable', 'removed by the uploader', 'private video', 'copyright']):
+            if self._is_video_unavailable(str(e)):
                 setattr(self, '_last_error_reason', 'unavailable')
                 print(f"⏭️  Skipping unavailable video: {e}")
                 return None
@@ -534,8 +667,7 @@ class YoutubeAudioDownloader:
                 duration = info.get('duration')
                 return float(duration) if duration is not None else None
         except Exception as e:
-            msg = str(e).lower()
-            if any(k in msg for k in ['video unavailable', 'removed by the uploader', 'private video', 'copyright']):
+            if self._is_video_unavailable(str(e)):
                 setattr(self, '_last_error_reason', 'unavailable')
                 print(f"⏭️  Skipping unavailable video: {e}")
                 return None
@@ -559,6 +691,10 @@ class YoutubeAudioDownloader:
         except Exception as e:
             print(f"⚠️ Error getting audio length: {e}")
             return None
+    
+    # =================================================================
+    # MAIN DOWNLOAD METHODS
+    # =================================================================
     
     def download_audio_from_yturl(self, url, index=0):
         """
@@ -628,14 +764,7 @@ class YoutubeAudioDownloader:
         print(f"   WAV: {wav_file}")
         
         # Remove existing files that might cause conflicts
-        cleanup_count = 0
-        for file_path in [m4a_file, wav_file, part_file]:
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                    cleanup_count += 1
-                except OSError:
-                    pass  # File might be in use by another process
+        cleanup_count = self._cleanup_files([m4a_file, wav_file, part_file])
         if cleanup_count > 0:
             print(f"🧹 Cleaned up {cleanup_count} existing file(s)")
         
@@ -699,24 +828,17 @@ class YoutubeAudioDownloader:
                 print(f"❌ Download attempt {attempt + 1} failed: {str(e)[:100]}...")
                 
                 # Unavailable or removed => mark skip and stop
-                if any(k in error_msg for k in ['video unavailable', 'removed by the uploader', 'private video', 'copyright']):
+                if self._is_video_unavailable(error_msg):
                     setattr(self, '_last_error_reason', 'unavailable')
                     print("⏭️  Skipping this video due to availability restrictions")
                     return None, None
                 # Clean up any partial files on error
-                cleanup_count = 0
-                for file_path in [m4a_file, wav_file, part_file]:
-                    if os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                            cleanup_count += 1
-                        except OSError:
-                            pass
+                cleanup_count = self._cleanup_files([m4a_file, wav_file, part_file])
                 if cleanup_count > 0:
                     print(f"🧹 Cleaned up {cleanup_count} partial file(s)")
 
                 # Check for specific YouTube blocking errors and fallback
-                if any(keyword in error_msg for keyword in ['sign in', 'bot', 'automated', 'captcha', 'blocked']):
+                if self._is_bot_detection_error(error_msg):
                     print(f"🚫 Bot detection triggered on attempt {attempt + 1}")
                     print("❌ Attempt exhausted due to bot detection; trying ffmpeg fallback...")
                     return self.download_audio_via_ffmpeg(url, index)
@@ -796,12 +918,7 @@ class YoutubeAudioDownloader:
         wav_file = self.config.get_output_path(self.config.get_wav_filename(index))
         part_file = m4a_file + '.part'
         
-        for file_path in [m4a_file, wav_file, part_file]:
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except OSError:
-                    pass
+        self._cleanup_files([m4a_file, wav_file, part_file])
         
         # Enhanced yt-dlp options with API metadata
         ydl_opts = self._get_dynamic_ydl_opts()
@@ -834,9 +951,9 @@ class YoutubeAudioDownloader:
                 return wav_path, final_duration
                 
             except Exception as e:
-                error_msg = str(e).lower()
+                error_msg = str(e)
                 
-                if any(keyword in error_msg for keyword in ['sign in', 'bot', 'automated', 'captcha', 'blocked']):
+                if self._is_bot_detection_error(error_msg):
                     print(f"🚫 Bot detection still triggered, trying alternative method...")
                     # Try with different yt-dlp options
                     return self._try_alternative_download_method(url, index, attempt)
@@ -848,12 +965,7 @@ class YoutubeAudioDownloader:
                         return self.download_audio_via_ffmpeg(url, index)
                 
                 # Clean up partial files
-                for file_path in [m4a_file, wav_file, part_file]:
-                    if os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                        except OSError:
-                            pass
+                self._cleanup_files([m4a_file, wav_file, part_file])
         
         # If we get here, all yt-dlp attempts failed, try ffmpeg fallback
         print("❌ All yt-dlp methods exhausted, trying ffmpeg fallback as last resort...")
@@ -903,6 +1015,10 @@ class YoutubeAudioDownloader:
             print("🔄 Trying ffmpeg fallback as final alternative...")
             return self.download_audio_via_ffmpeg(url, index)
     
+    # =================================================================
+    # FFMPEG CONVERSION AND FALLBACK METHODS
+    # =================================================================
+    
     def _find_ffmpeg_executable(self):
         """Find FFmpeg executable in system PATH or common locations."""
         # Try to find ffmpeg in PATH first
@@ -911,10 +1027,7 @@ class YoutubeAudioDownloader:
             return ffmpeg_path
         
         # Common FFmpeg locations on Windows
-        common_paths = [
-            r"C:\ffmpeg\bin\ffmpeg.exe",
-            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-            r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+        common_paths = FFMPEG_COMMON_PATHS + [
             os.path.join(os.path.dirname(sys.executable), "ffmpeg.exe"),  # Python Scripts directory
             os.path.join(os.path.dirname(sys.executable), "Scripts", "ffmpeg.exe"),  # Python Scripts/Scripts directory
         ]
@@ -1019,12 +1132,7 @@ class YoutubeAudioDownloader:
         except Exception as e:
             print(f"⚠️ Error converting to WAV: {e}")
             # Clean up both intermediate and output files on error
-            for file_path in [input_file, output_file]:
-                if os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                    except OSError:
-                        pass
+            self._cleanup_files([input_file, output_file])
             return None, None
     
     def _convert_with_ffmpeg_python(self, input_file, output_file, ffmpeg_path):
@@ -1050,7 +1158,7 @@ class YoutubeAudioDownloader:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
                                      stdin=subprocess.PIPE, text=True)
             process.stdin.close()
-            stdout, stderr = process.communicate(timeout=120)  # Reduced from 5min to 2min
+            stdout, stderr = process.communicate(timeout=CONVERSION_TIMEOUT_SECONDS)  # Extended from 2min to 3min
             return process.returncode == 0
         except subprocess.TimeoutExpired:
             print("⏰ FFmpeg conversion timeout, killing process...")
@@ -1101,13 +1209,12 @@ class YoutubeAudioDownloader:
         Args:
             browser_name (str): Browser name ('chrome', 'firefox', 'safari', 'edge', 'opera', 'brave')
         """
-        supported_browsers = ['chrome', 'firefox', 'safari', 'edge', 'opera', 'brave']
-        if browser_name.lower() in supported_browsers:
+        if browser_name.lower() in SUPPORTED_BROWSERS:
             self.cookies_from_browser = browser_name.lower()
             self.cookies_file = None
             print(f"🍪 Cookies set from browser: {browser_name}")
         else:
-            print(f"⚠️ Unsupported browser: {browser_name}. Supported: {', '.join(supported_browsers)}")
+            print(f"⚠️ Unsupported browser: {browser_name}. Supported: {', '.join(SUPPORTED_BROWSERS)}")
     
     def download_audio_via_ffmpeg(self, url, index=0):
         """
@@ -1158,7 +1265,7 @@ class YoutubeAudioDownloader:
                 process = subprocess.Popen(cmd_get_url, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
                                          stdin=subprocess.PIPE, text=True)
                 process.stdin.close()
-                stdout, stderr = process.communicate(timeout=30)
+                stdout, stderr = process.communicate(timeout=YT_DLP_TIMEOUT_SECONDS)
                 result = type('Result', (), {'returncode': process.returncode, 'stdout': stdout, 'stderr': stderr})()
             except subprocess.TimeoutExpired:
                 print("⏰ yt-dlp URL extraction timeout")
@@ -1193,7 +1300,7 @@ class YoutubeAudioDownloader:
                 "-acodec", "pcm_s16le",  # Convert to WAV PCM
                 "-ar", "16000",  # 16kHz sample rate
                 "-ac", "1",  # Mono
-                "-t", "300",  # Limit to 5 minutes max
+                "-t", str(DEFAULT_MAX_AUDIO_DURATION),  # Limit to 5 minutes max
                 "-y",  # Overwrite existing file
                 wav_file
             ]
@@ -1201,9 +1308,9 @@ class YoutubeAudioDownloader:
             # Add user agent to ffmpeg
             cmd_ffmpeg = [
                 "ffmpeg",
-                "-user_agent", self.config.ydl_opts.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0'),
+                "-user_agent", self.config.ydl_opts.get('user_agent', DEFAULT_USER_AGENT),
                 "-i", direct_url,
-                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", "-t", "300", "-y",
+                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", "-t", str(DEFAULT_MAX_AUDIO_DURATION), "-y",
                 wav_file
             ]
             
@@ -1212,7 +1319,7 @@ class YoutubeAudioDownloader:
                 process = subprocess.Popen(cmd_ffmpeg, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
                                          stdin=subprocess.PIPE, text=True)
                 process.stdin.close()
-                stdout, stderr = process.communicate(timeout=120)  # Reduced from 5min to 2min
+                stdout, stderr = process.communicate(timeout=FFMPEG_TIMEOUT_SECONDS)  # Extended from 2min to 3min
                 result = type('Result', (), {'returncode': process.returncode, 'stdout': stdout, 'stderr': stderr})()
             except subprocess.TimeoutExpired:
                 print("⏰ FFmpeg download timeout")
@@ -1294,6 +1401,9 @@ class YoutubeAudioDownloader:
             'cookies_file_size': cookie_file_size
         }
 
+    # =================================================================
+    # TEST AND UTILITY METHODS
+    # =================================================================
 
     def test_video_duration_extraction(self, url):
         """
@@ -1329,6 +1439,11 @@ class YoutubeAudioDownloader:
             'video_info': video_info,
             'success': duration is not None
         }
+
+
+# =================================================================
+# MAIN FUNCTION AND CLI INTERFACE
+# =================================================================
 
 def main():
     """Main function to handle command line interface with behavior aligned to the alternative script."""
