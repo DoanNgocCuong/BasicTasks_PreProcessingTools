@@ -17,6 +17,8 @@ import json
 import re
 import os
 import torch
+import subprocess
+import sys
 import googleapiclient.discovery
 from googleapiclient.errors import HttpError
 from datetime import datetime
@@ -862,7 +864,44 @@ class YouTubeVideoCrawler:
         self.download_index_lock = threading.Lock()  # Thread-safe lock for index assignment
         self.start_time = time.time()
         self.start_datetime = datetime.now()
+        
+        # URL counter for running audio downloader script every 10 URLs
+        self.url_counter_for_downloader = 0
     
+    def _run_audio_downloader_script(self) -> None:
+        """
+        Run the youtube_audio_downloader.py script to process collected URLs.
+        """
+        try:
+            script_path = os.path.join(os.path.dirname(__file__), 'youtube_audio_downloader.py')
+            if os.path.exists(script_path):
+                print(f"🎵 Running audio downloader script: {script_path}")
+                result = subprocess.run([sys.executable, script_path], 
+                                      capture_output=True, text=True, timeout=300)
+                if result.returncode == 0:
+                    print("✅ Audio downloader script completed successfully")
+                else:
+                    print(f"⚠️ Audio downloader script finished with warnings (exit code: {result.returncode})")
+                    if result.stderr:
+                        print(f"Error output: {result.stderr[:200]}...")
+            else:
+                print(f"❌ Audio downloader script not found at: {script_path}")
+        except subprocess.TimeoutExpired:
+            print("⚠️ Audio downloader script timed out after 5 minutes")
+        except Exception as e:
+            print(f"❌ Error running audio downloader script: {e}")
+    
+    def _check_and_run_downloader(self) -> None:
+        """
+        Check if we've collected 10 URLs and run the audio downloader script if so.
+        """
+        self.url_counter_for_downloader += 1
+        if self.url_counter_for_downloader >= 10:
+            print(f"\n🎯 Collected {self.url_counter_for_downloader} URLs - triggering audio downloader script")
+            self._run_audio_downloader_script()
+            self.url_counter_for_downloader = 0  # Reset counter
+            print("🔄 Continuing URL collection...\n")
+
     def _download_audio_with_fallback(self, url: str, index: int) -> Optional[Tuple[str, float]]:
         """
         Download audio using the reliable yt-dlp method with Android client configuration.
@@ -2417,6 +2456,9 @@ class YouTubeVideoCrawler:
             self._save_url_to_file(video, Config.DEFAULT_URLS_FILE)
             query_stats['videos_collected'] += 1
             
+            # Check if we should run audio downloader script
+            self._check_and_run_downloader()
+            
             # Mark video as collected in analysis results
             for result in reversed(self.video_analysis_results):
                 if result['video_url'] == video['url']:
@@ -2511,6 +2553,9 @@ class YouTubeVideoCrawler:
                 self._save_url_to_file(similar_video, Config.DEFAULT_URLS_FILE)
                 query_stats['videos_collected'] += 1
                 added_count += 1
+                
+                # Check if we should run audio downloader script
+                self._check_and_run_downloader()
                 print("✓ Video has children's voice - Added to results")
                 self.reporter.report_similar_video_result(True)
             else:
@@ -2674,6 +2719,9 @@ class YouTubeVideoCrawler:
             self.current_session_collected_urls.append(similar_video['url'])
             self._save_url_to_file(similar_video, Config.DEFAULT_URLS_FILE)
             query_stats['videos_collected'] += 1
+            
+            # Check if we should run audio downloader script
+            self._check_and_run_downloader()
             print("✓ Video has children's voice - Added to results")
             self.reporter.report_similar_video_result(True)
             
