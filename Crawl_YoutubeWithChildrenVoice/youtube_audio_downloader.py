@@ -27,11 +27,14 @@ from youtube_audio_downloader_alternative import YouTubeAudioDownloaderAlternati
 class Config:
     """Configuration class to store paths and settings."""
     
-    def __init__(self, user_agent=None):
+    def __init__(self, user_agent=None, language_mapping=None):
         # Determine the parent directory of the script
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         # Store audio in youtube_audio_outputs relative to the parent directory
         self.output_dir = os.path.join(self.base_dir, 'youtube_audio_outputs')
+        
+        # Store language mapping for organizing files
+        self.language_mapping = language_mapping or {}
         
         # Use provided user agent or load from crawler config
         if user_agent:
@@ -97,6 +100,22 @@ class Config:
         """Get the full path for an output file."""
         return os.path.join(self.output_dir, filename)
     
+    def get_language_output_dir(self, url):
+        """Get the output directory based on URL language classification."""
+        # Get language classification for this URL
+        language_folder = self.language_mapping.get(url, 'unknown')
+        
+        # Create the language-specific subfolder
+        language_output_dir = os.path.join(self.output_dir, language_folder)
+        os.makedirs(language_output_dir, exist_ok=True)
+        
+        return language_output_dir
+    
+    def get_language_output_path(self, filename, url):
+        """Get the full path for an output file in the appropriate language subfolder."""
+        language_dir = self.get_language_output_dir(url)
+        return os.path.join(language_dir, filename)
+    
     def get_m4a_filename(self, index):
         """Get the m4a filename for a given index."""
         # Allow run-as-script to inject a custom base name
@@ -116,7 +135,7 @@ class Config:
 class YoutubeAudioDownloader:
     """Class to handle YouTube audio downloading and conversion."""
     
-    def __init__(self, config, cookies_file=None, cookies_from_browser=None):
+    def __init__(self, config, cookies_file=None, cookies_from_browser=None, language_mapping=None):
         self.config = config
         self.last_request_time = 0
         self.request_count = 0
@@ -124,6 +143,9 @@ class YoutubeAudioDownloader:
         self.youtube_service = None
         # Runtime flags
         self.disable_rate_limit = False
+        
+        # Store language mapping for organizing downloads
+        self.language_mapping = language_mapping or {}
         
         # Cookie settings
         self.cookies_file = cookies_file
@@ -1310,14 +1332,39 @@ class YoutubeAudioDownloader:
 
 def main():
     """Main function to handle command line interface with behavior aligned to the alternative script."""
-    config = Config()
+    # Parse command line arguments for language mapping
+    language_mapping = {}
+    args = sys.argv[1:]
+    
+    # Check for language mapping argument
+    if '--language-mapping' in args:
+        mapping_index = args.index('--language-mapping')
+        if mapping_index + 1 < len(args):
+            mapping_file = args[mapping_index + 1]
+            try:
+                with open(mapping_file, 'r', encoding='utf-8') as f:
+                    language_mapping = json.load(f)
+                print(f"📋 Loaded language mapping from {mapping_file} ({len(language_mapping)} URLs)")
+            except Exception as e:
+                print(f"⚠️ Failed to load language mapping: {e}")
+            # Remove mapping arguments from args list
+            args = args[:mapping_index] + args[mapping_index + 2:]
+    
+    config = Config(language_mapping=language_mapping)
     base_dir = os.path.dirname(os.path.abspath(__file__))
     final_output_dir = os.path.join(base_dir, 'final_audio_files')
     os.makedirs(final_output_dir, exist_ok=True)
+    
+    # Create language subfolders
+    vietnamese_dir = os.path.join(final_output_dir, 'vietnamese')
+    unknown_dir = os.path.join(final_output_dir, 'unknown')
+    os.makedirs(vietnamese_dir, exist_ok=True)
+    os.makedirs(unknown_dir, exist_ok=True)
+    
     config.output_dir = final_output_dir
 
     # Initialize downloader early (no special CLI flags; behavior mirrors alternative script)
-    downloader = YoutubeAudioDownloader(config)
+    downloader = YoutubeAudioDownloader(config, language_mapping=language_mapping)
     setattr(downloader, 'no_length_limit', True)
     setattr(downloader, 'disable_rate_limit', True)
     
@@ -1496,70 +1543,93 @@ def main():
         return f"{idx:04d}_{short_id}_{camel}"
     
     def _run_single(url: str, index: int):
+        """Download a single URL with language-specific organization."""
+        print(f"🎯 Processing URL {index}: {url}")
+        
+        # Determine language classification and output directory
+        language_folder = language_mapping.get(url, 'unknown')
+        language_output_dir = os.path.join(final_output_dir, language_folder)
+        os.makedirs(language_output_dir, exist_ok=True)
+        
+        print(f"📁 Language classification: {language_folder}")
+        print(f"📂 Output directory: {language_output_dir}")
+        
+        # Load language-specific manifest
+        language_manifest_path = os.path.join(language_output_dir, 'manifest.json')
+        language_manifest_data = _load_manifest(language_manifest_path)
+        language_manifest_records = language_manifest_data.get('records', [])
+        language_manifest_index = _index_manifest(language_manifest_records)
+        
+        # Check if already downloaded in this language folder
         vid = downloader._extract_video_id(url)
-        if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
-            print("⏭️  Already downloaded (manifest) - skipping")
+        if vid and vid in language_manifest_index and language_manifest_index[vid].get('status') == 'success':
+            print("⏭️  Already downloaded (language manifest) - skipping")
             return
+            
+        # Update config to use language-specific directory temporarily
+        original_output_dir = config.output_dir
+        config.output_dir = language_output_dir
+        
         try:
-            # Set basename on the alternative downloader (not config)
+            # Set basename on the alternative downloader 
+            basename = _build_basename(index, url)
             if hasattr(downloader, 'alt_downloader') and downloader.alt_downloader:
-                downloader.alt_downloader._current_basename = _build_basename(index, url)
-        except Exception:
+                downloader.alt_downloader._current_basename = basename
+                
+            result = downloader.download_audio_from_yturl(url, index=index)
+            
+            # Clear basename after download
             if hasattr(downloader, 'alt_downloader') and downloader.alt_downloader:
                 downloader.alt_downloader._current_basename = None
-        
-        result = downloader.download_audio_from_yturl(url, index=index)
-        
-        # Clear basename after download
-        if hasattr(downloader, 'alt_downloader') and downloader.alt_downloader:
-            downloader.alt_downloader._current_basename = None
-        
-        if isinstance(result, tuple):
-            wav_path, duration = result
-            if wav_path:
-                print(f"✅ Saved: {wav_path} ({duration}s)")
-                title_val = ''
-                try:
-                    # Match alternative downloader's title extraction approach
-                    from pytubefix import YouTube
-                    yt_tmp2 = YouTube(url)
-                    title_val = yt_tmp2.title or ''
-                except Exception:
+            
+            if isinstance(result, tuple):
+                wav_path, duration = result
+                if wav_path:
+                    print(f"✅ Saved: {wav_path} ({duration}s)")
+                    title_val = ''
                     try:
-                        from pytube import YouTube
+                        # Match alternative downloader's title extraction approach
+                        from pytubefix import YouTube
                         yt_tmp2 = YouTube(url)
                         title_val = yt_tmp2.title or ''
                     except Exception:
-                        title_val = ''
-                record = {
-                    'video_id': vid or '',
-                    'url': url,
-                    'output_path': wav_path,
-                    'status': 'success',
-                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                    'duration_seconds': duration,
-                    'title': title_val
-                }
-                if vid:
-                    manifest_index[vid] = record
-                    others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
-                    manifest_records[:] = others + list(manifest_index.values())
+                        try:
+                            from pytube import YouTube
+                            yt_tmp2 = YouTube(url)
+                            title_val = yt_tmp2.title or ''
+                        except Exception:
+                            title_val = ''
+                    
+                    # Create record for language-specific manifest
+                    record = {
+                        'video_id': vid or '',
+                        'url': url,
+                        'output_path': wav_path,
+                        'status': 'success',
+                        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                        'duration_seconds': duration,
+                        'title': title_val,
+                        'language_folder': language_folder,
+                        'download_index': index
+                    }
+                    
+                    # Add to language-specific manifest
+                    if vid:
+                        language_manifest_index[vid] = record
+                    language_manifest_records.append(record)
+                    language_manifest_data['records'] = language_manifest_records
+                    language_manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in language_manifest_records)
+                    _save_manifest(language_manifest_path, language_manifest_data)
+                    print(f"📋 Updated {language_folder} manifest: {len(language_manifest_records)} files, {language_manifest_data['total_duration_seconds']:.1f}s total")
                 else:
-                    manifest_records.append(record)
-                try:
-                    manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
-                except Exception:
-                    manifest_data['total_duration_seconds'] = 0.0
-                manifest_data['records'] = manifest_records
-                _save_manifest(manifest_path, manifest_data)
+                    print("❌ Download failed")
             else:
-                print("❌ Download failed: No output file created")
-        elif result:
-            print(f"✅ DOWNLOAD SUCCESS (legacy): {result}")
-        else:
-            print("❌ Download failed")
+                print("❌ Download failed")
+        finally:
+            # Restore original output directory
+            config.output_dir = original_output_dir
 
-    args = sys.argv[1:]
+    args = args  # Use the modified args list after removing language mapping arguments
     default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
 
     if not args:
@@ -1567,8 +1637,9 @@ def main():
             with open(default_urls_file, 'r', encoding='utf-8') as f:
                 urls = [line.strip() for line in f if line.strip().startswith('http')]
             print(f"📋 Batch download from: {default_urls_file} ({len(urls)} URLs)")
+            print(f"🌍 Language mapping: {len(language_mapping)} URLs classified")
             for idx, url in enumerate(urls, start=1):
-                print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+                print(f"\n===== [{idx}/{len(urls)}] {url} =====\n")
                 _run_single(url, idx)
             print("\n🎉 Batch download completed")
         else:

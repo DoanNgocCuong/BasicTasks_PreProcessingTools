@@ -867,16 +867,28 @@ class YouTubeVideoCrawler:
         
         # URL counter for running audio downloader script every 10 URLs
         self.url_counter_for_downloader = 0
+        
+        # Language mapping for organizing audio downloads
+        self.url_language_mapping = {}  # Maps URL to language classification (vietnamese/unknown)
     
     def _run_audio_downloader_script(self) -> None:
         """
         Run the youtube_audio_downloader.py script to process collected URLs.
+        Creates a language mapping file to organize downloads by language.
         """
         try:
             script_path = os.path.join(os.path.dirname(__file__), 'youtube_audio_downloader.py')
             if os.path.exists(script_path):
+                # Create language mapping file for the downloader
+                mapping_file = os.path.join(os.path.dirname(__file__), 'language_mapping.json')
+                with open(mapping_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.url_language_mapping, f, indent=2, ensure_ascii=False)
+                
                 print(f"🎵 Running audio downloader script: {script_path}")
-                result = subprocess.run([sys.executable, script_path], 
+                print(f"📝 Language mapping created: {mapping_file} ({len(self.url_language_mapping)} URLs)")
+                
+                # Pass the mapping file as an argument
+                result = subprocess.run([sys.executable, script_path, '--language-mapping', mapping_file], 
                                       capture_output=True, text=True, timeout=300)
                 if result.returncode == 0:
                     print("✅ Audio downloader script completed successfully")
@@ -884,6 +896,12 @@ class YouTubeVideoCrawler:
                     print(f"⚠️ Audio downloader script finished with warnings (exit code: {result.returncode})")
                     if result.stderr:
                         print(f"Error output: {result.stderr[:200]}...")
+                        
+                # Clean up mapping file after use
+                try:
+                    os.remove(mapping_file)
+                except:
+                    pass
             else:
                 print(f"❌ Audio downloader script not found at: {script_path}")
         except subprocess.TimeoutExpired:
@@ -2456,6 +2474,10 @@ class YouTubeVideoCrawler:
             self._save_url_to_file(video, Config.DEFAULT_URLS_FILE)
             query_stats['videos_collected'] += 1
             
+            # Track language classification for audio downloader
+            language_folder = 'vietnamese' if analysis_result.is_vietnamese else 'unknown'
+            self.url_language_mapping[video['url']] = language_folder
+            
             # Check if we should run audio downloader script
             self._check_and_run_downloader()
             
@@ -2553,6 +2575,10 @@ class YouTubeVideoCrawler:
                 self._save_url_to_file(similar_video, Config.DEFAULT_URLS_FILE)
                 query_stats['videos_collected'] += 1
                 added_count += 1
+                
+                # Track language classification for audio downloader
+                language_folder = 'vietnamese' if similar_analysis_result.is_vietnamese else 'unknown'
+                self.url_language_mapping[similar_video['url']] = language_folder
                 
                 # Check if we should run audio downloader script
                 self._check_and_run_downloader()
@@ -2719,6 +2745,21 @@ class YouTubeVideoCrawler:
             self.current_session_collected_urls.append(similar_video['url'])
             self._save_url_to_file(similar_video, Config.DEFAULT_URLS_FILE)
             query_stats['videos_collected'] += 1
+            
+            # Track language classification for audio downloader
+            # Get the analysis result from the video_analysis_results
+            similar_analysis_result = None
+            for result in reversed(self.video_analysis_results):
+                if result['video_url'] == similar_video['url']:
+                    similar_analysis_result = result
+                    break
+            
+            if similar_analysis_result:
+                language_folder = 'vietnamese' if similar_analysis_result['is_vietnamese'] else 'unknown'
+                self.url_language_mapping[similar_video['url']] = language_folder
+            else:
+                # Fallback to unknown if no analysis result found
+                self.url_language_mapping[similar_video['url']] = 'unknown'
             
             # Check if we should run audio downloader script
             self._check_and_run_downloader()
