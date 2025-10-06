@@ -9,29 +9,408 @@ blocking or cookie issues.
 Author: Assistant
 """
 
+import json
 import os
-import sys
-import time
-import subprocess
-import tempfile
 import random
+import re
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
+from urllib.parse import parse_qs, urlparse
+
 import ffmpeg
 
 
 YTDLP_DOWNLOAD_WAIT_SECONDS = 180
 
 try:
-    from pytubefix import YouTube
+    from pytubefix import YouTube  # type: ignore
     print("✅ Using pytubefix (maintained fork)")
 except ImportError:
     try:
-        from pytube import YouTube
+        from pytube import YouTube  # type: ignore
         print("⚠️ Using original pytube (may have issues)")
     except ImportError:
         print("❌ Neither pytube nor pytubefix installed. Install with: pip install pytubefix")
         sys.exit(1)
+
+
+class URLHelper:
+    """Helper class for URL parsing and video ID extraction."""
+    
+    @staticmethod
+    def extract_video_id(url: str) -> Optional[str]:
+        """Extract YouTube video ID from URL."""
+        try:
+            parsed = urlparse(url)
+            if 'youtube.com' in parsed.netloc:
+                return parse_qs(parsed.query).get('v', [None])[0]
+            elif 'youtu.be' in parsed.netloc:
+                return parsed.path[1:]
+        except Exception:
+            pass
+        return None
+
+
+class FileNameHelper:
+    """Helper class for generating file names."""
+    
+    @staticmethod
+    def to_camel_case(text: str, max_len: int = 40) -> str:
+        """Convert text to camel case with specified max length."""
+        try:
+            words = re.split(r'[^a-z0-9]+', (text or '').lower())
+            words = [w for w in words if w]
+            camel = ''.join(w.capitalize() for w in words)
+            return camel[:max_len] if camel else 'NoTitle'
+        except Exception:
+            return 'NoTitle'
+    
+    @staticmethod
+    def build_basename(index: int, url: str) -> str:
+        """Build a descriptive basename for audio files."""
+        title = None
+        try:
+            yt_tmp = YouTube(url)  # type: ignore
+            title = yt_tmp.title
+        except Exception:
+            title = None
+        
+        video_id = URLHelper.extract_video_id(url)
+        camel = FileNameHelper.to_camel_case(title or '')
+        short_id = (video_id or 'noid')[:8]
+        return f"{index:04d}_{short_id}_{camel}"
+
+
+class ManifestManager:
+    """Helper class for managing manifest files."""
+    
+    def __init__(self, manifest_path: Path):
+        self.manifest_path = manifest_path
+    
+    def load_manifest(self) -> Dict:
+        """Load manifest data from file."""
+        try:
+            if self.manifest_path.exists():
+                data = json.loads(self.manifest_path.read_text(encoding='utf-8'))
+                # Backward compatibility: older manifests were plain lists
+                if isinstance(data, list):
+                    records = data
+                    total = 0.0
+                    try:
+                        total = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
+                    except Exception:
+                        total = 0.0
+                    return {
+                        'total_duration_seconds': total,
+                        'records': records
+                    }
+                elif isinstance(data, dict):
+                    records = data.get('records', []) or []
+                    # Ensure total exists; if missing, compute from records
+                    if 'total_duration_seconds' not in data:
+                        try:
+                            data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
+                        except Exception:
+                            data['total_duration_seconds'] = 0.0
+                    else:
+                        # Normalize type
+                        try:
+                            data['total_duration_seconds'] = float(data['total_duration_seconds'])
+                        except Exception:
+                            data['total_duration_seconds'] = 0.0
+                    data['records'] = records
+                    return data
+        except Exception:
+            pass
+        return {
+            'total_duration_seconds': 0.0,
+            'records': []
+        }
+    
+    def save_manifest(self, manifest_data: Dict) -> None:
+        """Save manifest data to file."""
+        try:
+            self.manifest_path.write_text(
+                json.dumps(manifest_data, ensure_ascii=False, indent=2), 
+                encoding='utf-8'
+            )
+        except Exception as e:
+            print(f"⚠️ Unable to write manifest: {e}")
+    
+    @staticmethod
+    def index_manifest(records: List[Dict]) -> Dict[str, Dict]:
+        """Create an index of manifest records by video ID."""
+        by_id = {}
+        for rec in records:
+            vid = rec.get('video_id')
+            if vid:
+                by_id[vid] = rec
+        return by_id
+
+
+class TitleBackfillService:
+    """Service for backfilling missing titles in manifest records."""
+    
+    def __init__(self, manifest_manager: ManifestManager):
+        self.manifest_manager = manifest_manager
+    
+    def backfill_missing_titles(self, manifest_data: Dict) -> None:
+        """Backfill missing titles by downloading and then deleting the file."""
+        manifest_records = manifest_data.get('records', [])
+        updated = False
+        updated_count = 0
+        failed_count = 0
+        skipped_count = 0
+        total_missing = sum(1 for r in manifest_records if r.get('status') == 'success' and not r.get('title'))
+        
+        if total_missing:
+            print(f"🔧 Backfilling titles for {total_missing} records without titles...")
+            print("=" * 60)
+        else:
+            print("✅ All records already have titles - no backfilling needed")
+            return
+            
+        for idx_bf, rec in enumerate(manifest_records, start=1):
+            try:
+                if rec.get('status') == 'success' and not rec.get('title'):
+                    url_val = rec.get('url')
+                    if not url_val:
+                        # Try reconstruct from video_id
+                        vid_local = rec.get('video_id')
+                        if vid_local:
+                            url_val = f"https://www.youtube.com/watch?v={vid_local}"
+                    
+                    if not url_val:
+                        vid_print = rec.get('video_id') or 'unknown'
+                        print(f"⏭️  [{idx_bf}/{len(manifest_records)}] Skipping record {vid_print}: No URL available")
+                        skipped_count += 1
+                        continue
+                    
+                    vid_print = rec.get('video_id') or url_val[:50] + "..."
+                    print(f"🔍 [{idx_bf}/{len(manifest_records)}] Processing: {vid_print}")
+                    
+                    title_val = self._fetch_title_via_download(url_val, vid_print)
+                    
+                    if title_val:
+                        rec['title'] = title_val
+                        updated = True
+                        updated_count += 1
+                        print(f"   ✅ SUCCESS: Title added - {title_val[:50]}...")
+                        
+                        # Persist incrementally so progress is visible
+                        try:
+                            manifest_data['records'] = manifest_records
+                            self.manifest_manager.save_manifest(manifest_data)
+                            print(f"   💾 Manifest updated incrementally")
+                        except Exception as save_error:
+                            print(f"   ⚠️  Incremental save failed: {save_error}")
+                    else:
+                        failed_count += 1
+                        print(f"   ❌ FAILED: Could not retrieve title for {vid_print}")
+                        
+            except Exception as record_error:
+                failed_count += 1
+                vid_print = rec.get('video_id', 'unknown') if rec else 'unknown'
+                print(f"❌ [{idx_bf}/{len(manifest_records)}] Record processing failed for {vid_print}: {str(record_error)[:100]}...")
+        
+        self._print_backfill_summary(len(manifest_records), total_missing, updated_count, failed_count, skipped_count)
+        
+        if updated:
+            self._finalize_manifest_update(manifest_data, manifest_records, updated_count, total_missing, failed_count)
+        elif total_missing > 0:
+            self._handle_no_updates(total_missing, failed_count, skipped_count)
+        
+        print("=" * 60)
+    
+    def _fetch_title_via_download(self, url_val: str, vid_print: str) -> Optional[str]:
+        """Fetch video title by performing a temporary download."""
+        title_val = None
+        # Download to a temporary directory and delete afterward
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                print(f"   📡 Creating YouTube object for {vid_print}...")
+                yt_tmp2 = YouTube(url_val)  # type: ignore
+                print(f"   🎯 Found video: {yt_tmp2.title[:50]}...")
+                
+                audio_stream = yt_tmp2.streams.filter(only_audio=True).order_by('abr').desc().first()
+                if audio_stream is not None:
+                    print(f"   ⏬ Downloading temporary file to fetch title...")
+                    temp_name = f"tmp_title_fetch.{audio_stream.subtype}"
+                    temp_path = Path(tmpdir) / temp_name
+                    audio_stream.download(output_path=tmpdir, filename=temp_name)
+                    # We only needed to perform a download; we don't keep the file
+                    title_val = yt_tmp2.title
+                    print(f"   🧹 Cleaning up temporary file...")
+                    try:
+                        if temp_path.exists():
+                            temp_path.unlink()
+                    except Exception as cleanup_error:
+                        print(f"   ⚠️  Cleanup warning: {cleanup_error}")
+                else:
+                    # Even if no stream, try to use the title if accessible
+                    print(f"   ⚠️  No audio streams found, but title is accessible")
+                    title_val = yt_tmp2.title
+                    
+            except Exception as download_error:
+                print(f"   ❌ Download failed: {str(download_error)[:100]}...")
+                title_val = None
+        
+        return title_val
+    
+    def _print_backfill_summary(self, total_records: int, total_missing: int, updated_count: int, failed_count: int, skipped_count: int) -> None:
+        """Print summary of backfill operation."""
+        print("=" * 60)
+        print("📊 BACKFILL SUMMARY:")
+        print(f"   📋 Total records processed: {total_records}")
+        print(f"   🔍 Records needing titles: {total_missing}")
+        print(f"   ✅ Successfully updated: {updated_count}")
+        print(f"   ❌ Failed to update: {failed_count}")
+        print(f"   ⏭️  Skipped (no URL): {skipped_count}")
+    
+    def _finalize_manifest_update(self, manifest_data: Dict, manifest_records: List[Dict], updated_count: int, total_missing: int, failed_count: int) -> None:
+        """Finalize the manifest update after backfill."""
+        try:
+            print("💾 Finalizing manifest update...")
+            manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
+            manifest_data['records'] = manifest_records
+            self.manifest_manager.save_manifest(manifest_data)
+            print(f"✅ Backfill complete! Updated titles for {updated_count}/{total_missing} record(s).")
+            
+            if failed_count > 0:
+                print(f"⚠️  Note: {failed_count} record(s) could not be updated (network issues, deleted videos, etc.)")
+                
+        except Exception as final_save_error:
+            print(f"❌ Final manifest save failed: {final_save_error}")
+    
+    def _handle_no_updates(self, total_missing: int, failed_count: int, skipped_count: int) -> None:
+        """Handle case where no updates were made."""
+        print("⚠️ Backfill attempted, but no titles could be updated.")
+        if failed_count == total_missing:
+            print("💡 All attempts failed - check network connection or try again later")
+        elif skipped_count == total_missing:
+            print("💡 All records were skipped due to missing URLs")
+
+
+class AudioDownloadProcessor:
+    """Processor for handling individual audio downloads."""
+    
+    def __init__(self, downloader, manifest_manager: ManifestManager):
+        self.downloader = downloader
+        self.manifest_manager = manifest_manager
+    
+    def process_single_url(self, url: str, index: int, manifest_data: Dict, manifest_index: Dict[str, Dict]) -> None:
+        """Process a single URL for download."""
+        manifest_records = manifest_data.get('records', [])
+        video_id = URLHelper.extract_video_id(url)
+        
+        if video_id and video_id in manifest_index and manifest_index[video_id].get('status') == 'success':
+            print("⏭️  Already downloaded (manifest) - skipping")
+            return
+        
+        try:
+            self.downloader._current_basename = FileNameHelper.build_basename(index, url)
+        except Exception:
+            self.downloader._current_basename = None
+        
+        result = self.downloader.download_audio_pytube(url, index=index)
+        self.downloader._current_basename = None
+        
+        if result:
+            wav_file, duration = result
+            print(f"✅ Saved: {wav_file} ({duration}s)")
+            self._update_manifest(url, video_id, wav_file, duration, manifest_data, manifest_records, manifest_index)
+        else:
+            print("❌ Download failed")
+            print(f"💔 SCRIPT EXECUTION FAILED: Could not download {url[:50]}...")
+    
+    def _update_manifest(self, url: str, video_id: Optional[str], wav_file: str, duration: float, 
+                        manifest_data: Dict, manifest_records: List[Dict], manifest_index: Dict[str, Dict]) -> None:
+        """Update the manifest with new download record."""
+        # Try to fetch full title for manifest
+        title_val = self._fetch_video_title(url)
+        
+        record = {
+            'video_id': video_id or '',
+            'url': url,
+            'output_path': wav_file,
+            'status': 'success',
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'duration_seconds': duration,
+            'title': title_val
+        }
+        
+        if video_id:
+            manifest_index[video_id] = record
+            # Merge preserving any records without video_id
+            others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
+            manifest_records[:] = others + list(manifest_index.values())
+        else:
+            manifest_records.append(record)
+
+        # Recompute total_duration_seconds to ensure correctness
+        try:
+            manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
+        except Exception:
+            manifest_data['total_duration_seconds'] = 0.0
+        manifest_data['records'] = manifest_records
+
+        self.manifest_manager.save_manifest(manifest_data)
+    
+    def _fetch_video_title(self, url: str) -> str:
+        """Fetch video title from URL."""
+        try:
+            yt_tmp2 = YouTube(url)  # type: ignore
+            return yt_tmp2.title or ''
+        except Exception:
+            return ''
+
+
+class BatchProcessor:
+    """Processor for batch operations."""
+    
+    def __init__(self, processor: AudioDownloadProcessor):
+        self.processor = processor
+    
+    def process_urls_from_file(self, file_path: Path, manifest_data: Dict, manifest_index: Dict[str, Dict]) -> None:
+        """Process URLs from a file."""
+        if not file_path.exists():
+            print("❌ URLs file not found")
+            sys.exit(1)
+        
+        urls = self._load_urls_from_file(file_path)
+        print(f"📋 Batch download from: {file_path} ({len(urls)} URLs)")
+        
+        for idx, url in enumerate(urls, start=1):
+            print(f"\n===== [{idx}/{len(urls)}] {url} =====")
+            self.processor.process_single_url(url, idx, manifest_data, manifest_index)
+        
+        print("\n🎉 Batch download completed")
+    
+    def process_default_urls_file(self, default_urls_file: Path, manifest_data: Dict, manifest_index: Dict[str, Dict]) -> None:
+        """Process URLs from the default file."""
+        if default_urls_file.exists():
+            self.process_urls_from_file(default_urls_file, manifest_data, manifest_index)
+        else:
+            print("⚠️ No URLs file found. Usage: python youtube_audio_downloader_alternative.py <url>|--from-file <path>")
+            test_with_sample_video()
+    
+    def process_url_arguments(self, args: List[str], manifest_data: Dict, manifest_index: Dict[str, Dict]) -> None:
+        """Process URLs from command line arguments."""
+        for i, url in enumerate(args, start=1):
+            self.processor.process_single_url(url, i, manifest_data, manifest_index)
+    
+    @staticmethod
+    def _load_urls_from_file(file_path: Path) -> List[str]:
+        """Load URLs from a text file."""
+        return [
+            line.strip() 
+            for line in file_path.read_text(encoding='utf-8').splitlines() 
+            if line.strip().startswith('http')
+        ]
 
 
 class YouTubeAudioDownloaderAlternative:
@@ -88,7 +467,7 @@ class YouTubeAudioDownloaderAlternative:
         try:
             # Create YouTube object
             print("📡 Creating YouTube object...")
-            yt = YouTube(url)
+            yt = YouTube(url)  # type: ignore
             
             # Get video info
             print(f"📺 Video title: {yt.title}")
@@ -173,7 +552,7 @@ class YouTubeAudioDownloaderAlternative:
         try:
             # Step 1: Download using pytube
             print("📡 Creating YouTube object...")
-            yt = YouTube(url)
+            yt = YouTube(url)  # type: ignore
             
             print(f"📺 Video: {yt.title[:50]}...")
             print(f"📏 Duration: {yt.length//60}m {yt.length%60}s")
@@ -326,6 +705,14 @@ class YouTubeAudioDownloaderAlternative:
             
             # Execute yt-dlp with enhanced timeout handling and stdin closure
             print(f"🔄 Running yt-dlp with Android client...")
+            
+            # Create result object compatible with subprocess.run
+            class ProcessResult:
+                def __init__(self, returncode: int, stdout: str, stderr: str):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+            
             try:
                 # Use Popen for better timeout control and explicitly close stdin
                 process = subprocess.Popen(
@@ -338,7 +725,8 @@ class YouTubeAudioDownloaderAlternative:
                 )
                 
                 # Close stdin immediately to prevent hanging
-                process.stdin.close()
+                if process.stdin:
+                    process.stdin.close()
                 
                 # Wait with shorter timeout and provide periodic status updates
                 print(f"⏳ Waiting for yt-dlp download (timeout: {YTDLP_DOWNLOAD_WAIT_SECONDS} seconds)...")
@@ -355,13 +743,6 @@ class YouTubeAudioDownloaderAlternative:
                         process.wait()  # Wait for process to die
                     raise
                 returncode = process.returncode
-                
-                # Create result object compatible with subprocess.run
-                class ProcessResult:
-                    def __init__(self, returncode, stdout, stderr):
-                        self.returncode = returncode
-                        self.stdout = stdout
-                        self.stderr = stderr
                 
                 result = ProcessResult(returncode, stdout, stderr)
                 
@@ -438,7 +819,7 @@ class YouTubeAudioDownloaderAlternative:
                 seconds = int(duration % 60)
                 print(f"📏 Audio duration: {minutes}:{seconds:02d}")
             
-            return str(wav_file), duration
+            return str(wav_file), duration or 0.0
             
         except subprocess.TimeoutExpired:
             print("❌ yt-dlp timeout after 2 minutes - process was hanging")
@@ -558,303 +939,27 @@ if __name__ == "__main__":
     downloader = YouTubeAudioDownloaderAlternative(output_dir=final_output_dir)
     manifest_path = base_dir / final_output_dir / 'manifest.json'
     
-    def _load_manifest(path: Path):
-        try:
-            if path.exists():
-                data = json.loads(path.read_text(encoding='utf-8'))
-                # Backward compatibility: older manifests were plain lists
-                if isinstance(data, list):
-                    records = data
-                    total = 0.0
-                    try:
-                        total = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
-                    except Exception:
-                        total = 0.0
-                    return {
-                        'total_duration_seconds': total,
-                        'records': records
-                    }
-                elif isinstance(data, dict):
-                    records = data.get('records', []) or []
-                    # Ensure total exists; if missing, compute from records
-                    if 'total_duration_seconds' not in data:
-                        try:
-                            data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
-                        except Exception:
-                            data['total_duration_seconds'] = 0.0
-                    else:
-                        # Normalize type
-                        try:
-                            data['total_duration_seconds'] = float(data['total_duration_seconds'])
-                        except Exception:
-                            data['total_duration_seconds'] = 0.0
-                    data['records'] = records
-                    return data
-        except Exception:
-            pass
-        return {
-            'total_duration_seconds': 0.0,
-            'records': []
-        }
-    
-    def _save_manifest(path: Path, manifest_data):
-        try:
-            path.write_text(json.dumps(manifest_data, ensure_ascii=False, indent=2), encoding='utf-8')
-        except Exception as e:
-            print(f"⚠️ Unable to write manifest: {e}")
-    
-    def _index_manifest(records):
-        by_id = {}
-        for rec in records:
-            vid = rec.get('video_id')
-            if vid:
-                by_id[vid] = rec
-        return by_id
-    
-    import json
-    manifest_data = _load_manifest(manifest_path)
+    # Load and prepare manifest data
+    manifest_manager = ManifestManager(manifest_path)
+    manifest_data = manifest_manager.load_manifest()
     manifest_records = manifest_data.get('records', [])
-    manifest_index = _index_manifest(manifest_records)
+    manifest_index = ManifestManager.index_manifest(manifest_records)
 
-    # Backfill missing titles by downloading and then deleting the file
-    def _backfill_missing_titles_by_download():
-        updated = False
-        updated_count = 0
-        failed_count = 0
-        skipped_count = 0
-        total_missing = sum(1 for r in manifest_records if r.get('status') == 'success' and not r.get('title'))
-        
-        if total_missing:
-            print(f"🔧 Backfilling titles for {total_missing} records without titles...")
-            print("=" * 60)
-        else:
-            print("✅ All records already have titles - no backfilling needed")
-            return
-            
-        for idx_bf, rec in enumerate(manifest_records, start=1):
-            try:
-                if rec.get('status') == 'success' and not rec.get('title'):
-                    url_val = rec.get('url')
-                    if not url_val:
-                        # Try reconstruct from video_id
-                        vid_local = rec.get('video_id')
-                        if vid_local:
-                            url_val = f"https://www.youtube.com/watch?v={vid_local}"
-                    
-                    if not url_val:
-                        vid_print = rec.get('video_id') or 'unknown'
-                        print(f"⏭️  [{idx_bf}/{len(manifest_records)}] Skipping record {vid_print}: No URL available")
-                        skipped_count += 1
-                        continue
-                    
-                    vid_print = rec.get('video_id') or url_val[:50] + "..."
-                    print(f"🔍 [{idx_bf}/{len(manifest_records)}] Processing: {vid_print}")
-                    
-                    title_val = None
-                    # Download to a temporary directory and delete afterward
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        try:
-                            print(f"   📡 Creating YouTube object for {vid_print}...")
-                            yt_tmp2 = YouTube(url_val)
-                            print(f"   🎯 Found video: {yt_tmp2.title[:50]}...")
-                            
-                            audio_stream = yt_tmp2.streams.filter(only_audio=True).order_by('abr').desc().first()
-                            if audio_stream is not None:
-                                print(f"   ⏬ Downloading temporary file to fetch title...")
-                                temp_name = f"tmp_title_fetch.{audio_stream.subtype}"
-                                temp_path = Path(tmpdir) / temp_name
-                                audio_stream.download(output_path=tmpdir, filename=temp_name)
-                                # We only needed to perform a download; we don't keep the file
-                                title_val = yt_tmp2.title
-                                print(f"   🧹 Cleaning up temporary file...")
-                                try:
-                                    if temp_path.exists():
-                                        temp_path.unlink()
-                                except Exception as cleanup_error:
-                                    print(f"   ⚠️  Cleanup warning: {cleanup_error}")
-                            else:
-                                # Even if no stream, try to use the title if accessible
-                                print(f"   ⚠️  No audio streams found, but title is accessible")
-                                title_val = yt_tmp2.title
-                                
-                        except Exception as download_error:
-                            print(f"   ❌ Download failed: {str(download_error)[:100]}...")
-                            title_val = None
-                    
-                    if title_val:
-                        rec['title'] = title_val
-                        updated = True
-                        updated_count += 1
-                        print(f"   ✅ SUCCESS: Title added - {title_val[:50]}...")
-                        
-                        # Persist incrementally so progress is visible
-                        try:
-                            manifest_data['records'] = manifest_records
-                            _save_manifest(manifest_path, manifest_data)
-                            print(f"   💾 Manifest updated incrementally")
-                        except Exception as save_error:
-                            print(f"   ⚠️  Incremental save failed: {save_error}")
-                    else:
-                        failed_count += 1
-                        print(f"   ❌ FAILED: Could not retrieve title for {vid_print}")
-                        
-            except Exception as record_error:
-                failed_count += 1
-                vid_print = rec.get('video_id', 'unknown') if rec else 'unknown'
-                print(f"❌ [{idx_bf}/{len(manifest_records)}] Record processing failed for {vid_print}: {str(record_error)[:100]}...")
-        
-        # Final summary and cleanup
-        print("=" * 60)
-        print("📊 BACKFILL SUMMARY:")
-        print(f"   📋 Total records processed: {len(manifest_records)}")
-        print(f"   🔍 Records needing titles: {total_missing}")
-        print(f"   ✅ Successfully updated: {updated_count}")
-        print(f"   ❌ Failed to update: {failed_count}")
-        print(f"   ⏭️  Skipped (no URL): {skipped_count}")
-        
-        if updated:
-            try:
-                print("💾 Finalizing manifest update...")
-                manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
-                manifest_data['records'] = manifest_records
-                _save_manifest(manifest_path, manifest_data)
-                print(f"✅ Backfill complete! Updated titles for {updated_count}/{total_missing} record(s).")
-                
-                if failed_count > 0:
-                    print(f"⚠️  Note: {failed_count} record(s) could not be updated (network issues, deleted videos, etc.)")
-                    
-            except Exception as final_save_error:
-                print(f"❌ Final manifest save failed: {final_save_error}")
-                
-        elif total_missing > 0:
-            print("⚠️ Backfill attempted, but no titles could be updated.")
-            if failed_count == total_missing:
-                print("💡 All attempts failed - check network connection or try again later")
-            elif skipped_count == total_missing:
-                print("💡 All records were skipped due to missing URLs")
-        
-        print("=" * 60)
-
-    _backfill_missing_titles_by_download()
-
-    def _to_camel_case_lower_suffix(text: str, max_len: int = 40) -> str:
-        try:
-            import re
-            words = re.split(r'[^a-z0-9]+', (text or '').lower())
-            words = [w for w in words if w]
-            camel = ''.join(w.capitalize() for w in words)
-            return camel[:max_len] if camel else 'NoTitle'
-        except Exception:
-            return 'NoTitle'
-
-    def _build_basename(idx: int, url: str) -> str:
-        # Try to derive title via pytube (cheap; already used later)
-        title = None
-        try:
-            yt_tmp = YouTube(url)
-            title = yt_tmp.title
-        except Exception:
-            title = None
-        # Extract video id
-        vid_local = None
-        try:
-            from urllib.parse import urlparse, parse_qs
-            parsed = urlparse(url)
-            if 'youtube.com' in parsed.netloc:
-                vid_local = parse_qs(parsed.query).get('v', [None])[0]
-            elif 'youtu.be' in parsed.netloc:
-                vid_local = parsed.path[1:]
-        except Exception:
-            pass
-        camel = _to_camel_case_lower_suffix(title or '')
-        short_id = (vid_local or 'noid')[:8]
-        return f"{idx:04d}_{short_id}_{camel}"
-
-    def run_single(url: str, index: int):
-        vid = None
-        # Simple video_id extract
-        try:
-            from urllib.parse import urlparse, parse_qs
-            parsed = urlparse(url)
-            if 'youtube.com' in parsed.netloc:
-                vid = parse_qs(parsed.query).get('v', [None])[0]
-            elif 'youtu.be' in parsed.netloc:
-                vid = parsed.path[1:]
-        except Exception:
-            vid = None
-        if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
-            print("⏭️  Already downloaded (manifest) - skipping")
-            return
-        try:
-            downloader._current_basename = _build_basename(index, url)
-        except Exception:
-            downloader._current_basename = None
-        result = downloader.download_audio_pytube(url, index=index)
-        downloader._current_basename = None
-        if result:
-            wav_file, duration = result
-            print(f"✅ Saved: {wav_file} ({duration}s)")
-            # Update manifest
-            # Try to fetch full title for manifest
-            title_val = ''
-            try:
-                yt_tmp2 = YouTube(url)
-                title_val = yt_tmp2.title or ''
-            except Exception:
-                title_val = ''
-            record = {
-                'video_id': vid or '',
-                'url': url,
-                'output_path': wav_file,
-                'status': 'success',
-                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                'duration_seconds': duration,
-                'title': title_val
-            }
-            if vid:
-                manifest_index[vid] = record
-                # Merge preserving any records without video_id
-                others = [r for r in manifest_records if not r.get('video_id') or r.get('video_id') not in manifest_index]
-                manifest_records[:] = others + list(manifest_index.values())
-            else:
-                manifest_records.append(record)
-
-            # Recompute total_duration_seconds to ensure correctness
-            try:
-                manifest_data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in manifest_records))
-            except Exception:
-                manifest_data['total_duration_seconds'] = 0.0
-            manifest_data['records'] = manifest_records
-
-            _save_manifest(manifest_path, manifest_data)
-        else:
-            print("❌ Download failed")
-            print(f"💔 SCRIPT EXECUTION FAILED: Could not download {url[:50]}...")
-
+    # Initialize service classes
+    manifest_manager = ManifestManager(manifest_path)
+    backfill_service = TitleBackfillService(manifest_manager)
+    processor = AudioDownloadProcessor(downloader, manifest_manager)
+    batch_processor = BatchProcessor(processor)
+    
+    # Backfill missing titles
+    backfill_service.backfill_missing_titles(manifest_data)
+    
+    # Process command line arguments
     if not args:
-        if default_urls_file.exists():
-            urls = [line.strip() for line in default_urls_file.read_text(encoding='utf-8').splitlines() if line.strip().startswith('http')]
-            print(f"📋 Batch download from: {default_urls_file} ({len(urls)} URLs)")
-            for idx, url in enumerate(urls, start=1):
-                print(f"\n===== [{idx}/{len(urls)}] {url} =====")
-                run_single(url, idx)
-            print("\n🎉 Batch download completed")
-        else:
-            print("⚠️ No URLs file found. Usage: python youtube_audio_downloader_alternative.py <url>|--from-file <path>")
-            test_with_sample_video()
+        batch_processor.process_default_urls_file(default_urls_file, manifest_data, manifest_index)
     else:
         # Support --from-file <path> or direct URL(s)
         if args[0] == '--from-file' and len(args) >= 2:
-            file_path = Path(args[1])
-            if not file_path.exists():
-                print("❌ URLs file not found")
-                sys.exit(1)
-            urls = [line.strip() for line in file_path.read_text(encoding='utf-8').splitlines() if line.strip().startswith('http')]
-            print(f"📋 Batch download from: {file_path} ({len(urls)} URLs)")
-            for idx, url in enumerate(urls, start=1):
-                print(f"\n===== [{idx}/{len(urls)}] {url} =====")
-                run_single(url, idx)
-            print("\n🎉 Batch download completed")
+            batch_processor.process_urls_from_file(Path(args[1]), manifest_data, manifest_index)
         else:
-            for i, url in enumerate(args, start=1):
-                run_single(url, i)
+            batch_processor.process_url_arguments(args, manifest_data, manifest_index)
