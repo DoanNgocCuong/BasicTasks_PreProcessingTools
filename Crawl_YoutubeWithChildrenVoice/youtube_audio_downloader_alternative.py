@@ -28,13 +28,13 @@ YTDLP_DOWNLOAD_WAIT_SECONDS = 180
 
 try:
     from pytubefix import YouTube  # type: ignore
-    print("✅ Using pytubefix (maintained fork)")
+    print("[SUCCESS] Using pytubefix (maintained fork)")
 except ImportError:
     try:
         from pytube import YouTube  # type: ignore
-        print("⚠️ Using original pytube (may have issues)")
+        print("[INFO] Falling back to pytube")
     except ImportError:
-        print("❌ Neither pytube nor pytubefix installed. Install with: pip install pytubefix")
+        print("[ERROR] Neither pytubefix nor pytube available")
         sys.exit(1)
 
 

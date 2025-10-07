@@ -1459,9 +1459,9 @@ def main():
             try:
                 with open(mapping_file, 'r', encoding='utf-8') as f:
                     language_mapping = json.load(f)
-                print(f"📋 Loaded language mapping from {mapping_file} ({len(language_mapping)} URLs)")
+                print(f"[INFO] Loaded language mapping from {mapping_file} ({len(language_mapping)} URLs)")
             except Exception as e:
-                print(f"⚠️ Failed to load language mapping: {e}")
+                print(f"[WARNING] Failed to load language mapping: {e}")
             # Remove mapping arguments from args list
             args = args[:mapping_index] + args[mapping_index + 2:]
     
@@ -1475,6 +1475,7 @@ def main():
     unknown_dir = os.path.join(final_output_dir, 'unknown')
     os.makedirs(vietnamese_dir, exist_ok=True)
     os.makedirs(unknown_dir, exist_ok=True)
+    print(f"📁 Created language folders: vietnamese/ and unknown/")
     
     config.output_dir = final_output_dir
 
@@ -1678,7 +1679,7 @@ def main():
         # Check if already downloaded in this language folder
         vid = downloader._extract_video_id(url)
         if vid and vid in language_manifest_index and language_manifest_index[vid].get('status') == 'success':
-            print("⏭️  Already downloaded (language manifest) - skipping")
+            print(f"⏭️  Already downloaded in {language_folder} folder (skipping duplicate)")
             return
             
         # Update config to use language-specific directory temporarily

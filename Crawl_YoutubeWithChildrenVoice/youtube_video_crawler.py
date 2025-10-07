@@ -886,16 +886,28 @@ class YouTubeVideoCrawler:
                 
                 print(f"🎵 Running audio downloader script: {script_path}")
                 print(f"📝 Language mapping created: {mapping_file} ({len(self.url_language_mapping)} URLs)")
+                print(f"📁 Ensuring vietnamese/ and unknown/ folders exist...")
                 
                 # Pass the mapping file as an argument
                 result = subprocess.run([sys.executable, script_path, '--language-mapping', mapping_file], 
                                       capture_output=True, text=True, timeout=300)
                 if result.returncode == 0:
                     print("✅ Audio downloader script completed successfully")
+                    if result.stdout:
+                        # Show relevant output about file organization and manifest updates
+                        stdout_lines = result.stdout.split('\n')
+                        relevant_lines = [line for line in stdout_lines if any(keyword in line.lower() for keyword in ['vietnamese', 'unknown', 'manifest', 'language', 'folder', 'skipping duplicate'])]
+                        if relevant_lines:
+                            print("📊 Organization details:")
+                            for line in relevant_lines[-5:]:  # Show last 5 relevant lines
+                                if line.strip():
+                                    print(f"  {line.strip()}")
                 else:
                     print(f"⚠️ Audio downloader script finished with warnings (exit code: {result.returncode})")
                     if result.stderr:
                         print(f"Error output: {result.stderr[:200]}...")
+                    if result.stdout:
+                        print(f"Standard output: {result.stdout[:300]}...")
                         
                 # Clean up mapping file after use
                 try:
@@ -911,10 +923,10 @@ class YouTubeVideoCrawler:
     
     def _check_and_run_downloader(self) -> None:
         """
-        Check if we've collected 10 URLs and run the audio downloader script if so.
+        Check if we've collected 2 URLs and run the audio downloader script if so.
         """
         self.url_counter_for_downloader += 1
-        if self.url_counter_for_downloader >= 10:
+        if self.url_counter_for_downloader >= 2:
             print(f"\n🎯 Collected {self.url_counter_for_downloader} URLs - triggering audio downloader script")
             self._run_audio_downloader_script()
             self.url_counter_for_downloader = 0  # Reset counter
