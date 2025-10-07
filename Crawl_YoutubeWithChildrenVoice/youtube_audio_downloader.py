@@ -1676,8 +1676,13 @@ def main():
         language_manifest_records = language_manifest_data.get('records', [])
         language_manifest_index = _index_manifest(language_manifest_records)
         
-        # Check if already downloaded in this language folder
+        # Check if already downloaded in global manifest first
         vid = downloader._extract_video_id(url)
+        if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+            print(f"⏭️  Already downloaded globally (video_id: {vid}, skipping duplicate)")
+            return
+            
+        # Check if already downloaded in this language folder
         if vid and vid in language_manifest_index and language_manifest_index[vid].get('status') == 'success':
             print(f"⏭️  Already downloaded in {language_folder} folder (skipping duplicate)")
             return
@@ -1737,6 +1742,15 @@ def main():
                     language_manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in language_manifest_records)
                     _save_manifest(language_manifest_path, language_manifest_data)
                     print(f"📋 Updated {language_folder} manifest: {len(language_manifest_records)} files, {language_manifest_data['total_duration_seconds']:.1f}s total")
+                    
+                    # Also add to global manifest
+                    if vid:
+                        manifest_index[vid] = record
+                    manifest_records.append(record)
+                    manifest_data['records'] = manifest_records
+                    manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in manifest_records)
+                    _save_manifest(manifest_path, manifest_data)
+                    print(f"📋 Updated global manifest: {len(manifest_records)} files, {manifest_data['total_duration_seconds']:.1f}s total")
                 else:
                     print("❌ Download failed")
             else:
@@ -1754,10 +1768,33 @@ def main():
                 urls = [line.strip() for line in f if line.strip().startswith('http')]
             print(f"📋 Batch download from: {default_urls_file} ({len(urls)} URLs)")
             print(f"🌍 Language mapping: {len(language_mapping)} URLs classified")
-            for idx, url in enumerate(urls, start=1):
-                print(f"\n===== [{idx}/{len(urls)}] {url} =====\n")
-                _run_single(url, idx)
-            print("\n🎉 Batch download completed")
+            
+            # Filter out already downloaded URLs from the global manifest
+            urls_to_process = []
+            skipped_count = 0
+            
+            for url in urls:
+                vid = downloader._extract_video_id(url)
+                if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+                    print(f"⏭️  Already downloaded: {url} (video_id: {vid})")
+                    skipped_count += 1
+                else:
+                    urls_to_process.append(url)
+                    
+            print(f"📊 Status: {skipped_count} already downloaded, {len(urls_to_process)} to process")
+            
+            if urls_to_process:
+                # Find the next available index based on existing manifest records
+                next_index = len(manifest_records) + 1
+                print(f"🔢 Starting from index {next_index}")
+                
+                for idx, url in enumerate(urls_to_process):
+                    current_index = next_index + idx
+                    print(f"\n===== [{current_index}] {url} =====\n")
+                    _run_single(url, current_index)
+                print("\n🎉 Batch download completed")
+            else:
+                print("\n✅ All URLs already downloaded!")
         else:
             print("⚠️ No URLs file found. Usage: python youtube_audio_downloader.py <url>|--from-file <path>")
             return
@@ -1770,10 +1807,33 @@ def main():
         with open(file_path, 'r', encoding='utf-8') as f:
             urls = [line.strip() for line in f if line.strip().startswith('http')]
         print(f"📋 Batch download from: {file_path} ({len(urls)} URLs)")
-        for idx, url in enumerate(urls, start=1):
-            print(f"\n===== [{idx}/{len(urls)}] {url} =====")
-            _run_single(url, idx)
-        print("\n🎉 Batch download completed")
+        
+        # Filter out already downloaded URLs from the global manifest
+        urls_to_process = []
+        skipped_count = 0
+        
+        for url in urls:
+            vid = downloader._extract_video_id(url)
+            if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+                print(f"⏭️  Already downloaded: {url} (video_id: {vid})")
+                skipped_count += 1
+            else:
+                urls_to_process.append(url)
+                
+        print(f"📊 Status: {skipped_count} already downloaded, {len(urls_to_process)} to process")
+        
+        if urls_to_process:
+            # Find the next available index based on existing manifest records
+            next_index = len(manifest_records) + 1
+            print(f"🔢 Starting from index {next_index}")
+            
+            for idx, url in enumerate(urls_to_process):
+                current_index = next_index + idx
+                print(f"\n===== [{current_index}] {url} =====")
+                _run_single(url, current_index)
+            print("\n🎉 Batch download completed")
+        else:
+            print("\n✅ All URLs already downloaded!")
         return
                 
     for i, url in enumerate(args, start=1):
