@@ -24,10 +24,12 @@ from __future__ import unicode_literals
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
 import time
+from typing import Optional, Tuple, Dict, List, Union
 from urllib.parse import urlparse, parse_qs
 
 # External dependencies
@@ -1489,6 +1491,381 @@ class YoutubeAudioDownloader:
             'duration_seconds': duration,
             'video_info': video_info,
             'success': duration is not None
+        }
+
+    def process_urls_from_file(self, urls_file_path: Optional[str] = None, language_mapping: Optional[dict] = None) -> dict:
+        """
+        Package the main script functionality into a single method.
+        
+        Args:
+            urls_file_path (str, optional): Path to file containing URLs to process
+            language_mapping (dict, optional): URL to language mapping
+            
+        Returns:
+            dict: Processing results with statistics
+        """
+        # Use provided language mapping or empty dict
+        language_mapping = language_mapping or {}
+        
+        # Determine base directory and setup paths
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        final_output_dir = os.path.join(base_dir, 'final_audio_files')
+        os.makedirs(final_output_dir, exist_ok=True)
+        
+        # Create language subfolders
+        vietnamese_dir = os.path.join(final_output_dir, 'vietnamese')
+        unknown_dir = os.path.join(final_output_dir, 'unknown')
+        os.makedirs(vietnamese_dir, exist_ok=True)
+        os.makedirs(unknown_dir, exist_ok=True)
+        print(f"📁 Created language folders: vietnamese/ and unknown/")
+        
+        # Store original output dir and temporarily set to final output
+        original_output_dir = self.config.output_dir
+        self.config.output_dir = final_output_dir
+        
+        # Configure downloader for batch processing (matching main() exactly)
+        setattr(self, 'no_length_limit', True)
+        setattr(self, 'disable_rate_limit', True)
+        
+        manifest_path = os.path.join(final_output_dir, 'manifest.json')
+        
+        def _load_manifest(path):
+            try:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            records = data
+                            try:
+                                total = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
+                            except Exception:
+                                total = 0.0
+                            return {'total_duration_seconds': total, 'records': records}
+                        elif isinstance(data, dict):
+                            records = data.get('records', []) or []
+                            if 'total_duration_seconds' not in data:
+                                try:
+                                    data['total_duration_seconds'] = float(sum(float(r.get('duration_seconds', 0) or 0) for r in records))
+                                except Exception:
+                                    data['total_duration_seconds'] = 0.0
+                            else:
+                                try:
+                                    data['total_duration_seconds'] = float(data['total_duration_seconds'])
+                                except Exception:
+                                    data['total_duration_seconds'] = 0.0
+                            data['records'] = records
+                            return data
+            except Exception:
+                pass
+            return {'total_duration_seconds': 0.0, 'records': []}
+        
+        def _save_manifest(path, manifest_data):
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(manifest_data, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"⚠️ Unable to write manifest: {e}")
+        
+        def _index_manifest(records):
+            by_id = {}
+            for rec in records:
+                vid = rec.get('video_id')
+                if vid:
+                    by_id[vid] = rec
+            return by_id
+        
+        def _to_camel_case_lower_suffix(text: str, max_len: int = 40) -> str:
+            try:
+                # Match main() implementation exactly
+                words = re.split(r'[^a-z0-9]+', (text or '').lower())
+                words = [w for w in words if w]
+                camel = ''.join(w.capitalize() for w in words)
+                return camel[:max_len] if camel else 'NoTitle'
+            except Exception:
+                return 'NoTitle'
+        
+        def _build_basename(idx: int, url: str) -> str:
+            # Match main() implementation exactly
+            title = None
+            try:
+                from pytubefix import YouTube
+                yt_tmp = YouTube(url)
+                title = yt_tmp.title
+            except Exception:
+                try:
+                    from pytube import YouTube
+                    yt_tmp = YouTube(url)
+                    title = yt_tmp.title
+                except Exception:
+                    title = None
+            
+            # Extract video id - match alternative exactly
+            vid_local = None
+            try:
+                from urllib.parse import urlparse, parse_qs
+                parsed = urlparse(url)
+                if 'youtube.com' in parsed.netloc:
+                    query_params = parse_qs(parsed.query)
+                    vid_local = query_params.get('v', [None])[0]
+                elif 'youtu.be' in parsed.netloc:
+                    vid_local = parsed.path[1:]
+            except Exception:
+                vid_local = None
+            camel = _to_camel_case_lower_suffix(title or '')
+            short_id = (vid_local or 'noid')[:8]
+            return f"{idx:04d}_{short_id}_{camel}"
+        
+        def _run_single(url: str, index: int):
+            """Download a single URL with language-specific organization - matches main() exactly."""
+            print(f"🎯 Processing URL {index}: {url}")
+            
+            # Determine language classification and output directory
+            language_folder = language_mapping.get(url, None)
+            
+            # If no explicit language mapping, try to detect Vietnamese content
+            if language_folder is None:
+                try:
+                    # Quick title check for Vietnamese content - match main() exactly
+                    from pytubefix import YouTube
+                    yt_temp = YouTube(url)
+                    title = yt_temp.title or ''
+                    # Simple Vietnamese detection based on common Vietnamese words/patterns
+                    vietnamese_indicators = ['việt', 'tiếng việt', 'bé', 'trẻ em', 'mầm non', 'thiếu nhi', 'con', 'em']
+                    if any(indicator in title.lower() for indicator in vietnamese_indicators):
+                        language_folder = 'vietnamese'
+                    else:
+                        language_folder = 'unknown'
+                except Exception:
+                    language_folder = 'unknown'
+            
+            language_output_dir = os.path.join(final_output_dir, language_folder)
+            os.makedirs(language_output_dir, exist_ok=True)
+            
+            print(f"📁 Language classification: {language_folder}")
+            print(f"📂 Output directory: {language_output_dir}")
+            
+            # Check if already downloaded in global manifest
+            vid = self._extract_video_id(url)
+            if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+                print(f"⏭️  Already downloaded globally (video_id: {vid}, skipping duplicate)")
+                return False
+                
+            # Update both config and alternative downloader to use language-specific directory
+            original_config_output_dir = self.config.output_dir
+            original_alt_output_dir = None
+            self.config.output_dir = language_output_dir
+            
+            # Also update the alternative downloader's output directory if it exists
+            if hasattr(self, 'alt_downloader') and self.alt_downloader:
+                from pathlib import Path
+                original_alt_output_dir = self.alt_downloader.output_dir
+                self.alt_downloader.output_dir = Path(language_output_dir)
+            
+            try:
+                # Set basename on the alternative downloader - match main() exactly
+                basename = _build_basename(index, url)
+                if hasattr(self, 'alt_downloader') and self.alt_downloader:
+                    self.alt_downloader._current_basename = basename
+                    
+                result = self.download_audio_from_yturl(url, index=index)
+                
+                # Clear basename after download
+                if hasattr(self, 'alt_downloader') and self.alt_downloader:
+                    self.alt_downloader._current_basename = None
+                
+                if isinstance(result, tuple):
+                    wav_path, duration = result
+                    if wav_path:
+                        print(f"✅ Saved: {wav_path} ({duration}s)")
+                        title_val = ''
+                        try:
+                            # Match alternative downloader's title extraction approach - match main() exactly
+                            from pytubefix import YouTube
+                            yt_tmp2 = YouTube(url)
+                            title_val = yt_tmp2.title or ''
+                        except Exception:
+                            try:
+                                from pytube import YouTube
+                                yt_tmp2 = YouTube(url)
+                                title_val = yt_tmp2.title or ''
+                            except Exception:
+                                title_val = ''
+                        
+                        # Create record for global manifest only - match main() exactly
+                        record = {
+                            'video_id': vid or '',
+                            'url': url,
+                            'output_path': wav_path,
+                            'status': 'success',
+                            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                            'duration_seconds': duration,
+                            'title': title_val,
+                            'language_folder': language_folder,
+                            'download_index': index
+                        }
+                        
+                        # Add to global manifest only
+                        if vid:
+                            manifest_index[vid] = record
+                        manifest_records.append(record)
+                        manifest_data['records'] = manifest_records
+                        manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in manifest_records)
+                        _save_manifest(manifest_path, manifest_data)
+                        print(f"📋 Updated global manifest: {len(manifest_records)} files, {manifest_data['total_duration_seconds']:.1f}s total")
+                        print(f"📂 File organized in: {language_folder}/ folder")
+                        return True
+                    else:
+                        print("❌ Download failed")
+                        return False
+                else:
+                    print("❌ Download failed")
+                    return False
+            finally:
+                # Restore original output directories - match main() exactly
+                self.config.output_dir = original_config_output_dir
+                if hasattr(self, 'alt_downloader') and self.alt_downloader and original_alt_output_dir:
+                    self.alt_downloader.output_dir = original_alt_output_dir
+        
+        # Load manifest and create index
+        manifest_data = _load_manifest(manifest_path)
+        manifest_records = manifest_data.get('records', [])
+        manifest_index = _index_manifest(manifest_records)
+        
+        # CRITICAL: Add the backfill functionality that was missing
+        def _backfill_missing_titles_similar_behavior():
+            updated = False
+            updated_count = 0
+            failed_count = 0
+            skipped_count = 0
+            total_missing = sum(1 for r in manifest_records if r.get('status') == 'success' and not r.get('title'))
+            
+            if total_missing:
+                print(f"🔧 Backfilling titles for {total_missing} records without titles...")
+                print("=" * 60)
+            else:
+                print("✅ All records already have titles - no backfilling needed")
+                return
+                
+            for idx_bf, rec in enumerate(manifest_records, start=1):
+                try:
+                    if rec.get('status') == 'success' and not rec.get('title'):
+                        print(f"🔍 [{idx_bf}/{len(manifest_records)}] Backfilling title for: {rec.get('url', 'No URL')}")
+                        url_bf = rec.get('url')
+                        if not url_bf:
+                            print("   ⏭️  Skipping - no URL in record")
+                            skipped_count += 1
+                            continue
+                            
+                        try:
+                            # Try to get video info without downloading
+                            video_info = self.get_video_info_with_duration(url_bf)
+                            if video_info and video_info.get('title'):
+                                rec['title'] = video_info['title']
+                                print(f"   ✅ Updated title: {video_info['title'][:50]}...")
+                                updated = True
+                                updated_count += 1
+                            else:
+                                print("   ❌ Could not retrieve title")
+                                failed_count += 1
+                        except Exception as title_error:
+                            print(f"   ❌ Error getting title: {title_error}")
+                            failed_count += 1
+                    else:
+                        # Record already has title or failed status
+                        continue
+                except Exception as record_error:
+                    print(f"   ❌ Error processing record {idx_bf}: {record_error}")
+                    failed_count += 1
+            
+            print("=" * 60)
+            print("📊 BACKFILL SUMMARY:")
+            print(f"   📋 Total records processed: {len(manifest_records)}")
+            print(f"   🔍 Records needing titles: {total_missing}")
+            print(f"   ✅ Successfully updated: {updated_count}")
+            print(f"   ❌ Failed to update: {failed_count}")
+            print(f"   ⏭️  Skipped (no URL): {skipped_count}")
+            
+            if updated:
+                try:
+                    # Recalculate total duration after backfill
+                    manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in manifest_records)
+                    _save_manifest(manifest_path, manifest_data)
+                    print("✅ Manifest updated with backfilled titles")
+                except Exception as final_save_error:
+                    print(f"❌ Error saving backfilled manifest: {final_save_error}")
+                    
+        # Run backfill process like in main()
+        _backfill_missing_titles_similar_behavior()
+        
+        # Determine URLs to process
+        if urls_file_path and os.path.exists(urls_file_path):
+            with open(urls_file_path, 'r', encoding='utf-8') as f:
+                urls = [line.strip() for line in f if line.strip().startswith('http')]
+        else:
+            # Default to collected URLs file - match main() exactly
+            default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
+            if os.path.exists(default_urls_file):
+                with open(default_urls_file, 'r', encoding='utf-8') as f:
+                    urls = [line.strip() for line in f if line.strip().startswith('http')]
+            else:
+                print("⚠️ No URLs file found to process")
+                # Restore original output dir before returning
+                self.config.output_dir = original_output_dir
+                return {'processed': 0, 'successful': 0, 'skipped': 0, 'failed': 0, 'total_in_file': 0}
+        
+        print(f"📋 Processing {len(urls)} URLs from file")
+        print(f"🌍 Language mapping: {len(language_mapping)} URLs classified")
+        
+        # Filter out already downloaded URLs from the global manifest - match main() exactly
+        urls_to_process = []
+        skipped_count = 0
+        
+        for url in urls:
+            vid = self._extract_video_id(url)
+            if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+                print(f"⏭️  Already downloaded: {url} (video_id: {vid})")
+                skipped_count += 1
+            else:
+                urls_to_process.append(url)
+                
+        print(f"📊 Status: {skipped_count} already downloaded, {len(urls_to_process)} to process")
+        
+        # Process URLs - match main() exactly
+        successful_count = 0
+        failed_count = 0
+        
+        if urls_to_process:
+            # Find the next available index based on existing manifest records
+            next_index = len(manifest_records) + 1
+            print(f"🔢 Starting from index {next_index}")
+            
+            for idx, url in enumerate(urls_to_process):
+                current_index = next_index + idx
+                print(f"\\n===== [{current_index}] {url} =====")
+                try:
+                    success = _run_single(url, current_index)
+                    if success:
+                        successful_count += 1
+                    else:
+                        failed_count += 1
+                except Exception as e:
+                    print(f"❌ Error processing {url}: {e}")
+                    failed_count += 1
+            
+            print("\\n🎉 Batch processing completed")
+        else:
+            print("\\n✅ All URLs already processed!")
+        
+        # Restore original output directory
+        self.config.output_dir = original_output_dir
+        
+        # Return processing statistics
+        return {
+            'processed': len(urls_to_process),
+            'successful': successful_count,
+            'skipped': skipped_count,
+            'failed': failed_count,
+            'total_in_file': len(urls)
         }
 
 
