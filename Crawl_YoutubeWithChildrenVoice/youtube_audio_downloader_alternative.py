@@ -421,12 +421,19 @@ class YouTubeAudioDownloaderAlternative:
         Initialize the alternative downloader.
         
         Args:
-            output_dir (str): Directory to save audio files
+            output_dir (str): Directory to save audio files (can be relative or absolute path)
             cookies_file (Optional[str]): Path to cookies file (for future yt-dlp fallback)
             cookies_from_browser (Optional[str]): Browser name for cookies (for future yt-dlp fallback)
         """
         self.base_dir = Path(__file__).parent
-        self.output_dir = self.base_dir / output_dir
+        
+        # Handle both relative and absolute paths for better compatibility
+        output_path = Path(output_dir)
+        if output_path.is_absolute():
+            self.output_dir = output_path
+        else:
+            self.output_dir = self.base_dir / output_dir
+        
         self.output_dir.mkdir(exist_ok=True)
         self._current_basename: Optional[str] = None  # For custom basenames when run as script
         

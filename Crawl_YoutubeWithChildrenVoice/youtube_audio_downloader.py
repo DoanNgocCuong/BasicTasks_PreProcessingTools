@@ -248,13 +248,15 @@ class YoutubeAudioDownloader:
         
         # Initialize alternative downloader used by the crawler
         try:
-            # Use the same output directory as the script's config
+            # Use relative path to ensure proper directory alignment
+            # Convert absolute path back to relative if needed
+            relative_output_dir = os.path.relpath(self.config.output_dir, self.config.base_dir)
             self.alt_downloader = YouTubeAudioDownloaderAlternative(
-                output_dir=self.config.output_dir,
+                output_dir=relative_output_dir,
                 cookies_file=self.cookies_file,
                 cookies_from_browser=self.cookies_from_browser
             )
-            print("✅ Initialized YouTubeAudioDownloaderAlternative (crawler method)")
+            print(f"✅ Initialized YouTubeAudioDownloaderAlternative (crawler method) with output dir: {relative_output_dir}")
         except Exception as e:
             print(f"⚠️ Could not initialize alternative downloader: {e}")
             self.alt_downloader = None
@@ -718,26 +720,58 @@ class YoutubeAudioDownloader:
         if self.alt_downloader is not None:
             try:
                 print("🔄 Trying crawler's alternative downloader (yt-dlp Android client → pytube fallback)...")
+                
+                # Set custom basename for consistency with main downloader naming
+                custom_base = getattr(self.config, '_current_basename', None)
+                if custom_base:
+                    self.alt_downloader._current_basename = custom_base
+                
+                # Try yt-dlp Android client first
                 alt_result = self.alt_downloader.download_audio_yt_dlp_fallback(url, index)
                 if not alt_result or not alt_result[0]:
                     print("⚠️ Alternative yt-dlp method returned no result, trying pytube fallback...")
                     try:
                         alt_result = self.alt_downloader.download_audio_pytube(url, index)
-                    except Exception as _:
+                    except Exception as pytube_error:
+                        print(f"⚠️ Pytube fallback also failed: {pytube_error}")
                         alt_result = None
+                
+                # Clean up custom basename
+                if hasattr(self.alt_downloader, '_current_basename'):
+                    self.alt_downloader._current_basename = None
+                
                 if alt_result and alt_result[0]:
                     print("🎉 Alternative downloader succeeded")
-                    # Ensure target output directory alignment
                     wav_path, duration = alt_result
+                    
+                    # Handle language-based file organization if needed
+                    if self.language_mapping and url in self.language_mapping:
+                        language_folder = self.language_mapping[url]
+                        language_dir = self.config.get_language_output_dir(url)
+                        target_filename = os.path.basename(wav_path)
+                        target_path = os.path.join(language_dir, target_filename)
+                        
+                        # Move file to language-specific directory if not already there
+                        if os.path.dirname(wav_path) != language_dir:
+                            try:
+                                os.makedirs(language_dir, exist_ok=True)
+                                import shutil
+                                shutil.move(wav_path, target_path)
+                                wav_path = target_path
+                                print(f"📁 Moved file to language folder ({language_folder}): {target_path}")
+                            except Exception as move_error:
+                                print(f"⚠️ Could not move file to language folder: {move_error}")
+                    
+                    print(f"✅ Alternative downloader result: {wav_path} ({duration}s)")
                     return wav_path, duration
                 else:
-                    print("⚠️ Alternative downloader failed; falling back to local yt-dlp flow")
+                    print("⚠️ Alternative downloader failed; falling back to main downloader's yt-dlp flow")
             except Exception as e_alt:
                 print(f"⚠️ Alternative downloader error: {e_alt}")
+                print("🔄 Continuing with main downloader's yt-dlp method...")
 
-        # If alternative path failed or not available, do not use a different method to stay EXACT with crawler
-        print("❌ Alternative downloader failed. Not switching methods to remain consistent with crawler.")
-        return None, None
+        # Continue with main downloader's own yt-dlp implementation as fallback
+        print("🔄 Using main downloader's yt-dlp method...")
         self._rate_limit_delay()
         
         # Optionally get video duration for manifest metadata; do not enforce any length limit here
