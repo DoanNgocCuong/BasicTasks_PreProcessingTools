@@ -1714,33 +1714,46 @@ def main():
         print(f"🎯 Processing URL {index}: {url}")
         
         # Determine language classification and output directory
-        language_folder = language_mapping.get(url, 'unknown')
+        language_folder = language_mapping.get(url, None)
+        
+        # If no explicit language mapping, try to detect Vietnamese content
+        if language_folder is None:
+            try:
+                # Quick title check for Vietnamese content
+                from pytubefix import YouTube
+                yt_temp = YouTube(url)
+                title = yt_temp.title or ''
+                # Simple Vietnamese detection based on common Vietnamese words/patterns
+                vietnamese_indicators = ['việt', 'tiếng việt', 'bé', 'trẻ em', 'mầm non', 'thiếu nhi', 'con', 'em']
+                if any(indicator in title.lower() for indicator in vietnamese_indicators):
+                    language_folder = 'vietnamese'
+                else:
+                    language_folder = 'unknown'
+            except Exception:
+                language_folder = 'unknown'
+        
         language_output_dir = os.path.join(final_output_dir, language_folder)
         os.makedirs(language_output_dir, exist_ok=True)
         
         print(f"📁 Language classification: {language_folder}")
         print(f"📂 Output directory: {language_output_dir}")
         
-        # Load language-specific manifest
-        language_manifest_path = os.path.join(language_output_dir, 'manifest.json')
-        language_manifest_data = _load_manifest(language_manifest_path)
-        language_manifest_records = language_manifest_data.get('records', [])
-        language_manifest_index = _index_manifest(language_manifest_records)
-        
-        # Check if already downloaded in global manifest first
+        # Check if already downloaded in global manifest
         vid = downloader._extract_video_id(url)
         if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
             print(f"⏭️  Already downloaded globally (video_id: {vid}, skipping duplicate)")
             return
             
-        # Check if already downloaded in this language folder
-        if vid and vid in language_manifest_index and language_manifest_index[vid].get('status') == 'success':
-            print(f"⏭️  Already downloaded in {language_folder} folder (skipping duplicate)")
-            return
-            
-        # Update config to use language-specific directory temporarily
+        # Update both config and alternative downloader to use language-specific directory
         original_output_dir = config.output_dir
+        original_alt_output_dir = None
         config.output_dir = language_output_dir
+        
+        # Also update the alternative downloader's output directory
+        if hasattr(downloader, 'alt_downloader') and downloader.alt_downloader:
+            from pathlib import Path
+            original_alt_output_dir = downloader.alt_downloader.output_dir
+            downloader.alt_downloader.output_dir = Path(language_output_dir)
         
         try:
             # Set basename on the alternative downloader 
@@ -1772,7 +1785,7 @@ def main():
                         except Exception:
                             title_val = ''
                     
-                    # Create record for language-specific manifest
+                    # Create record for global manifest only
                     record = {
                         'video_id': vid or '',
                         'url': url,
@@ -1785,16 +1798,7 @@ def main():
                         'download_index': index
                     }
                     
-                    # Add to language-specific manifest
-                    if vid:
-                        language_manifest_index[vid] = record
-                    language_manifest_records.append(record)
-                    language_manifest_data['records'] = language_manifest_records
-                    language_manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in language_manifest_records)
-                    _save_manifest(language_manifest_path, language_manifest_data)
-                    print(f"📋 Updated {language_folder} manifest: {len(language_manifest_records)} files, {language_manifest_data['total_duration_seconds']:.1f}s total")
-                    
-                    # Also add to global manifest
+                    # Add to global manifest only
                     if vid:
                         manifest_index[vid] = record
                     manifest_records.append(record)
@@ -1802,13 +1806,16 @@ def main():
                     manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in manifest_records)
                     _save_manifest(manifest_path, manifest_data)
                     print(f"📋 Updated global manifest: {len(manifest_records)} files, {manifest_data['total_duration_seconds']:.1f}s total")
+                    print(f"📂 File organized in: {language_folder}/ folder")
                 else:
                     print("❌ Download failed")
             else:
                 print("❌ Download failed")
         finally:
-            # Restore original output directory
+            # Restore original output directories
             config.output_dir = original_output_dir
+            if hasattr(downloader, 'alt_downloader') and downloader.alt_downloader and original_alt_output_dir:
+                downloader.alt_downloader.output_dir = original_alt_output_dir
 
     args = args  # Use the modified args list after removing language mapping arguments
     default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
