@@ -271,17 +271,34 @@ class YoutubeAudioDownloader:
             # Try to get API key from environment config
             try:
                 from env_config import config as env_config
-                self.youtube_api_key = env_config.YOUTUBE_API_KEY
-            except (ImportError, AttributeError):
-                self.youtube_api_key = os.getenv('YOUTUBE_API_KEY')
+                # Try to get API keys (returns list)
+                api_keys = env_config.YOUTUBE_API_KEYS
+                if api_keys:
+                    self.youtube_api_key = api_keys[0]  # Use first available key
+                    print(f"🔑 Found {len(api_keys)} YouTube API key(s) in env_config")
+                else:
+                    self.youtube_api_key = None
+            except (ImportError, AttributeError, ValueError) as e:
+                print(f"⚠️ env_config not available or no keys found: {e}")
+                # Fallback to environment variables
+                self.youtube_api_key = (
+                    os.getenv('YOUTUBE_API_KEY') or 
+                    os.getenv('YOUTUBE_API_KEY_1') or 
+                    os.getenv('YOUTUBE_API_KEYS', '').split(',')[0].strip() if os.getenv('YOUTUBE_API_KEYS') else None
+                )
+                if self.youtube_api_key:
+                    print("🔑 Found YouTube API key in environment variables")
             
-            if self.youtube_api_key:
+            if self.youtube_api_key and self.youtube_api_key.strip():
                 self.youtube_service = googleapiclient.discovery.build(
                     "youtube", "v3", developerKey=self.youtube_api_key
                 )
                 print("✅ YouTube Data API initialized for metadata retrieval")
+                print(f"🔑 Using API key: {self.youtube_api_key[:10]}...{self.youtube_api_key[-4:]}")
             else:
                 print("⚠️ YouTube Data API key not found, using yt-dlp for metadata")
+                print("💡 Set YOUTUBE_API_KEY, YOUTUBE_API_KEY_1, or YOUTUBE_API_KEYS in .env file")
+                self.youtube_service = None
         except Exception as e:
             print(f"⚠️ Could not initialize YouTube Data API: {e}")
             self.youtube_service = None
