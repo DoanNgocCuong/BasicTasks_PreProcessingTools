@@ -815,17 +815,6 @@ class YouTubeVideoCrawler:
         
         print("🔧 Audio downloader initialized")
         
-        # Initialize integrated audio downloader for batch processing  
-        audio_config = AudioDownloaderConfig(
-            output_dir=str(self.crawler_output_dir),
-            manifest_path=str(self.crawler_manifest_path),
-            original_manifest_path=str(self.original_manifest_path),
-            enable_duplicate_check=True
-        )
-        self.integrated_audio_downloader = YoutubeAudioDownloader(
-            audio_config
-        )
-        
         # Log the download strategy
         print(f"🔧 Audio download strategy: yt-dlp (Android client) → pytube fallback")
         print(f"🔧 Using reliable yt-dlp with Android client to bypass YouTube restrictions")
@@ -882,9 +871,6 @@ class YouTubeVideoCrawler:
         self.start_time = time.time()
         self.start_datetime = datetime.now()
         
-        # URL counter for running integrated audio downloader every 2 URLs
-        self.url_counter_for_downloader = 0
-        
         # Language mapping for organizing audio downloads
         self.url_language_mapping = {}  # Maps URL to language classification (vietnamese/unknown)
     
@@ -914,47 +900,6 @@ class YouTubeVideoCrawler:
                 json.dump(initial_data, f, ensure_ascii=False, indent=2)
             print("✅ Created initial crawler manifest")
     
-    def _run_integrated_audio_downloader(self) -> None:
-        """
-        Run the integrated audio downloader to process collected URLs.
-        Uses the main function from youtube_audio_downloader with crawler-specific configuration.
-        """
-        try:
-            print(f"🎵 Running integrated audio downloader with crawler manifest")
-            print(f"📁 Crawler output: {self.crawler_output_dir}")
-            print(f"📝 Crawler manifest: {self.crawler_manifest_path}")
-            
-            # Note: The audio downloader is already configured with crawler paths
-            # and will automatically avoid duplicates by checking both manifests
-            
-            # Simply log that the downloader will process any collected URLs
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
-            
-            if os.path.exists(urls_file):
-                with open(urls_file, 'r', encoding='utf-8') as f:
-                    urls = [line.strip() for line in f if line.strip().startswith('http')]
-                print(f"📋 Found {len(urls)} URLs to potentially process")
-                print("✅ Audio downloader is configured and ready")
-            else:
-                print("⚠️  No URLs file found")
-            
-        except Exception as e:
-            print(f"❌ Error setting up integrated audio downloader: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def _check_and_run_downloader(self) -> None:
-        """
-        Check if we've collected 2 URLs and run the integrated audio downloader if so.
-        """
-        self.url_counter_for_downloader += 1
-        if self.url_counter_for_downloader >= 2:
-            print(f"\n🎯 Collected {self.url_counter_for_downloader} URLs - triggering integrated audio downloader")
-            self._run_integrated_audio_downloader()
-            self.url_counter_for_downloader = 0  # Reset counter
-            print("🔄 Continuing URL collection...\n")
-
     def _download_audio_with_fallback(self, url: str, index: int) -> Optional[Tuple[str, float]]:
         """
         Download audio using the reliable yt-dlp method with Android client configuration.
@@ -2513,9 +2458,6 @@ class YouTubeVideoCrawler:
             language_folder = 'vietnamese' if analysis_result.is_vietnamese else 'unknown'
             self.url_language_mapping[video['url']] = language_folder
             
-            # Check if we should run audio downloader script
-            self._check_and_run_downloader()
-            
             # Mark video as collected in analysis results
             for result in reversed(self.video_analysis_results):
                 if result['video_url'] == video['url']:
@@ -2615,8 +2557,6 @@ class YouTubeVideoCrawler:
                 language_folder = 'vietnamese' if similar_analysis_result.is_vietnamese else 'unknown'
                 self.url_language_mapping[similar_video['url']] = language_folder
                 
-                # Check if we should run audio downloader script
-                self._check_and_run_downloader()
                 print("✓ Video has children's voice - Added to results")
                 self.reporter.report_similar_video_result(True)
             else:
@@ -2759,8 +2699,6 @@ class YouTubeVideoCrawler:
         # Since we're not running language detection, assume Vietnamese for similar videos
         self.url_language_mapping[similar_video['url']] = 'vietnamese'
         
-        # Check if we should run audio downloader script
-        self._check_and_run_downloader()
         print("✓ Similar video added directly (classification will be done later)")
         self.reporter.report_similar_video_result(True)
         
