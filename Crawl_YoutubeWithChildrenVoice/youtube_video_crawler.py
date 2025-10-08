@@ -28,7 +28,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import librosa
 import soundfile as sf
 import tempfile
-from youtube_audio_downloader_alternative import YouTubeAudioDownloaderAlternative
 from youtube_audio_downloader import YoutubeAudioDownloader, Config as AudioDownloaderConfig
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
@@ -799,15 +798,14 @@ class YouTubeVideoCrawler:
             elif method == 'browser':
                 cookies_from_browser = config.cookie_settings.get('browser_name', 'chrome')
         
-        # Initialize alternative downloader (provides both pytube and yt-dlp methods)
-        self.alternative_downloader = YouTubeAudioDownloaderAlternative(
-            output_dir="youtube_audio_outputs",
+        # Initialize audio downloader
+        self.audio_downloader = YoutubeAudioDownloader(
+            config=AudioDownloaderConfig(),
             cookies_file=cookies_file,
             cookies_from_browser=cookies_from_browser
         )
         
-        # Set audio downloader (always use alternative downloader which provides both methods)
-        self.audio_downloader = self.alternative_downloader
+        print("🔧 Audio downloader initialized")
         
         # Initialize integrated audio downloader for batch processing
         audio_config = AudioDownloaderConfig(language_mapping={})
@@ -949,7 +947,7 @@ class YouTubeVideoCrawler:
         try:
             print(f"🔄 Downloading with yt-dlp (Android client)")
             print(f"📡 Using proven method that bypasses YouTube restrictions")
-            result = self.alternative_downloader.download_audio_yt_dlp_fallback(url, index)
+            result = self.audio_downloader.download_audio_yt_dlp_fallback(url, index)
             
             if result and result[0]:  # Check if we got a valid result with file path
                 print(f"✅ Primary yt-dlp download successful")
@@ -964,7 +962,7 @@ class YouTubeVideoCrawler:
         try:
             print(f"🔄 FALLBACK: Attempting pytube download as last resort")
             print(f"⚠️  Note: pytube may have issues with YouTube's recent restrictions")
-            result = self.alternative_downloader.download_audio_pytube(url, index)
+            result = self.audio_downloader.download_audio_pytube(url, index)
             
             if result and result[0]:  # Check if we got a valid result with file path
                 print(f"✅ Fallback pytube download successful (despite restrictions)")
