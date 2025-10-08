@@ -55,10 +55,8 @@ class YouTubeLanguageClassifier:
             Optional[str]: The language code of the auto-generated transcript, or None if not found.
         """
         try:
-            # Create an instance of the API
-            api = YouTubeTranscriptApi()
             # List all available transcripts
-            transcript_list = api.list(video_id)
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
             
             for transcript in transcript_list:
                 # The user wants the language of auto-generated captions.

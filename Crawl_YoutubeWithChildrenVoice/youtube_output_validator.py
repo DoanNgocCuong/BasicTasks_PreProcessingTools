@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
 """
-YouTube URL Validator and Duplicate Checker
+YouTube URL Validator and Audio Classifier
 
 This module provides comprehensive validation and analysis tools for YouTube URL collections.
 It validates URL formats, detects and reports duplicates, normalizes URLs to standard format,
 and generates detailed statistics and cleaned datasets.
 
+Additionally, it provides audio classification functionality to validate audio files
+using children's voice detection and cleanup non-children audio files.
+
 Author: Le Hoang Minh
 """
+import json
+import os
 import re
+import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Set, Tuple, Optional, Any
 from collections import Counter
 from dataclasses import dataclass
 
@@ -34,6 +43,15 @@ class ValidationResult:
     invalid_url_list: List[str]
     valid_urls: Set[str]
     duplicate_urls: List[DuplicateInfo]  # Detailed duplicate information with positions
+
+@dataclass
+class ClassificationResult:
+    """Data class for audio classification results."""
+    audio_path: str
+    is_children: bool
+    confidence: float
+    error: Optional[str] = None
+    processing_time: float = 0.0
 
 
 class Config:
@@ -423,6 +441,312 @@ class YouTubeURLValidator:
         return result
 
 
+class AudioFileClassifier:
+    """Handles audio file classification and cleanup based on children's voice detection."""
+    
+    def __init__(self, manifest_path: Optional[Path] = None, max_workers: int = 4):
+        """
+        Initialize the audio classifier.
+        
+        Args:
+            manifest_path (Optional[Path]): Path to manifest.json file
+            max_workers (int): Maximum number of worker threads for parallel processing
+        """
+        self.script_dir = Path(__file__).parent
+        self.manifest_path = manifest_path or self.script_dir / "final_audio_files" / "manifest.json"
+        self.max_workers = max_workers
+        self._classifier = None
+        self._classifier_lock = threading.Lock()
+        
+        # Statistics
+        self.stats = {
+            'total_processed': 0,
+            'children_voice_kept': 0,
+            'non_children_deleted': 0,
+            'files_not_found': 0,
+            'classification_errors': 0
+        }
+    
+    def _get_classifier(self):
+        """Get or create audio classifier instance (thread-safe lazy loading)."""
+        if self._classifier is None:
+            with self._classifier_lock:
+                if self._classifier is None:
+                    try:
+                        # Import here to avoid issues if the module is not available
+                        from youtube_audio_classifier import AudioClassifier
+                        self._classifier = AudioClassifier()
+                        print("✅ Audio classifier loaded successfully")
+                    except ImportError as e:
+                        print(f"❌ Failed to import AudioClassifier: {e}")
+                        raise
+                    except Exception as e:
+                        print(f"❌ Failed to initialize AudioClassifier: {e}")
+                        raise
+        return self._classifier
+    
+    def load_manifest(self) -> Dict[str, Any]:
+        """
+        Load manifest.json file.
+        
+        Returns:
+            Dict[str, Any]: Manifest data
+        """
+        try:
+            if not self.manifest_path.exists():
+                raise FileNotFoundError(f"Manifest file not found: {self.manifest_path}")
+            
+            with self.manifest_path.open('r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"❌ Error loading manifest: {e}")
+            raise
+    
+    def save_manifest(self, manifest_data: Dict[str, Any]) -> None:
+        """
+        Save manifest.json file.
+        
+        Args:
+            manifest_data (Dict[str, Any]): Manifest data to save
+        """
+        try:
+            # Create backup before saving
+            backup_path = self.manifest_path.with_suffix(f'.json.backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+            shutil.copy2(self.manifest_path, backup_path)
+            
+            with self.manifest_path.open('w', encoding='utf-8') as f:
+                json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"✅ Manifest saved successfully (backup: {backup_path.name})")
+        except Exception as e:
+            print(f"❌ Error saving manifest: {e}")
+            raise
+    
+    def classify_audio_file(self, manifest_entry: Dict[str, Any]) -> ClassificationResult:
+        """
+        Classify a single audio file for children's voice.
+        
+        Args:
+            manifest_entry (Dict[str, Any]): Manifest entry containing audio file path
+            
+        Returns:
+            ClassificationResult: Classification result
+        """
+        audio_path = manifest_entry.get('output_path', '')
+        
+        try:
+            start_time = datetime.now()
+            
+            # Check if file exists
+            if not os.path.exists(audio_path):
+                return ClassificationResult(
+                    audio_path=audio_path,
+                    is_children=False,
+                    confidence=0.0,
+                    error="File not found"
+                )
+            
+            # Get classifier and run classification
+            classifier = self._get_classifier()
+            is_children = classifier.is_child_audio_optimized(audio_path)
+            
+            processing_time = (datetime.now() - start_time).total_seconds()
+            
+            if is_children is None:
+                return ClassificationResult(
+                    audio_path=audio_path,
+                    is_children=False,
+                    confidence=0.0,
+                    error="Classification failed",
+                    processing_time=processing_time
+                )
+            
+            return ClassificationResult(
+                audio_path=audio_path,
+                is_children=is_children,
+                confidence=1.0 if is_children else 0.0,
+                processing_time=processing_time
+            )
+            
+        except Exception as e:
+            return ClassificationResult(
+                audio_path=audio_path,
+                is_children=False,
+                confidence=0.0,
+                error=str(e)
+            )
+    
+    def delete_audio_file_and_update_stats(self, manifest_entry: Dict[str, Any], manifest_data: Dict[str, Any]) -> bool:
+        """
+        Delete audio file and remove its duration from total stats.
+        
+        Args:
+            manifest_entry (Dict[str, Any]): Manifest entry to delete
+            manifest_data (Dict[str, Any]): Full manifest data
+            
+        Returns:
+            bool: True if deletion successful, False otherwise
+        """
+        audio_path = manifest_entry.get('output_path', '')
+        duration = manifest_entry.get('duration_seconds', 0)
+        
+        try:
+            # Delete audio file if it exists
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+                print(f"🗑️  Deleted audio file: {Path(audio_path).name}")
+            
+            # Update total duration
+            if 'total_duration_seconds' in manifest_data and duration > 0:
+                manifest_data['total_duration_seconds'] -= duration
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error deleting file {audio_path}: {e}")
+            return False
+    
+    def process_single_entry(self, manifest_entry: Dict[str, Any], manifest_data: Dict[str, Any]) -> Tuple[bool, ClassificationResult]:
+        """
+        Process a single manifest entry for classification.
+        
+        Args:
+            manifest_entry (Dict[str, Any]): Single manifest entry
+            manifest_data (Dict[str, Any]): Full manifest data (for stats updates)
+            
+        Returns:
+            Tuple[bool, ClassificationResult]: (should_keep, classification_result)
+        """
+        # Skip if already classified
+        if manifest_entry.get('classified', False):
+            return True, ClassificationResult(
+                audio_path=manifest_entry.get('output_path', ''),
+                is_children=True,  # If in manifest and classified, it's children's voice
+                confidence=1.0
+            )
+        
+        # Run classification
+        result = self.classify_audio_file(manifest_entry)
+        
+        # Update statistics
+        self.stats['total_processed'] += 1
+        
+        if result.error == "File not found":
+            self.stats['files_not_found'] += 1
+            print(f"❌ File not found: {Path(result.audio_path).name}")
+            return False, result
+        elif result.error:
+            self.stats['classification_errors'] += 1
+            print(f"❌ Classification error for {Path(result.audio_path).name}: {result.error}")
+            return False, result
+        elif result.is_children:
+            self.stats['children_voice_kept'] += 1
+            # Update manifest entry
+            manifest_entry['classified'] = True
+            manifest_entry['classification_timestamp'] = datetime.now().isoformat()
+            print(f"✅ Children's voice detected: {Path(result.audio_path).name}")
+            return True, result
+        else:
+            self.stats['non_children_deleted'] += 1
+            # Delete file and update stats
+            self.delete_audio_file_and_update_stats(manifest_entry, manifest_data)
+            print(f"❌ Non-children voice detected and deleted: {Path(result.audio_path).name}")
+            return False, result
+    
+    def validate_and_classify_audio_files(self) -> Dict[str, int]:
+        """
+        Main method to validate and classify all unclassified audio files.
+        
+        Returns:
+            Dict[str, int]: Statistics summary
+        """
+        print(">>> Starting audio file classification and validation...")
+        print(f">>> Manifest file: {self.manifest_path}")
+        print(f">>> Max workers: {self.max_workers}")
+        
+        # Load manifest
+        manifest_data = self.load_manifest()
+        total_records = len(manifest_data.get('records', []))
+        print(f">>> Total records in manifest: {total_records}")
+        
+        # Filter unclassified entries
+        unclassified_entries = [
+            entry for entry in manifest_data.get('records', [])
+            if not entry.get('classified', False)
+        ]
+        
+        print(f">>> Unclassified entries to process: {len(unclassified_entries)}")
+        
+        if not unclassified_entries:
+            print(">>> All entries are already classified!")
+            return self.stats
+        
+        # Process entries with thread pool
+        entries_to_keep = []
+        
+        print(f">>> Processing {len(unclassified_entries)} entries with {self.max_workers} workers...")
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all tasks
+            future_to_entry = {
+                executor.submit(self.process_single_entry, entry, manifest_data): entry
+                for entry in unclassified_entries
+            }
+            
+            # Process completed tasks
+            for i, future in enumerate(as_completed(future_to_entry), 1):
+                entry = future_to_entry[future]
+                try:
+                    should_keep, result = future.result()
+                    if should_keep:
+                        entries_to_keep.append(entry)
+                    
+                    # Progress update
+                    if i % 10 == 0 or i == len(unclassified_entries):
+                        print(f">>> Progress: {i}/{len(unclassified_entries)} entries processed")
+                        
+                except Exception as e:
+                    print(f">>> Error processing entry: {e}")
+                    self.stats['classification_errors'] += 1
+        
+        # Update manifest with kept entries (remove deleted ones)
+        all_classified_entries = [
+            entry for entry in manifest_data.get('records', [])
+            if entry.get('classified', False)
+        ]
+        
+        # Combine already classified + newly classified entries
+        updated_records = all_classified_entries + entries_to_keep
+        manifest_data['records'] = updated_records
+        
+        print(f">>> Updated manifest: {len(updated_records)} total records (removed {total_records - len(updated_records)} entries)")
+        
+        # Save updated manifest
+        self.save_manifest(manifest_data)
+        
+        # Print statistics
+        self.print_classification_summary()
+        
+        return self.stats
+    
+    def print_classification_summary(self):
+        """Print classification summary statistics."""
+        print("\n" + "=" * 60)
+        print("🎯 AUDIO CLASSIFICATION SUMMARY")
+        print("=" * 60)
+        print(f"📊 Total entries processed: {self.stats['total_processed']}")
+        print(f"✅ Children's voices kept: {self.stats['children_voice_kept']}")
+        print(f"❌ Non-children voices deleted: {self.stats['non_children_deleted']}")
+        print(f"📁 Files not found: {self.stats['files_not_found']}")
+        print(f"⚠️  Classification errors: {self.stats['classification_errors']}")
+        
+        if self.stats['total_processed'] > 0:
+            success_rate = ((self.stats['children_voice_kept']) / self.stats['total_processed']) * 100
+            print(f"📈 Children's voice rate: {success_rate:.1f}%")
+        
+        print("=" * 60)
+
+
 def main():
     """Main function to run the YouTube URL validator."""
     print("🎬 YouTube URL Validator and Duplicate Checker")
@@ -452,5 +776,28 @@ def main():
         print(f"\n✅ No duplicates found! Your URL collection was already clean.")
 
 
+def main_audio_classification():
+    """Main function for audio file classification."""
+    print(">>> YouTube Audio File Classifier")
+    print("=" * 60)
+    
+    # Initialize classifier
+    classifier = AudioFileClassifier(max_workers=4)
+    
+    # Run classification
+    try:
+        stats = classifier.validate_and_classify_audio_files()
+        print("\n>>> Classification completed successfully!")
+        
+    except Exception as e:
+        print(f"\n>>> Classification failed: {e}")
+        print("Please check the error messages above and try again.")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "--classify-audio":
+        main_audio_classification()
+    else:
+        main()
