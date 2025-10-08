@@ -26,6 +26,9 @@ import ffmpeg
 import googleapiclient.discovery
 import yt_dlp
 
+# Import language classifier
+from youtube_language_classifier import YouTubeLanguageClassifier
+
 # PyTube imports with fallback
 try:
     from pytubefix import YouTube  # type: ignore
@@ -157,12 +160,14 @@ def cleanup_file(file_path: Optional[Path], description: str = "temp file") -> N
 class Config:
     """Simplified configuration class."""
     
-    def __init__(self, user_agent=None, language_mapping=None):
+    def __init__(self, user_agent=None):
         debug_print("Initializing Config...")
         
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.output_dir = os.path.join(self.base_dir, 'youtube_audio_outputs')
-        self.language_mapping = language_mapping or {}
+        
+        # Initialize language classifier
+        self.language_classifier = YouTubeLanguageClassifier()
         
         # Load user agent settings
         default_user_agent = user_agent or self._load_user_agent() or DEFAULT_USER_AGENT
@@ -199,8 +204,34 @@ class Config:
         return os.path.join(self.output_dir, filename)
     
     def get_language_output_dir(self, url):
-        """Get language-specific output directory."""
-        language_folder = self.language_mapping.get(url, 'unknown')
+        """Get language-specific output directory using transcript-based detection."""
+        try:
+            # Use language classifier to detect language
+            detection_result = self.language_classifier.detect_language_from_url(url)
+            
+            if detection_result['error']:
+                debug_print(f"Language detection failed for {url}: {detection_result['error']}", "WARNING")
+                language_folder = 'unknown'
+            else:
+                detected_lang = detection_result['detected_language']
+                # Map common language codes to folder names
+                language_mapping = {
+                    'vi': 'vietnamese',
+                    'en': 'english', 
+                    'zh': 'chinese',
+                    'es': 'spanish',
+                    'fr': 'french',
+                    'de': 'german',
+                    'ja': 'japanese',
+                    'ko': 'korean'
+                }
+                language_folder = language_mapping.get(detected_lang, detected_lang or 'unknown')
+                debug_print(f"Detected language for {url}: {detected_lang} -> {language_folder}")
+                
+        except Exception as e:
+            debug_print(f"Language detection error for {url}: {e}", "ERROR")
+            language_folder = 'unknown'
+            
         language_dir = os.path.join(self.output_dir, language_folder)
         os.makedirs(language_dir, exist_ok=True)
         return language_dir
@@ -222,11 +253,10 @@ class Config:
 class YoutubeAudioDownloader:
     """Simplified YouTube Audio Downloader."""
     
-    def __init__(self, config, cookies_file=None, cookies_from_browser=None, language_mapping=None):
+    def __init__(self, config, cookies_file=None, cookies_from_browser=None):
         debug_print("Initializing YoutubeAudioDownloader...")
         
         self.config = config
-        self.language_mapping = language_mapping or {}
         self.last_request_time = 0
         self.request_count = 0
         self.disable_rate_limit = False
@@ -308,31 +338,42 @@ class YoutubeAudioDownloader:
         return is_error_pattern(error_message, BOT_DETECTION_PATTERNS)
     
     def _organize_language_folder(self, wav_path, url):
-        """Handle language-based file organization."""
-        if not self.language_mapping or url not in self.language_mapping:
-            debug_print(f"No language mapping for URL, keeping in: {os.path.dirname(wav_path)}")
-            return wav_path
-            
-        language_folder = self.language_mapping[url]
-        language_dir = self.config.get_language_output_dir(url)
-        target_filename = os.path.basename(wav_path)
-        target_path = os.path.join(language_dir, target_filename)
-        
-        current_dir = os.path.normpath(os.path.dirname(wav_path))
-        target_dir = os.path.normpath(language_dir)
-        
-        if current_dir != target_dir:
-            try:
-                debug_print(f"Moving to language folder ({language_folder}): {current_dir} → {target_dir}")
-                os.makedirs(language_dir, exist_ok=True)
-                shutil.move(wav_path, target_path)
-                debug_print(f"File moved successfully: {target_path}", "SUCCESS")
-                return target_path
-            except Exception as move_error:
-                debug_print(f"Could not move file: {move_error}", "WARNING")
+        """Handle language-based file organization using transcript detection."""
+        try:
+            # Check if file is already in a language-specific directory
+            current_dir = os.path.dirname(wav_path)
+            if any(lang in current_dir for lang in ['vietnamese', 'english', 'chinese', 'spanish', 'french', 'german', 'japanese', 'korean', 'unknown']):
+                debug_print(f"File already in language folder: {os.path.basename(current_dir)}")
                 return wav_path
-        else:
-            debug_print(f"File already in correct language folder: {language_folder}")
+                
+            # Get language-specific output directory
+            language_dir = self.config.get_language_output_dir(url)
+            target_filename = os.path.basename(wav_path)
+            target_path = os.path.join(language_dir, target_filename)
+            
+            # Check if file needs to be moved
+            current_dir = os.path.normpath(os.path.dirname(wav_path))
+            target_dir = os.path.normpath(language_dir)
+            
+            if current_dir != target_dir:
+                try:
+                    # Extract language folder name from path
+                    language_folder = os.path.basename(language_dir)
+                    debug_print(f"Moving to language folder ({language_folder}): {current_dir} → {target_dir}")
+                    os.makedirs(language_dir, exist_ok=True)
+                    shutil.move(wav_path, target_path)
+                    debug_print(f"File moved successfully: {target_path}", "SUCCESS")
+                    return target_path
+                except Exception as move_error:
+                    debug_print(f"Could not move file: {move_error}", "WARNING")
+                    return wav_path
+            else:
+                language_folder = os.path.basename(language_dir)
+                debug_print(f"File already in correct language folder: {language_folder}")
+                return wav_path
+                
+        except Exception as e:
+            debug_print(f"Error in language organization: {e}", "ERROR")
             return wav_path
     
     def get_audio_length_from_file(self, audio_file_path):
@@ -721,31 +762,11 @@ class YoutubeAudioDownloader:
 # HELPER FUNCTIONS
 # =================================================================
 
-def _parse_language_mapping():
-    """Parse language mapping from command line."""
-    language_mapping = {}
-    args = sys.argv[1:]
-    
-    if '--language-mapping' in args:
-        mapping_index = args.index('--language-mapping')
-        if mapping_index + 1 < len(args):
-            mapping_file = args[mapping_index + 1]
-            try:
-                with open(mapping_file, 'r', encoding='utf-8') as f:
-                    language_mapping = json.load(f)
-                debug_print(f"Loaded language mapping: {len(language_mapping)} URLs", "SUCCESS")
-            except Exception as e:
-                debug_print(f"Failed to load language mapping: {e}", "WARNING")
-            # Remove from args
-            sys.argv = sys.argv[:mapping_index+1] + sys.argv[mapping_index + 2:]
-    
-    return language_mapping
-
-def _setup_environment(language_mapping):
+def _setup_environment():
     """Setup directories and downloader."""
     debug_print("Setting up environment...")
     
-    config = Config(language_mapping=language_mapping)
+    config = Config()
     base_dir = os.path.dirname(os.path.abspath(__file__))
     final_output_dir = os.path.join(base_dir, 'final_audio_files')
     
@@ -757,7 +778,7 @@ def _setup_environment(language_mapping):
     config.output_dir = final_output_dir
     
     # Initialize downloader
-    downloader = YoutubeAudioDownloader(config, language_mapping=language_mapping)
+    downloader = YoutubeAudioDownloader(config)
     # Set batch processing flags
     downloader.disable_rate_limit = True
     
@@ -829,14 +850,13 @@ def _backfill_missing_titles(downloader, manifest_data, manifest_path):
         debug_print(f"Backfilled {updated_count} titles", "SUCCESS")
 
 def _run_single_download(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                        manifest_path, language_mapping, url, index):
+                        manifest_path, url, index):
     """Download single URL with proper directory handling."""
     debug_print(f"Processing URL {index}: {url}", "PROCESS")
     
-    # Language classification
-    language_folder = language_mapping.get(url, 'unknown')
-    language_output_dir = os.path.join(final_output_dir, language_folder)
-    os.makedirs(language_output_dir, exist_ok=True)
+    # Language classification will be done automatically by the config
+    language_output_dir = config.get_language_output_dir(url)
+    language_folder = os.path.basename(language_output_dir)
     
     debug_print(f"Language: {language_folder}")
     
@@ -892,7 +912,7 @@ def _run_single_download(downloader, config, final_output_dir, manifest_data, ma
         config.output_dir = original_config_output_dir
 
 def _process_urls_from_file(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                           manifest_path, language_mapping, urls_file):
+                           manifest_path, urls_file):
     """Process URLs from file."""
     if not os.path.exists(urls_file):
         debug_print(f"File not found: {urls_file}", "WARNING")
@@ -918,7 +938,7 @@ def _process_urls_from_file(downloader, config, final_output_dir, manifest_data,
             current_index = next_index + idx
             print(f"\n===== [{current_index}] =====")
             _run_single_download(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                               manifest_path, language_mapping, url, current_index)
+                               manifest_path, url, current_index)
         debug_print("Batch completed", "SUCCESS")
     else:
         debug_print("All URLs processed", "SUCCESS")
@@ -931,11 +951,8 @@ def main():
     """Simplified main function."""
     debug_print("Starting YouTube Audio Downloader...", "SUCCESS")
     
-    # Parse arguments
-    language_mapping = _parse_language_mapping()
-    
     # Setup
-    config, downloader, final_output_dir = _setup_environment(language_mapping)
+    config, downloader, final_output_dir = _setup_environment()
     
     # Load manifest
     manifest_path = os.path.join(final_output_dir, 'manifest.json')
@@ -946,9 +963,6 @@ def main():
     
     # Process command line
     args = sys.argv[1:]
-    if '--language-mapping' in args:
-        mapping_index = args.index('--language-mapping')
-        args = args[:mapping_index] + args[mapping_index + 2:]
     
     base_dir = os.path.dirname(os.path.abspath(__file__))
     default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
@@ -956,7 +970,7 @@ def main():
     if not args:
         # Default: process from collected URLs
         _process_urls_from_file(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                               manifest_path, language_mapping, default_urls_file)
+                               manifest_path, default_urls_file)
     elif args[0] == '--from-file' and len(args) >= 2:
         # Process from specified file
         file_path = args[1]
@@ -964,13 +978,13 @@ def main():
             debug_print("File not found", "ERROR")
             sys.exit(1)
         _process_urls_from_file(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                               manifest_path, language_mapping, file_path)
+                               manifest_path, file_path)
     else:
         # Process individual URLs
         for i, url in enumerate(args, start=1):
             print(f"\n===== [{i}] =====")
             _run_single_download(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                               manifest_path, language_mapping, url, i)
+                               manifest_path, url, i)
 
 if __name__ == "__main__":
     main()
