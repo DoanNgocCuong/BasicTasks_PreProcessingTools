@@ -158,13 +158,16 @@ def cleanup_file(file_path: Optional[Path], description: str = "temp file") -> N
 # =================================================================
 
 class Config:
-    """Simplified configuration class."""
+    """Enhanced configuration class with dual manifest support."""
     
-    def __init__(self, user_agent=None):
+    def __init__(self, user_agent=None, output_dir=None, manifest_path=None, original_manifest_path=None, enable_duplicate_check=True):
         debug_print("Initializing Config...")
         
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.output_dir = os.path.join(self.base_dir, 'youtube_audio_outputs')
+        self.output_dir = output_dir or os.path.join(self.base_dir, 'youtube_audio_outputs')
+        self.manifest_path = manifest_path
+        self.original_manifest_path = original_manifest_path
+        self.enable_duplicate_check = enable_duplicate_check
         
         # Initialize language classifier
         self.language_classifier = YouTubeLanguageClassifier()
@@ -279,8 +282,12 @@ class YoutubeAudioDownloader:
         self.youtube_api_key = None
         self.youtube_service = None
         
+        # Initialize unified manifest index for duplicate detection
+        self.unified_index = {}
+        
         self._init_youtube_api()
         self._ensure_cookies_available()
+        self._load_unified_manifest_index()
         
         debug_print("YoutubeAudioDownloader initialized", "SUCCESS")
     
@@ -339,6 +346,71 @@ class YoutubeAudioDownloader:
     def _extract_video_id(self, url):
         """Extract video ID from YouTube URL."""
         return extract_video_id(url)
+    
+    def _load_unified_manifest_index(self):
+        """Load unified index from both manifests for duplicate detection."""
+        debug_print("Loading unified manifest index for duplicate detection...")
+        
+        self.unified_index = {}
+        
+        # Load primary manifest (where we write) if specified
+        if hasattr(self.config, 'manifest_path') and self.config.manifest_path:
+            try:
+                if os.path.exists(self.config.manifest_path):
+                    debug_print(f"Loading primary manifest: {self.config.manifest_path}")
+                    primary_data = self._load_manifest(self.config.manifest_path)
+                    for record in primary_data.get('records', []):
+                        video_id = record.get('video_id')
+                        url = record.get('url')
+                        if video_id:
+                            self.unified_index[video_id] = {'source': 'primary', 'record': record}
+                        if url:
+                            self.unified_index[f"url_{url}"] = {'source': 'primary', 'record': record}
+            except Exception as e:
+                debug_print(f"Error loading primary manifest: {e}", "WARNING")
+        
+        # Load original manifest (read-only for duplicate checking) if specified
+        if hasattr(self.config, 'original_manifest_path') and self.config.original_manifest_path:
+            try:
+                if os.path.exists(self.config.original_manifest_path):
+                    debug_print(f"Loading original manifest for duplicate check: {self.config.original_manifest_path}")
+                    original_data = self._load_manifest(self.config.original_manifest_path)
+                    for record in original_data.get('records', []):
+                        video_id = record.get('video_id')
+                        url = record.get('url')
+                        # Only add if not already present (primary manifest takes precedence)
+                        if video_id and video_id not in self.unified_index:
+                            self.unified_index[video_id] = {'source': 'original', 'record': record}
+                        if url and f"url_{url}" not in self.unified_index:
+                            self.unified_index[f"url_{url}"] = {'source': 'original', 'record': record}
+            except Exception as e:
+                debug_print(f"Error loading original manifest: {e}", "WARNING")
+        
+        total_records = len([k for k in self.unified_index.keys() if not k.startswith('url_')])
+        debug_print(f"Unified index loaded: {total_records} records for duplicate detection")
+    
+    def _load_manifest(self, manifest_path):
+        """Load manifest data from file."""
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {'total_duration_seconds': 0.0, 'records': []}
+    
+    def _is_duplicate(self, video_id, url):
+        """Enhanced duplicate checking across both manifests."""
+        if not hasattr(self.config, 'enable_duplicate_check') or not self.config.enable_duplicate_check:
+            return False
+        
+        if video_id and video_id in self.unified_index:
+            source = self.unified_index[video_id]['source']
+            debug_print(f"Duplicate found by video_id {video_id} in {source} manifest", "WARNING")
+            return True
+        if url and f"url_{url}" in self.unified_index:
+            source = self.unified_index[f"url_{url}"]['source']
+            debug_print(f"Duplicate found by URL in {source} manifest", "WARNING")
+            return True
+        return False
     
     def _is_video_unavailable(self, error_message):
         """Check if error indicates unavailable video."""
@@ -868,20 +940,27 @@ def _backfill_missing_titles(downloader, manifest_data, manifest_path):
 
 def _run_single_download(downloader, config, final_output_dir, manifest_data, manifest_index, 
                         manifest_path, url, index):
-    """Download single URL with proper directory handling."""
+    """Download single URL with proper directory handling and enhanced duplicate detection."""
     debug_print(f"Processing URL {index}: {url}", "PROCESS")
+    
+    # Extract video ID for duplicate checking
+    vid = downloader._extract_video_id(url)
+    
+    # Enhanced duplicate checking using unified index
+    if downloader._is_duplicate(vid, url):
+        debug_print("Skipping duplicate URL", "WARNING")
+        return
+    
+    # Legacy duplicate check in current manifest index
+    if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
+        debug_print("Already downloaded in current manifest")
+        return
     
     # Language classification will be done automatically by the config
     language_output_dir = config.get_language_output_dir(url)
     language_folder = os.path.basename(language_output_dir)
     
     debug_print(f"Language: {language_folder}")
-    
-    # Check if already downloaded
-    vid = downloader._extract_video_id(url)
-    if vid and vid in manifest_index and manifest_index[vid].get('status') == 'success':
-        debug_print("Already downloaded")
-        return
     
     # Update directories
     original_config_output_dir = config.output_dir
@@ -918,6 +997,10 @@ def _run_single_download(downloader, config, final_output_dir, manifest_data, ma
             
             if vid:
                 manifest_index[vid] = record
+                # Update unified index with new record
+                if hasattr(downloader, 'unified_index'):
+                    downloader.unified_index[vid] = {'source': 'primary', 'record': record}
+                    downloader.unified_index[f"url_{url}"] = {'source': 'primary', 'record': record}
             manifest_data.setdefault('records', []).append(record)
             manifest_data['total_duration_seconds'] = sum(r.get('duration_seconds', 0) for r in manifest_data['records'])
             _save_manifest(manifest_path, manifest_data)

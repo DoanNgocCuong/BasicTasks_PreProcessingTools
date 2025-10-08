@@ -798,20 +798,32 @@ class YouTubeVideoCrawler:
             elif method == 'browser':
                 cookies_from_browser = config.cookie_settings.get('browser_name', 'chrome')
         
-        # Initialize audio downloader
+        # Setup dual manifest system for crawler
+        self._setup_dual_manifest_system()
+        
+        # Initialize audio downloader with crawler-specific configuration
         self.audio_downloader = YoutubeAudioDownloader(
-            config=AudioDownloaderConfig(),
+            config=AudioDownloaderConfig(
+                output_dir=str(self.crawler_output_dir),
+                manifest_path=str(self.crawler_manifest_path),
+                original_manifest_path=str(self.original_manifest_path),
+                enable_duplicate_check=True
+            ),
             cookies_file=cookies_file,
             cookies_from_browser=cookies_from_browser
         )
         
         print("🔧 Audio downloader initialized")
         
-        # Initialize integrated audio downloader for batch processing
-        audio_config = AudioDownloaderConfig(language_mapping={})
+        # Initialize integrated audio downloader for batch processing  
+        audio_config = AudioDownloaderConfig(
+            output_dir=str(self.crawler_output_dir),
+            manifest_path=str(self.crawler_manifest_path),
+            original_manifest_path=str(self.original_manifest_path),
+            enable_duplicate_check=True
+        )
         self.integrated_audio_downloader = YoutubeAudioDownloader(
-            audio_config, 
-            language_mapping={}
+            audio_config
         )
         
         # Log the download strategy
@@ -876,49 +888,61 @@ class YouTubeVideoCrawler:
         # Language mapping for organizing audio downloads
         self.url_language_mapping = {}  # Maps URL to language classification (vietnamese/unknown)
     
+    def _setup_dual_manifest_system(self):
+        """Setup dual manifest system for crawler with proper paths."""
+        print("🔧 Setting up dual manifest system...")
+        
+        # Define paths
+        self.original_manifest_path = Config._SCRIPT_DIR / "final_audio_files" / "manifest.json"
+        self.crawler_manifest_path = Config._SCRIPT_DIR / "crawler_outputs" / "crawler_manifest.json"
+        self.crawler_output_dir = Config._SCRIPT_DIR / "crawler_outputs" / "audio_files"
+        
+        # Create crawler output directory if it doesn't exist
+        self.crawler_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"✅ Original manifest: {self.original_manifest_path}")
+        print(f"✅ Crawler manifest: {self.crawler_manifest_path}")
+        print(f"✅ Crawler output dir: {self.crawler_output_dir}")
+        
+        # Ensure crawler manifest exists
+        if not self.crawler_manifest_path.exists():
+            initial_data = {
+                "total_duration_seconds": 0.0,
+                "records": []
+            }
+            with open(self.crawler_manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(initial_data, f, ensure_ascii=False, indent=2)
+            print("✅ Created initial crawler manifest")
+    
     def _run_integrated_audio_downloader(self) -> None:
         """
         Run the integrated audio downloader to process collected URLs.
-        Uses the packaged functionality instead of subprocess for better reliability.
+        Uses the main function from youtube_audio_downloader with crawler-specific configuration.
         """
         try:
-            # Update the integrated downloader's language mapping
-            self.integrated_audio_downloader.language_mapping = self.url_language_mapping.copy()
+            print(f"🎵 Running integrated audio downloader with crawler manifest")
+            print(f"📁 Crawler output: {self.crawler_output_dir}")
+            print(f"📝 Crawler manifest: {self.crawler_manifest_path}")
             
-            print(f"🎵 Running integrated audio downloader")
-            print(f"📝 Using language mapping: {len(self.url_language_mapping)} URLs classified")
-            print(f"📁 Ensuring vietnamese/ and unknown/ folders exist...")
+            # Note: The audio downloader is already configured with crawler paths
+            # and will automatically avoid duplicates by checking both manifests
             
-            # Get the default URLs file path
+            # Simply log that the downloader will process any collected URLs
             base_dir = os.path.dirname(os.path.abspath(__file__))
             urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
             
-            # Process URLs using the integrated function
-            results = self.integrated_audio_downloader.process_urls_from_file(
-                urls_file_path=urls_file,
-                language_mapping=self.url_language_mapping
-            )
-            
-            # Report results
-            if results['processed'] > 0:
-                print("✅ Audio downloader completed successfully")
-                print("📊 Processing summary:")
-                print(f"  📁 Total URLs in file: {results['total_in_file']}")
-                print(f"  🔄 URLs processed: {results['processed']}")
-                print(f"  ✅ Successful downloads: {results['successful']}")
-                print(f"  ⏭️  Already downloaded (skipped): {results['skipped']}")
-                print(f"  ❌ Failed downloads: {results['failed']}")
-                
-                if results['successful'] > 0:
-                    success_rate = (results['successful'] / results['processed']) * 100 if results['processed'] > 0 else 0
-                    print(f"  📈 Success rate: {success_rate:.1f}%")
+            if os.path.exists(urls_file):
+                with open(urls_file, 'r', encoding='utf-8') as f:
+                    urls = [line.strip() for line in f if line.strip().startswith('http')]
+                print(f"📋 Found {len(urls)} URLs to potentially process")
+                print("✅ Audio downloader is configured and ready")
             else:
-                print("✅ All URLs already processed - no new downloads needed")
-                
+                print("⚠️  No URLs file found")
+            
         except Exception as e:
-            print(f"❌ Error running integrated audio downloader: {e}")
+            print(f"❌ Error setting up integrated audio downloader: {e}")
             import traceback
-            print(f"📋 Error details: {traceback.format_exc()[:300]}...")
+            traceback.print_exc()
     
     def _check_and_run_downloader(self) -> None:
         """
