@@ -912,7 +912,8 @@ def _run_single_download(downloader, config, final_output_dir, manifest_data, ma
                 'duration_seconds': duration,
                 'title': get_video_title(url),
                 'language_folder': language_folder,
-                'download_index': index
+                'download_index': index,
+                'classified': False  # New entries need to be classified
             }
             
             if vid:

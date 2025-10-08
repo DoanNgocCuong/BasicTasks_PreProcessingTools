@@ -2677,7 +2677,8 @@ class YouTubeVideoCrawler:
     
     def _process_single_similar_video(self, similar_video: Dict, query_stats: Dict) -> bool:
         """
-        OPTIMIZED: Process a single similar video with optimized audio loading.
+        OPTIMIZED: Process a single similar video WITHOUT classification.
+        Similar videos are added directly when the main video passes classification.
         
         Args:
             similar_video (Dict): Video information
@@ -2693,11 +2694,10 @@ class YouTubeVideoCrawler:
         # Count similar video as reviewed since we're processing it
         query_stats['videos_reviewed'] += 1
         
-        # OPTIMIZED: Analyze similar video audio using combined prediction
-        print(f"Analyzing similar video: {similar_video['title']}")
-        similar_analysis_result = self.analyze_video_audio(similar_video, video_type="similar")
+        # ⭐ SIMPLIFIED: No classification for similar videos - add directly ⭐
+        print(f"Adding similar video (no classification): {similar_video['title']}")
         
-        # Store individual video analysis result for detailed reporting
+        # Store minimal video analysis result for detailed reporting
         video_analysis_record = {
             'video_url': similar_video['url'],
             'video_title': similar_video['title'],
@@ -2705,89 +2705,42 @@ class YouTubeVideoCrawler:
             'channel_id': similar_video['channel_id'],
             'video_type': 'similar',
             'query': query_stats['current_query'],
-            'is_vietnamese': similar_analysis_result.is_vietnamese,
-            'detected_language': similar_analysis_result.detected_language,
-            'has_children_voice': similar_analysis_result.has_children_voice,
-            'confidence': similar_analysis_result.confidence,
-            'total_analysis_time': similar_analysis_result.total_analysis_time,
-            'children_detection_time': similar_analysis_result.children_detection_time,
-            'video_length_seconds': similar_analysis_result.video_length_seconds,
-            'was_collected': False,  # Will be updated later if collected
-            'analysis_error': similar_analysis_result.error,
-            'timestamp': datetime.now().isoformat()
+            'is_vietnamese': None,  # Not classified
+            'detected_language': None,  # Not classified
+            'has_children_voice': None,  # Not classified - assumed true
+            'confidence': None,  # Not classified
+            'total_analysis_time': 0.0,  # No analysis performed
+            'children_detection_time': 0.0,  # No analysis performed
+            'video_length_seconds': None,  # Not analyzed
+            'was_collected': True,  # Always collected for similar videos
+            'analysis_error': None,
+            'timestamp': datetime.now().isoformat(),
+            'classification_skipped': True  # Flag to indicate classification was skipped
         }
         self.video_analysis_results.append(video_analysis_record)
         
-        # Check language result first (only if language detection is enabled)
-        if self.config.enable_language_detection:
-            if not similar_analysis_result.is_vietnamese:
-                print("✗ Similar video is not in Vietnamese - Skipping")
-                query_stats['videos_not_vietnamese'] += 1
-                self.total_videos_not_vietnamese += 1
-                self.reporter.report_similar_video_language_result(False)
-                return False
-            else:
-                print("✓ Similar video is in Vietnamese - Proceeding to evaluate")
-                query_stats['videos_vietnamese'] += 1
-                self.total_videos_vietnamese += 1
-                self.reporter.report_similar_video_language_result(True)
-        else:
-            # Language detection disabled - assume all videos are Vietnamese
-            print("⚠️  Language detection disabled - assuming similar video is Vietnamese")
-            query_stats['videos_vietnamese'] += 1
-            self.total_videos_vietnamese += 1
-            self.reporter.report_similar_video_language_result(True)
+        # ⭐ Direct addition to results (no classification required) ⭐
+        query_stats['videos_with_children_voice'] += 1  # Assumed based on main video
+        self.total_videos_with_children_voice += 1
         
-        # Process children's voice detection result
-        print(f"Evaluating similar video: {similar_video['title']}")
-        self.reporter.report_similar_video_evaluation(similar_video['title'])
-        similar_evaluation_result = similar_analysis_result.has_children_voice
-        query_stats['videos_evaluated'] += 1
-        self.total_videos_evaluated += 1
+        # Thread-safe adding to results
+        self.total_video_urls.append(similar_video['url'])
+        self.collected_url_set.add(similar_video['url'])
+        self.current_session_collected_count += 1
+        self.current_session_collected_urls.append(similar_video['url'])
+        self._save_url_to_file(similar_video, Config.DEFAULT_URLS_FILE)
+        query_stats['videos_collected'] += 1
         
-        if similar_evaluation_result:
-            query_stats['videos_with_children_voice'] += 1
-            self.total_videos_with_children_voice += 1
-            
-            # Thread-safe adding to results
-            self.total_video_urls.append(similar_video['url'])
-            self.collected_url_set.add(similar_video['url'])
-            self.current_session_collected_count += 1
-            self.current_session_collected_urls.append(similar_video['url'])
-            self._save_url_to_file(similar_video, Config.DEFAULT_URLS_FILE)
-            query_stats['videos_collected'] += 1
-            
-            # Track language classification for audio downloader
-            # Get the analysis result from the video_analysis_results
-            similar_analysis_result = None
-            for result in reversed(self.video_analysis_results):
-                if result['video_url'] == similar_video['url']:
-                    similar_analysis_result = result
-                    break
-            
-            if similar_analysis_result:
-                language_folder = 'vietnamese' if similar_analysis_result['is_vietnamese'] else 'unknown'
-                self.url_language_mapping[similar_video['url']] = language_folder
-            else:
-                # Fallback to unknown if no analysis result found
-                self.url_language_mapping[similar_video['url']] = 'unknown'
-            
-            # Check if we should run audio downloader script
-            self._check_and_run_downloader()
-            print("✓ Video has children's voice - Added to results")
-            self.reporter.report_similar_video_result(True)
-            
-            # Mark video as collected in analysis results
-            for result in reversed(self.video_analysis_results):
-                if result['video_url'] == similar_video['url']:
-                    result['was_collected'] = True
-                    break
-            
-            return True
-        else:
-            print("✗ Video has no children's voice - Skipped")
-            self.reporter.report_similar_video_result(False)
-            return False
+        # Track language classification for audio downloader (assume same as main video)
+        # Since we're not running language detection, assume Vietnamese for similar videos
+        self.url_language_mapping[similar_video['url']] = 'vietnamese'
+        
+        # Check if we should run audio downloader script
+        self._check_and_run_downloader()
+        print("✓ Similar video added directly (classification will be done later)")
+        self.reporter.report_similar_video_result(True)
+        
+        return True
     
     def _create_query_statistics(self, query: str, query_stats: Dict) -> QueryStatistics:
         """Create QueryStatistics object from query statistics dictionary."""
