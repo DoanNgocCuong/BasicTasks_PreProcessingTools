@@ -169,6 +169,9 @@ class Config:
         # Initialize language classifier
         self.language_classifier = YouTubeLanguageClassifier()
         
+        # Cache for language detection results
+        self._language_cache = {}
+        
         # Load user agent settings
         default_user_agent = user_agent or self._load_user_agent() or DEFAULT_USER_AGENT
         
@@ -205,32 +208,40 @@ class Config:
     
     def get_language_output_dir(self, url):
         """Get language-specific output directory using transcript-based detection."""
-        try:
-            # Use language classifier to detect language
-            detection_result = self.language_classifier.detect_language_from_url(url)
-            
-            if detection_result['error']:
-                debug_print(f"Language detection failed for {url}: {detection_result['error']}", "WARNING")
-                language_folder = 'unknown'
-            else:
-                detected_lang = detection_result['detected_language']
-                # Map common language codes to folder names
-                language_mapping = {
-                    'vi': 'vietnamese',
-                    'en': 'english', 
-                    'zh': 'chinese',
-                    'es': 'spanish',
-                    'fr': 'french',
-                    'de': 'german',
-                    'ja': 'japanese',
-                    'ko': 'korean'
-                }
-                language_folder = language_mapping.get(detected_lang, detected_lang or 'unknown')
-                debug_print(f"Detected language for {url}: {detected_lang} -> {language_folder}")
+        # Check cache first
+        if url in self._language_cache:
+            language_folder = self._language_cache[url]
+            debug_print(f"Using cached language for {url}: {language_folder}")
+        else:
+            try:
+                # Use language classifier to detect language
+                detection_result = self.language_classifier.detect_language_from_url(url)
                 
-        except Exception as e:
-            debug_print(f"Language detection error for {url}: {e}", "ERROR")
-            language_folder = 'unknown'
+                if detection_result['error']:
+                    debug_print(f"Language detection failed for {url}: {detection_result['error']}", "WARNING")
+                    language_folder = 'unknown'
+                else:
+                    detected_lang = detection_result['detected_language']
+                    # Map common language codes to folder names
+                    language_mapping = {
+                        'vi': 'vietnamese',
+                        'en': 'english', 
+                        'zh': 'chinese',
+                        'es': 'spanish',
+                        'fr': 'french',
+                        'de': 'german',
+                        'ja': 'japanese',
+                        'ko': 'korean'
+                    }
+                    language_folder = language_mapping.get(detected_lang, detected_lang or 'unknown')
+                    debug_print(f"Detected language for {url}: {detected_lang} -> {language_folder}")
+                    
+            except Exception as e:
+                debug_print(f"Language detection error for {url}: {e}", "ERROR")
+                language_folder = 'unknown'
+            
+            # Cache the result
+            self._language_cache[url] = language_folder
             
         language_dir = os.path.join(self.output_dir, language_folder)
         os.makedirs(language_dir, exist_ok=True)
@@ -462,8 +473,14 @@ class YoutubeAudioDownloader:
                 info = ydl.extract_info(url, download=False)
             if info:
                 print(f"🔧 [DEBUG] Retrieved metadata via yt-dlp")
+                duration_value = info.get('duration', 0)
+                try:
+                    duration = float(duration_value) if duration_value is not None else 0.0
+                except (ValueError, TypeError):
+                    duration = 0.0
+                
                 return {
-                    'duration': float(info.get('duration')) if info.get('duration') else None,
+                    'duration': duration,
                     'title': info.get('title', ''),
                     'uploader': info.get('uploader', ''),
                     'upload_date': info.get('upload_date', ''),
@@ -949,42 +966,49 @@ def _process_urls_from_file(downloader, config, final_output_dir, manifest_data,
 
 def main():
     """Simplified main function."""
-    debug_print("Starting YouTube Audio Downloader...", "SUCCESS")
-    
-    # Setup
-    config, downloader, final_output_dir = _setup_environment()
-    
-    # Load manifest
-    manifest_path = os.path.join(final_output_dir, 'manifest.json')
-    manifest_data, manifest_index = _load_manifest(manifest_path)
-    
-    # Backfill titles
-    _backfill_missing_titles(downloader, manifest_data, manifest_path)
-    
-    # Process command line
-    args = sys.argv[1:]
-    
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
-    
-    if not args:
-        # Default: process from collected URLs
-        _process_urls_from_file(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                               manifest_path, default_urls_file)
-    elif args[0] == '--from-file' and len(args) >= 2:
-        # Process from specified file
-        file_path = args[1]
-        if not os.path.exists(file_path):
-            debug_print("File not found", "ERROR")
-            sys.exit(1)
-        _process_urls_from_file(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                               manifest_path, file_path)
-    else:
-        # Process individual URLs
-        for i, url in enumerate(args, start=1):
-            print(f"\n===== [{i}] =====")
-            _run_single_download(downloader, config, final_output_dir, manifest_data, manifest_index, 
-                               manifest_path, url, i)
+    try:
+        debug_print("Starting YouTube Audio Downloader...", "SUCCESS")
+        
+        # Setup
+        config, downloader, final_output_dir = _setup_environment()
+        
+        # Load manifest
+        manifest_path = os.path.join(final_output_dir, 'manifest.json')
+        manifest_data, manifest_index = _load_manifest(manifest_path)
+        
+        # Backfill titles
+        _backfill_missing_titles(downloader, manifest_data, manifest_path)
+        
+        # Process command line
+        args = sys.argv[1:]
+        
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        default_urls_file = os.path.join(base_dir, 'youtube_url_outputs', 'collected_video_urls.txt')
+        
+        if not args:
+            # Default: process from collected URLs
+            _process_urls_from_file(downloader, config, final_output_dir, manifest_data, manifest_index, 
+                                   manifest_path, default_urls_file)
+        elif args[0] == '--from-file' and len(args) >= 2:
+            # Process from specified file
+            file_path = args[1]
+            if not os.path.exists(file_path):
+                debug_print("File not found", "ERROR")
+                sys.exit(1)
+            _process_urls_from_file(downloader, config, final_output_dir, manifest_data, manifest_index, 
+                                   manifest_path, file_path)
+        else:
+            # Process individual URLs
+            for i, url in enumerate(args, start=1):
+                print(f"\n===== [{i}] =====")
+                _run_single_download(downloader, config, final_output_dir, manifest_data, manifest_index, 
+                                   manifest_path, url, i)
+    except KeyboardInterrupt:
+        debug_print("Download interrupted by user", "WARNING")
+        sys.exit(1)
+    except Exception as e:
+        debug_print(f"Fatal error: {e}", "ERROR")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
