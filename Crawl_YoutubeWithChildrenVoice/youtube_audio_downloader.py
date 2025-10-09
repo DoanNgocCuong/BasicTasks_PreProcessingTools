@@ -165,6 +165,10 @@ class Config:
         
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.output_dir = output_dir or os.path.join(self.base_dir, 'youtube_audio_outputs')
+        
+        # Store the base output directory to prevent nested language folders
+        self.base_output_dir = self.output_dir
+        
         self.manifest_path = manifest_path
         self.original_manifest_path = original_manifest_path
         self.enable_duplicate_check = enable_duplicate_check
@@ -246,7 +250,10 @@ class Config:
             # Cache the result
             self._language_cache[url] = language_folder
             
-        language_dir = os.path.join(self.output_dir, language_folder)
+        # Always use the base output directory for language folder creation
+        # This prevents nested language folders when config.output_dir is already set to a language folder
+        base_output_dir = getattr(self, 'base_output_dir', self.output_dir)
+        language_dir = os.path.join(base_output_dir, language_folder)
         os.makedirs(language_dir, exist_ok=True)
         return language_dir
     
@@ -865,6 +872,8 @@ def _setup_environment():
         os.makedirs(os.path.join(final_output_dir, lang_folder), exist_ok=True)
     
     config.output_dir = final_output_dir
+    # Ensure base_output_dir is set to prevent nested language folders
+    config.base_output_dir = final_output_dir
     
     # Initialize downloader
     downloader = YoutubeAudioDownloader(config)
