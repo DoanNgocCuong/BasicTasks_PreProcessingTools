@@ -14,35 +14,16 @@ import sys
 from typing import Optional, Dict, Any
 from youtube_transcript_api import YouTubeTranscriptApi
 
+# Import utilities
+from utils.url_utils import extract_video_id
+
 
 class YouTubeLanguageClassifier:
     """YouTube language classifier using auto-generated transcripts."""
     
     def __init__(self):
         """Initialize the YouTube language classifier."""
-        # YouTube URL patterns for video ID extraction
-        self.url_patterns = [
-            re.compile(r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]+)'),
-            re.compile(r'youtube\.com/v/([a-zA-Z0-9_-]+)'),
-            re.compile(r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]+)')
-        ]
-    
-    def extract_video_id(self, url: str) -> Optional[str]:
-        """
-        Extract video ID from YouTube URL.
-        
-        Args:
-            url (str): YouTube URL
-            
-        Returns:
-            Optional[str]: Video ID or None if not found
-        """
-        url = url.strip()
-        for pattern in self.url_patterns:
-            match = pattern.search(url)
-            if match:
-                return match.group(1)
-        return None
+        # Note: URL patterns are now handled by the shared utils.url_utils.extract_video_id function
     
     def get_auto_generated_language(self, video_id: str) -> Optional[str]:
         """
@@ -76,10 +57,10 @@ class YouTubeLanguageClassifier:
             youtube_url (str): YouTube video URL
             
         Returns:
-            Dict[str, Any]: Language detection result with metadata
+            Dict[str, Any]: Language detection result
         """
         # Extract video ID from URL
-        video_id = self.extract_video_id(youtube_url)
+        video_id = extract_video_id(youtube_url)
         if not video_id:
             return {
                 'detected_language': None,

@@ -29,6 +29,13 @@ import yt_dlp
 # Import language classifier
 from youtube_language_classifier import YouTubeLanguageClassifier
 
+# Import utilities  
+from utils.debug_utils import debug_print
+from utils.url_utils import extract_video_id
+
+# Import configuration management
+from config.downloader_config import AudioDownloaderConfig
+
 # PyTube imports with fallback
 try:
     from pytubefix import YouTube  # type: ignore
@@ -68,31 +75,6 @@ BOT_DETECTION_PATTERNS = [
 # =================================================================
 # UTILITY FUNCTIONS
 # =================================================================
-
-def debug_print(message: str, level: str = "DEBUG"):
-    """Centralized debug printing with consistent formatting."""
-    emoji_map = {
-        "DEBUG": "🔧",
-        "SUCCESS": "✅", 
-        "ERROR": "❌",
-        "WARNING": "⚠️",
-        "INFO": "📋",
-        "PROCESS": "🎯"
-    }
-    emoji = emoji_map.get(level, "📝")
-    print(f"{emoji} [DEBUG] {message}")
-
-def extract_video_id(url: str) -> Optional[str]:
-    """Extract YouTube video ID from URL."""
-    try:
-        parsed = urlparse(url)
-        if 'youtube.com' in parsed.netloc:
-            return parse_qs(parsed.query).get('v', [None])[0]
-        elif 'youtu.be' in parsed.netloc:
-            return parsed.path[1:]
-    except Exception:
-        pass
-    return None
 
 def get_video_title(url: str) -> Optional[str]:
     """Get video title using available methods."""
@@ -154,118 +136,11 @@ def cleanup_file(file_path: Optional[Path], description: str = "temp file") -> N
         debug_print(f"Could not clean up {description}: {e}", "WARNING")
 
 # =================================================================
-# CONFIGURATION CLASS
+# CONFIGURATION ALIAS
 # =================================================================
 
-class Config:
-    """Enhanced configuration class with dual manifest support."""
-    
-    def __init__(self, user_agent=None, output_dir=None, manifest_path=None, original_manifest_path=None, enable_duplicate_check=True):
-        debug_print("Initializing Config...")
-        
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.output_dir = output_dir or os.path.join(self.base_dir, 'youtube_audio_outputs')
-        
-        # Store the base output directory to prevent nested language folders
-        self.base_output_dir = self.output_dir
-        
-        self.manifest_path = manifest_path
-        self.original_manifest_path = original_manifest_path
-        self.enable_duplicate_check = enable_duplicate_check
-        
-        # Initialize language classifier
-        self.language_classifier = YouTubeLanguageClassifier()
-        
-        # Cache for language detection results
-        self._language_cache = {}
-        
-        # Load user agent settings
-        default_user_agent = user_agent or self._load_user_agent() or DEFAULT_USER_AGENT
-        
-        # Basic yt-dlp options
-        self.ydl_opts = {
-            'format': 'bestaudio/best',
-            'user_agent': default_user_agent,
-            'sleep_interval': DEFAULT_SLEEP_INTERVAL,
-            'max_sleep_interval': DEFAULT_MAX_SLEEP_INTERVAL,
-            'retries': DEFAULT_RETRIES,
-            'fragment_retries': DEFAULT_RETRIES,
-            'geo_bypass': True,
-            'extractor_retries': DEFAULT_RETRIES,
-        }
-        
-        os.makedirs(self.output_dir, exist_ok=True)
-        debug_print(f"Config initialized: {self.output_dir}", "SUCCESS")
-    
-    def _load_user_agent(self):
-        """Load user agent from crawler config."""
-        try:
-            config_file = os.path.join(self.base_dir, 'crawler_config.json')
-            if os.path.exists(config_file):
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    config_data = json.load(f)
-                    return config_data.get('user_agent_settings', {}).get('default_user_agent')
-        except Exception as e:
-            debug_print(f"Error loading user agent: {e}", "WARNING")
-        return None
-    
-    def get_output_path(self, filename):
-        """Get full path for output file."""
-        return os.path.join(self.output_dir, filename)
-    
-    def get_language_output_dir(self, url):
-        """Get language-specific output directory using transcript-based detection."""
-        # Check cache first
-        if url in self._language_cache:
-            language_folder = self._language_cache[url]
-            debug_print(f"Using cached language for {url}: {language_folder}")
-        else:
-            try:
-                # Use language classifier to detect language
-                detection_result = self.language_classifier.detect_language_from_url(url)
-                
-                if detection_result['error']:
-                    debug_print(f"Language detection failed for {url}: {detection_result['error']}", "WARNING")
-                    language_folder = 'unknown'
-                else:
-                    detected_lang = detection_result['detected_language']
-                    # Map common language codes to folder names
-                    language_mapping = {
-                        'vi': 'vietnamese',
-                        'en': 'english', 
-                        'zh': 'chinese',
-                        'es': 'spanish',
-                        'fr': 'french',
-                        'de': 'german',
-                        'ja': 'japanese',
-                        'ko': 'korean'
-                    }
-                    language_folder = language_mapping.get(detected_lang, detected_lang or 'unknown')
-                    debug_print(f"Detected language for {url}: {detected_lang} -> {language_folder}")
-                    
-            except Exception as e:
-                debug_print(f"Language detection error for {url}: {e}", "ERROR")
-                language_folder = 'unknown'
-            
-            # Cache the result
-            self._language_cache[url] = language_folder
-            
-        # Always use the base output directory for language folder creation
-        # This prevents nested language folders when config.output_dir is already set to a language folder
-        base_output_dir = getattr(self, 'base_output_dir', self.output_dir)
-        language_dir = os.path.join(base_output_dir, language_folder)
-        os.makedirs(language_dir, exist_ok=True)
-        return language_dir
-    
-    def get_m4a_filename(self, index):
-        """Get M4A filename."""
-        custom_base = getattr(self, '_current_basename', None)
-        return f'{custom_base}.m4a' if custom_base else f'output_{index}.m4a'
-    
-    def get_wav_filename(self, index):
-        """Get WAV filename."""
-        custom_base = getattr(self, '_current_basename', None)
-        return f'{custom_base}.wav' if custom_base else f'output_{index}.wav'
+# Use the centralized configuration system
+Config = AudioDownloaderConfig
 
 # =================================================================
 # MAIN DOWNLOADER CLASS

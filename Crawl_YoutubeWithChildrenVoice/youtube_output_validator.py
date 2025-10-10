@@ -23,35 +23,11 @@ from typing import List, Dict, Set, Tuple, Optional, Any
 from collections import Counter
 from dataclasses import dataclass
 
+# Import models from the new models package
+from models.validation_models import DuplicateInfo, ValidationResult, ClassificationResult
 
-@dataclass
-class DuplicateInfo:
-    """Data class for duplicate URL information."""
-    url: str
-    normalized_url: str
-    positions: List[int]  # Line positions (0-based) where this URL appears
-    count: int
-
-@dataclass
-class ValidationResult:
-    """Data class for validation results."""
-    total_urls: int
-    unique_urls: int
-    duplicate_count: int
-    invalid_urls: int
-    duplicates: Dict[str, int]  # Kept for backward compatibility
-    invalid_url_list: List[str]
-    valid_urls: Set[str]
-    duplicate_urls: List[DuplicateInfo]  # Detailed duplicate information with positions
-
-@dataclass
-class ClassificationResult:
-    """Data class for audio classification results."""
-    audio_path: str
-    is_children: bool
-    confidence: float
-    error: Optional[str] = None
-    processing_time: float = 0.0
+# Import utilities
+from utils.url_utils import extract_video_id, normalize_youtube_url
 
 
 class Config:
@@ -91,22 +67,6 @@ class YouTubeURLValidator:
         # Ensure output directory exists
         self.config.default_output_dir.mkdir(parents=True, exist_ok=True)
     
-    def extract_video_id(self, url: str) -> str:
-        """
-        Extract video ID from YouTube URL.
-        
-        Args:
-            url (str): YouTube URL
-            
-        Returns:
-            str: Video ID or empty string if not found
-        """
-        for pattern in self.config.compiled_patterns:
-            match = pattern.search(url.strip())
-            if match:
-                return match.group(1)
-        return ""
-    
     def is_valid_youtube_url(self, url: str) -> bool:
         """
         Check if URL is a valid YouTube video URL.
@@ -133,7 +93,7 @@ class YouTubeURLValidator:
         Returns:
             str: Normalized URL or original if invalid
         """
-        video_id = self.extract_video_id(url)
+        video_id = extract_video_id(url)
         if video_id:
             return f"https://www.youtube.com/watch?v={video_id}"
         return url.strip()
@@ -241,7 +201,7 @@ class YouTubeURLValidator:
         if result.duplicate_count > 0:
             print(f"\n🔄 DUPLICATES FOUND:")
             for url, count in result.duplicates.items():
-                video_id = self.extract_video_id(url)
+                video_id = extract_video_id(url)
                 print(f"   • {video_id} (appears {count} times)")
                 print(f"     URL: {url}")
         else:
@@ -278,7 +238,7 @@ class YouTubeURLValidator:
                 f.write("DUPLICATE URLs:\n")
                 f.write("-" * 30 + "\n")
                 for url, count in result.duplicates.items():
-                    video_id = self.extract_video_id(url)
+                    video_id = extract_video_id(url)
                     f.write(f"Video ID: {video_id}\n")
                     f.write(f"URL: {url}\n")
                     f.write(f"Occurrences: {count}\n")

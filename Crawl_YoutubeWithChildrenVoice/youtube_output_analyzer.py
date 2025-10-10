@@ -17,6 +17,9 @@ from datetime import datetime
 from typing import List, Dict, Optional, Union, Any
 from dataclasses import dataclass
 
+# Import models from the new models package  
+from models.analytics_models import QueryStatistics
+
 
 class NumpyJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles numpy types."""
@@ -49,22 +52,6 @@ def sanitize_for_json(obj: Any) -> Any:
         return obj.item()
     else:
         return obj
-
-
-@dataclass
-class QueryStatistics:
-    """Data class for query statistics."""
-    query: str
-    videos_collected: int
-    videos_reviewed: int
-    videos_evaluated: int
-    videos_with_children_voice: int
-    videos_vietnamese: int
-    videos_not_vietnamese: int
-    efficiency_rate: float
-    children_voice_rate: float
-    vietnamese_rate: float
-    new_channels_found: int
 
 
 class YouTubeOutputAnalyzer:

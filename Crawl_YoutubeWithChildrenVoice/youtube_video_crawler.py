@@ -30,9 +30,16 @@ import soundfile as sf
 import tempfile
 from youtube_audio_downloader import YoutubeAudioDownloader, Config as AudioDownloaderConfig
 from youtube_audio_classifier import AudioClassifier
-from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
+from youtube_output_analyzer import YouTubeOutputAnalyzer
 from youtube_output_validator import YouTubeURLValidator
 from env_config import config
+
+# Import models from the new models package
+from models.crawler_models import CrawlerConfig, AnalysisResult
+from models.analytics_models import QueryStatistics
+
+# Import configuration management
+from config.crawler_config import CrawlerConstants
 
 # Set CUDA memory optimization environment variables
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
@@ -43,61 +50,14 @@ if torch.cuda.is_available():
     torch.backends.cudnn.allow_tf32 = True
 
 
-class Config:
-    """Configuration constants for the YouTube video crawler."""
-    
-    # API and URL constants
-    YOUTUBE_API_BASE_URL = "https://www.googleapis.com/youtube/v3"
-    YOUTUBE_VIDEO_URL_PREFIX = "https://www.youtube.com/watch?v="
-    MAX_RESULTS_PER_REQUEST = 50
-    
-    # File paths
-    _SCRIPT_DIR = Path(__file__).parent
-    DEFAULT_OUTPUT_DIR = _SCRIPT_DIR / "youtube_url_outputs"
-    DEFAULT_CONFIG_FILE = str(_SCRIPT_DIR / "crawler_config.json")
-    DEFAULT_URLS_FILE = str(DEFAULT_OUTPUT_DIR / "collected_video_urls.txt")
-    DEFAULT_REPORT_FILE = str(DEFAULT_OUTPUT_DIR / "collection_report.txt")
-    DEFAULT_DETAILED_RESULTS_FILE = str(DEFAULT_OUTPUT_DIR / "detailed_collection_results.json")
-    DEFAULT_STATISTICS_FILE = str(DEFAULT_OUTPUT_DIR / "query_efficiency_statistics.json")
-    DEFAULT_MAIN_URLS_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_collected_video_urls.txt")
-    DEFAULT_MAIN_DETAILED_FILE = str(DEFAULT_OUTPUT_DIR / "multi_query_detailed_results.json")
-    DEFAULT_BACKUP_FILE_PREFIX = str(DEFAULT_OUTPUT_DIR / "backup")
-
-    # Validation constants
-    MIN_TARGET_COUNT = 1
-    MAX_RECOMMENDED_PER_QUERY = 100
-    
-    # Default values
-    DEBUG_PREFIX = "🔍 DEBUG: "
-    DEFAULT_QUERY = "bé giới thiệu bản thân"
-    
-    # Common message patterns
-    CHUNK_ANALYSIS_TIME_ESTIMATE = 20  # seconds per chunk
-    MAX_CONSECUTIVE_NO_CHILDREN = 3
-
-
-@dataclass
-class CrawlerConfig:
-    """Data class for crawler configuration loaded from JSON file."""
-    debug_mode: bool
-    target_videos_per_query: int
-    search_queries: List[str]
-    max_recommended_per_query: int = 100
-    min_target_count: int = 1
-    download_method: str = "api_assisted"
-    yt_dlp_primary: bool = True
-    cookie_settings: Optional[Dict[str, Any]] = None
-    enable_language_detection: bool = True
-    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
-
-
 class ConfigLoader:
     """Loads configuration from JSON file instead of user input."""
     
     def __init__(self, output_manager: "OutputManager", config_file_path: Optional[str] = None):
         """Initialize with output manager and optional config file path."""
         self.output = output_manager
-        self.config_file_path = config_file_path or Config.DEFAULT_CONFIG_FILE
+        self.constants = CrawlerConstants()
+        self.config_file_path = config_file_path or self.constants.DEFAULT_CONFIG_FILE
     
     def load_config(self) -> CrawlerConfig:
         """
@@ -220,19 +180,6 @@ class ConfigLoader:
         self.output.print_section_divider()
 
 
-@dataclass
-class AnalysisResult:
-    """Data class for audio analysis results."""
-    is_vietnamese: bool
-    detected_language: str
-    has_children_voice: Optional[bool]
-    confidence: float
-    error: Optional[str]
-    total_analysis_time: Optional[float] = None
-    children_detection_time: Optional[float] = None
-    video_length_seconds: Optional[float] = None
-    chunks_analyzed: Optional[int] = None
-    positive_chunk_index: Optional[int] = None
     was_chunked: bool = False
 
 
@@ -593,6 +540,7 @@ class UserInputManager:
     def __init__(self, output_manager: OutputManager):
         """Initialize with output manager."""
         self.output = output_manager
+        self.constants = CrawlerConstants()
     
     def get_debug_mode_preference(self) -> bool:
         """Get user preference for debug mode."""
@@ -616,10 +564,10 @@ class UserInputManager:
         while True:
             try:
                 count = int(input("Enter the target number of videos to collect per query (recommended: 10-50): "))
-                if count <= Config.MIN_TARGET_COUNT - 1:
+                if count <= self.constants.MIN_TARGET_COUNT - 1:
                     self.output.print_error("Please enter a positive number")
                     continue
-                if count > Config.MAX_RECOMMENDED_PER_QUERY:
+                if count > self.constants.MAX_RECOMMENDED_PER_QUERY:
                     confirm = input(f"⚠️  {count} videos per query is quite high. Continue? (y/n): ").strip().lower()
                     if confirm not in ['y', 'yes']:
                         continue
@@ -655,7 +603,7 @@ class UserInputManager:
         
         if not query_list:
             self.output.print_warning("No queries provided. Using default query.")
-            query_list = [Config.DEFAULT_QUERY]
+            query_list = [self.constants.DEFAULT_QUERY]
         
         return query_list
 
@@ -671,7 +619,8 @@ class DebugLogger:
             enabled (bool): Whether debug logging is enabled
         """
         self.enabled = enabled
-        self.debug_prefix = Config.DEBUG_PREFIX
+        self.constants = CrawlerConstants()
+        self.debug_prefix = self.constants.DEBUG_PREFIX
     
     def log(self, message: str) -> None:
         """Log a debug message if debug mode is enabled."""
@@ -757,13 +706,14 @@ class YouTubeVideoCrawler:
             config = config_loader.load_config()
         
         self.config = config
-        self.analyzer = YouTubeOutputAnalyzer(Config.DEFAULT_OUTPUT_DIR)
+        self.constants = CrawlerConstants()
+        self.analyzer = YouTubeOutputAnalyzer(self.constants.output_dir)
         
         self.debug = DebugLogger(enabled=config.debug_mode)
         self.api_keys = self._get_api_keys()
         self.current_api_key_index = 0
         self.api_key = self.api_keys[0] if self.api_keys else None
-        self.base_url = Config.YOUTUBE_API_BASE_URL
+        self.base_url = self.constants.YOUTUBE_API_BASE_URL
         
         from env_config import config as env_config
         self.max_workers = env_config.MAX_WORKERS
@@ -879,9 +829,9 @@ class YouTubeVideoCrawler:
         print("🔧 Setting up dual manifest system...")
         
         # Define paths
-        self.original_manifest_path = Config._SCRIPT_DIR / "final_audio_files" / "manifest.json"
-        self.crawler_manifest_path = Config._SCRIPT_DIR / "crawler_outputs" / "crawler_manifest.json"
-        self.crawler_output_dir = Config._SCRIPT_DIR / "crawler_outputs" / "audio_files"
+        self.original_manifest_path = self.constants.base_dir / "final_audio_files" / "manifest.json"
+        self.crawler_manifest_path = self.constants.base_dir / "crawler_outputs" / "crawler_manifest.json"
+        self.crawler_output_dir = self.constants.base_dir / "crawler_outputs" / "audio_files"
         
         # Create crawler output directory if it doesn't exist
         self.crawler_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1203,7 +1153,7 @@ class YouTubeVideoCrawler:
     
     def _load_existing_urls(self) -> None:
         """Load existing URLs from file to prevent duplicates."""
-        filename = Config.DEFAULT_URLS_FILE
+        filename = self.constants.DEFAULT_URLS_FILE
         if Path(filename).exists():
             try:
                 with Path(filename).open('r', encoding='utf-8') as f:
@@ -2232,7 +2182,7 @@ class YouTubeVideoCrawler:
             'part': 'snippet',
             'q': query,
             'type': 'video',
-            'maxResults': min(max_results, Config.MAX_RESULTS_PER_REQUEST),  # YouTube API max is 50 per request
+            'maxResults': min(max_results, self.constants.MAX_RESULTS_PER_REQUEST),  # YouTube API max is 50 per request
             'key': self.api_key
         }
         
@@ -2288,7 +2238,7 @@ class YouTubeVideoCrawler:
             'channel_title': snippet.get('channelTitle', ''),
             'description': snippet.get('description', ''),
             'published_at': snippet.get('publishedAt', ''),
-            'url': f"{Config.YOUTUBE_VIDEO_URL_PREFIX}{video_id}"
+            'url': f"{self.constants.YOUTUBE_VIDEO_URL_PREFIX}{video_id}"
         }
     
     def get_channel_videos(self, channel_id: str, query: str = "", max_results: int = 50) -> List[Dict]:
@@ -2312,7 +2262,7 @@ class YouTubeVideoCrawler:
             'part': 'snippet',
             'channelId': channel_id,
             'type': 'video',
-            'maxResults': min(max_results, Config.MAX_RESULTS_PER_REQUEST),
+            'maxResults': min(max_results, self.constants.MAX_RESULTS_PER_REQUEST),
             'key': self.api_key
         }
         
@@ -2905,13 +2855,16 @@ class YouTubeVideoCrawler:
         # Channel tracking removed - return 0
         return 0
     
-    def save_results(self, filename: str = Config.DEFAULT_URLS_FILE) -> None:
+    def save_results(self, filename: str = None) -> None:
         """
         Save collected video URLs to a file
         
         Args:
-            filename (str): Output filename
+            filename (str, optional): Output filename. Defaults to DEFAULT_URLS_FILE.
         """
+        if filename is None:
+            filename = self.constants.DEFAULT_URLS_FILE
+        
         filepath = Path(filename)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         
