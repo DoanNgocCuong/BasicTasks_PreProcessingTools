@@ -1,0 +1,17 @@
+{
+  "total_duration_seconds": 60.5,
+  "records": [
+    {
+      "video_id": "TEST123456789",
+      "url": "https://www.youtube.com/watch?v=TEST123456789",
+      "output_path": "D:\\code\\BasicTasks_PreProcessingTools\\Crawl_YoutubeWithChildrenVoice\\crawler_outputs\\audio_files\\test_audio_20250101_0001_TEST123456789.wav",
+      "status": "success",
+      "timestamp": "2025-10-08T22:53:32.927101",
+      "duration_seconds": 60.5,
+      "title": "Test Video for Dual Manifest System",
+      "language_folder": "vietnamese",
+      "download_index": 1,
+      "classified": false
+    }
+  ]
+}
