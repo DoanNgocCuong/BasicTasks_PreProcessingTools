@@ -7,6 +7,9 @@ managing the manifest accordingly and supporting concurrent execution.
 
 Features:
     - Processes audio files using paths from manifest.json
+    - Uses chunked audio analysis (like the crawler) for efficiency
+    - Analyzes only the first 3 chunks with early exit on positive detection
+    - Uses chunk duration from MAX_AUDIO_DURATION_SECONDS in .env config
     - Uses AudioClassifier for children's voice detection
     - Removes files without children's voices and updates manifest
     - Marks processed files to avoid reprocessing
@@ -14,7 +17,7 @@ Features:
     - Handles missing files and error cases gracefully
 
 Author: Generated for YouTube Audio Crawler
-Version: 1.0
+Version: 2.0 - Added chunked processing
 """
 
 import json
@@ -22,14 +25,20 @@ import logging
 import os
 import threading
 import time
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import shutil
 
-# Import the existing AudioClassifier
+# Audio processing imports
+import librosa
+import soundfile as sf
+
+# Import the existing AudioClassifier and env config
 from youtube_audio_classifier import AudioClassifier
+from env_config import config
 
 
 # Configure logging
@@ -48,6 +57,9 @@ class ProcessingResult:
     action_taken: str  # "kept", "deleted", "error", "skipped", "file_not_found"
     error_message: Optional[str]
     processing_time: float
+    chunks_analyzed: Optional[int] = None
+    positive_chunk_index: Optional[int] = None
+    was_chunked: bool = False
 
 
 @dataclass
@@ -82,6 +94,209 @@ class YouTubeOutputFilterer:
             raise FileNotFoundError(f"Manifest file not found: {self.manifest_path}")
         
         logger.info(f"Initialized YouTubeOutputFilterer with manifest: {self.manifest_path}")
+    
+    def _split_audio_into_chunks(self, audio_file_path: str, chunk_duration_seconds: int) -> List[str]:
+        """
+        Split audio file into chunks of specified duration.
+        
+        Args:
+            audio_file_path (str): Path to the audio file to split
+            chunk_duration_seconds (int): Duration of each chunk in seconds
+            
+        Returns:
+            List[str]: List of paths to chunk files
+        """
+        chunk_files = []
+        temp_dir = None
+        
+        try:
+            # Create temporary directory for chunks
+            temp_dir = tempfile.mkdtemp(prefix="filterer_audio_chunks_")
+            
+            # Load audio file
+            logger.info(f"📄 Loading audio file for chunking: {audio_file_path}")
+            audio, sr = librosa.load(audio_file_path, sr=16000)  # Standard 16kHz for analysis
+            total_duration = len(audio) / sr
+            
+            logger.info(f"📏 Audio duration: {total_duration:.1f}s, chunk size: {chunk_duration_seconds}s")
+            
+            # Calculate number of chunks
+            num_chunks = int(total_duration / chunk_duration_seconds) + (1 if total_duration % chunk_duration_seconds > 0 else 0)
+            logger.info(f"📊 Will create {num_chunks} chunks")
+            
+            # Create chunks
+            for i in range(num_chunks):
+                start_time = i * chunk_duration_seconds
+                end_time = min((i + 1) * chunk_duration_seconds, total_duration)
+                
+                start_sample = int(start_time * sr)
+                end_sample = int(end_time * sr)
+                
+                chunk_audio = audio[start_sample:end_sample]
+                
+                # Skip very short chunks (less than 1 second)
+                if len(chunk_audio) < sr:
+                    logger.info(f"⏭️  Skipping chunk {i+1} (too short: {len(chunk_audio)/sr:.1f}s)")
+                    continue
+                
+                # Save chunk
+                chunk_path = os.path.join(temp_dir, f"chunk_{i+1:03d}.wav")
+                sf.write(chunk_path, chunk_audio, sr)
+                chunk_files.append(chunk_path)
+                
+                chunk_duration = len(chunk_audio) / sr
+                logger.info(f"📋 Created chunk {i+1}: {start_time:.1f}s-{end_time:.1f}s ({chunk_duration:.1f}s) -> {chunk_path}")
+            
+            logger.info(f"✅ Successfully created {len(chunk_files)} audio chunks")
+            return chunk_files
+            
+        except Exception as e:
+            logger.error(f"❌ Error splitting audio into chunks: {e}")
+            # Cleanup on error
+            if chunk_files:
+                for chunk_file in chunk_files:
+                    try:
+                        if os.path.exists(chunk_file):
+                            os.remove(chunk_file)
+                    except Exception:
+                        pass
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception:
+                    pass
+            return []
+    
+    def _cleanup_chunk_files(self, chunk_files: List[str]) -> None:
+        """
+        Clean up temporary chunk files and their directory.
+        
+        Args:
+            chunk_files (List[str]): List of chunk file paths to clean up
+        """
+        if not chunk_files:
+            return
+            
+        try:
+            # Get the directory containing the chunks
+            chunk_dir = os.path.dirname(chunk_files[0])
+            
+            # Remove all chunk files
+            for chunk_file in chunk_files:
+                try:
+                    if os.path.exists(chunk_file):
+                        os.remove(chunk_file)
+                        logger.debug(f"Cleaned up chunk file: {chunk_file}")
+                except Exception as e:
+                    logger.debug(f"Could not clean up chunk file {chunk_file}: {e}")
+            
+            # Remove the temporary directory if empty
+            try:
+                if os.path.exists(chunk_dir) and not os.listdir(chunk_dir):
+                    os.rmdir(chunk_dir)
+                    logger.debug(f"Cleaned up chunk directory: {chunk_dir}")
+            except Exception as e:
+                logger.debug(f"Could not clean up chunk directory {chunk_dir}: {e}")
+                
+        except Exception as e:
+            logger.debug(f"Error during chunk cleanup: {e}")
+    
+    def _analyze_audio_chunks(self, audio_file_path: str) -> tuple[bool, int, Optional[int]]:
+        """
+        Analyze audio by splitting it into chunks and processing up to the first 3 chunks with early exit.
+        
+        Args:
+            audio_file_path (str): Path to the audio file to analyze
+            
+        Returns:
+            tuple[bool, int, Optional[int]]: (has_children_voice, chunks_analyzed, positive_chunk_index)
+        """
+        chunk_files = []
+        
+        try:
+            # Get chunk duration from config (same as crawler)
+            chunk_duration = config.MAX_AUDIO_DURATION_SECONDS
+            if chunk_duration is None:
+                # Fallback to default chunk size if no limit configured
+                chunk_duration = 300  # 5 minutes
+            
+            # Get audio duration first
+            try:
+                audio, sr = librosa.load(audio_file_path, sr=16000)
+                audio_duration = len(audio) / sr
+            except Exception as e:
+                logger.error(f"Failed to get audio duration: {e}")
+                return False, 0, None
+            
+            logger.info(f"🧩 Starting chunk analysis for {audio_duration:.1f}s audio")
+            logger.info(f"📏 Chunk size: {chunk_duration}s ({chunk_duration//60}m {chunk_duration%60}s)")
+            logger.info(f"🎯 Will analyze up to the first 3 chunks with early exit on success")
+            
+            # Split audio into chunks
+            chunk_files = self._split_audio_into_chunks(audio_file_path, chunk_duration)
+            
+            if not chunk_files:
+                logger.error("❌ Failed to create audio chunks")
+                return False, 0, None
+            
+            total_chunks = len(chunk_files)
+            # Limit to first 3 chunks
+            chunks_to_analyze = min(3, total_chunks)
+            logger.info(f"📊 Created {total_chunks} chunks, will analyze first {chunks_to_analyze}")
+            
+            # Analyze chunks sequentially with early exit
+            for chunk_index in range(chunks_to_analyze):
+                chunk_file = chunk_files[chunk_index]
+                logger.info(f"🔍 Analyzing chunk {chunk_index + 1}/{chunks_to_analyze} for children's voice...")
+                
+                try:
+                    # Perform children's voice detection
+                    children_voice_result = self.audio_classifier.is_child_audio(chunk_file)
+                    
+                    # Check for critical errors in children's voice detection
+                    if children_voice_result is None:
+                        logger.error(f"❌ Chunk {chunk_index + 1} children's voice detection failed")
+                        continue  # Try next chunk
+                    
+                    logger.info(f"📋 Chunk {chunk_index + 1} children's voice detection: {children_voice_result}")
+                    
+                    if children_voice_result:
+                        remaining_chunks = chunks_to_analyze - (chunk_index + 1)
+                        logger.info(f"🎯 SUCCESS! Chunk {chunk_index + 1} contains children's voice")
+                        logger.info(f"⚡ Early exit: Found positive match in {chunk_index + 1}/{chunks_to_analyze} chunks")
+                        if remaining_chunks > 0:
+                            logger.info(f"⏭️  Skipping {remaining_chunks} remaining chunks")
+                        
+                        # Clean up chunk files
+                        self._cleanup_chunk_files(chunk_files)
+                        
+                        # Return positive result
+                        return True, chunk_index + 1, chunk_index + 1
+                    else:
+                        # This chunk doesn't contain children's voice
+                        logger.info(f"❌ Chunk {chunk_index + 1}: no children's voice detected")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error analyzing chunk {chunk_index + 1}: {e}")
+                    continue  # Try next chunk
+            
+            logger.info(f"📊 CHUNK ANALYSIS SUMMARY:")
+            logger.info(f"   └─ Analyzed {chunks_to_analyze}/{total_chunks} chunks")
+            logger.info(f"   └─ Result: No children's voice detected in any analyzed chunk")
+            
+            # Clean up chunk files
+            self._cleanup_chunk_files(chunk_files)
+            
+            return False, chunks_to_analyze, None
+            
+        except Exception as e:
+            logger.error(f"❌ Error in chunk analysis: {e}")
+            
+            # Clean up chunk files on error
+            if chunk_files:
+                self._cleanup_chunk_files(chunk_files)
+            
+            return False, 0, None
     
     def filter_audio_files(self) -> FilterResult:
         """
@@ -144,7 +359,13 @@ class YouTubeOutputFilterer:
                 elif result.action_taken == "error":
                     logger.error(f"Error processing {record.get('video_id', 'unknown')}: {result.error_message}")
                 else:
-                    logger.info(f"Record {record.get('video_id', 'unknown')} -> {result.action_taken}")
+                    chunk_info = ""
+                    if result.was_chunked and result.chunks_analyzed is not None:
+                        if result.positive_chunk_index is not None:
+                            chunk_info = f" (found in chunk {result.positive_chunk_index}/{result.chunks_analyzed})"
+                        else:
+                            chunk_info = f" (analyzed {result.chunks_analyzed} chunks)"
+                    logger.info(f"Record {record.get('video_id', 'unknown')} -> {result.action_taken}{chunk_info}")
         
         except Exception as e:
             logger.error(f"Fatal error during filtering: {e}")
@@ -220,7 +441,10 @@ class YouTubeOutputFilterer:
                     has_children_voice=False,
                     action_taken="file_not_found",
                     error_message=f"File does not exist: {output_path}",
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    chunks_analyzed=0,
+                    positive_chunk_index=None,
+                    was_chunked=False
                 )
             
             # Re-check if record was classified by another instance
@@ -231,14 +455,17 @@ class YouTubeOutputFilterer:
                     has_children_voice=current_record.get('has_children_voice', False),
                     action_taken="skipped",
                     error_message="Already classified by another instance",
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    chunks_analyzed=0,
+                    positive_chunk_index=None,
+                    was_chunked=False
                 )
             
-            # Classify audio
+            # Classify audio using chunked analysis (similar to crawler)
             logger.info(f"Classifying audio: {output_path}")
-            is_child = self.audio_classifier.is_child_audio_optimized(output_path)
+            has_children_voice, chunks_analyzed, positive_chunk_index = self._analyze_audio_chunks(output_path)
             
-            if is_child is None:
+            if chunks_analyzed == 0:
                 # Classification error - mark as classified but keep file
                 self._update_record_classification(record, classified=True, has_children_voice=False)
                 return ProcessingResult(
@@ -246,10 +473,13 @@ class YouTubeOutputFilterer:
                     has_children_voice=False,
                     action_taken="error",
                     error_message="Audio classification failed",
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    chunks_analyzed=0,
+                    positive_chunk_index=None,
+                    was_chunked=True
                 )
             
-            if is_child:
+            if has_children_voice:
                 # Keep file and mark as classified
                 self._update_record_classification(record, classified=True, has_children_voice=True)
                 return ProcessingResult(
@@ -257,7 +487,10 @@ class YouTubeOutputFilterer:
                     has_children_voice=True,
                     action_taken="kept",
                     error_message=None,
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    chunks_analyzed=chunks_analyzed,
+                    positive_chunk_index=positive_chunk_index,
+                    was_chunked=True
                 )
             else:
                 # Delete file and remove from manifest
@@ -267,7 +500,10 @@ class YouTubeOutputFilterer:
                     has_children_voice=False,
                     action_taken="deleted",
                     error_message=None,
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
+                    chunks_analyzed=chunks_analyzed,
+                    positive_chunk_index=None,
+                    was_chunked=True
                 )
         
         except Exception as e:
@@ -283,7 +519,10 @@ class YouTubeOutputFilterer:
                 has_children_voice=False,
                 action_taken="error",
                 error_message=str(e),
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
+                chunks_analyzed=0,
+                positive_chunk_index=None,
+                was_chunked=False
             )
     
     def _get_current_record(self, target_record: Dict) -> Optional[Dict]:
