@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-YouTube Output Filterer API Startup Script
+YouTube Output Filterer API Startup Script - Client-Server Architecture
 
-Simple script to start the API server with proper configuration.
+Simple script to start the API server that processes client files remotely
+using the server's computational resources while modifying the client's files.
 """
 
 import argparse
@@ -36,7 +37,7 @@ def check_dependencies():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Start YouTube Output Filterer API Server",
+        description="Start YouTube Output Filterer API Server - Client-Server Architecture",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -44,6 +45,16 @@ Examples:
   python start_api.py --port 8080        # Use custom port
   python start_api.py --host 127.0.0.1   # Local access only
   python start_api.py --reload            # Development mode with auto-reload
+
+Client Usage:
+  # Upload, process and download in one call
+  from api_youtube_filterer import YouTubeFiltererClient
+  client = YouTubeFiltererClient('http://your-server:8000')
+  result = client.process_complete_workflow(
+      manifest_path='./final_audio_files/manifest.json',
+      audio_files_dir='./final_audio_files/audio_files',
+      output_dir='./processed_results'
+  )
         """
     )
     
@@ -75,8 +86,8 @@ Examples:
     
     args = parser.parse_args()
     
-    print("YouTube Output Filterer API Startup")
-    print("=" * 50)
+    print("YouTube Output Filterer API Startup - Client-Server")
+    print("=" * 55)
     
     # Check dependencies
     print("Checking dependencies...")
@@ -92,24 +103,22 @@ Examples:
     
     print("✅ All dependencies available")
     
-    # Check default manifest
-    default_manifest = Path("final_audio_files/manifest.json")
-    if default_manifest.exists():
-        print(f"✅ Default manifest found: {default_manifest}")
-    else:
-        print(f"⚠️  Default manifest not found: {default_manifest}")
-        print("   The API will still work with custom manifest paths")
-    
-    print(f"\nStarting API server...")
+    print(f"\nStarting Client-Server API...")
+    print("This API processes client files using server computational resources.")
+    print("Client files are temporarily uploaded, processed, and results returned.")
     print(f"Host: {args.host}")
     print(f"Port: {args.port}")
     print(f"Reload: {args.reload}")
     print(f"Log Level: {args.log_level}")
-    print("=" * 50)
+    print("=" * 55)
     print(f"📖 API Documentation: http://localhost:{args.port}/docs")
     print(f"❤️  Health Check: http://localhost:{args.port}/health")
-    print(f"📊 Statistics: http://localhost:{args.port}/stats")
-    print("=" * 50)
+    print(f"� Upload Files: POST http://localhost:{args.port}/upload")
+    print(f"⚙️  Process Files: POST http://localhost:{args.port}/process")  
+    print(f"📥 Download Results: GET http://localhost:{args.port}/download/{{session_id}}")
+    print(f"🚀 Combined Workflow: POST http://localhost:{args.port}/filter-remote")
+    print(f"📊 Sessions: GET http://localhost:{args.port}/sessions")
+    print("=" * 55)
     print("Press Ctrl+C to stop the server")
     print()
     
