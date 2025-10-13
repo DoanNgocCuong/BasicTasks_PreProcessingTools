@@ -1,76 +1,111 @@
 #!/usr/bin/env python3
 """
-Test script for audio classification functionality.
-This creates a few test entries in manifest to verify the classification workflow.
+Test audio classification logic with dummy files
 """
 
 import json
+import os
 import shutil
+import tempfile
+import numpy as np
+import soundfile as sf
 from datetime import datetime
-from pathlib import Path
+from youtube_output_filterer import YouTubeOutputFilterer
 
+def create_dummy_audio_file(filepath, duration=2.0, sample_rate=16000):
+    """Create a dummy audio file for testing"""
+    # Generate simple sine wave
+    t = np.linspace(0, duration, int(sample_rate * duration))
+    frequency = 440  # A4 note
+    audio_data = 0.3 * np.sin(2 * np.pi * frequency * t)
+    
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    
+    # Save as WAV file
+    sf.write(filepath, audio_data, sample_rate)
+    print(f"Created dummy audio file: {filepath}")
 
-def create_test_manifest():
-    """Create a test manifest with some unclassified entries."""
-    script_dir = Path(__file__).parent
-    test_manifest_path = script_dir / "final_audio_files" / "test_manifest.json"
-    original_manifest_path = script_dir / "final_audio_files" / "manifest.json"
+def test_audio_classification():
+    """Test the filterer with actual audio files"""
+    print("\n" + "="*50)
+    print("TESTING AUDIO CLASSIFICATION")
+    print("="*50)
     
-    # Load original manifest
-    with original_manifest_path.open('r', encoding='utf-8') as f:
-        original_data = json.load(f)
+    # Create backup first
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"final_audio_files/manifest.backup_audio_test_{timestamp}.json"
+    shutil.copy2("final_audio_files/manifest.json", backup_path)
+    print(f"Created backup: {backup_path}")
     
-    # Create test data with first 3 entries, mark them as unclassified
-    test_data = {
-        "total_duration_seconds": 0,
-        "records": []
-    }
+    # Create temporary directory for test audio files
+    temp_dir = tempfile.mkdtemp(prefix="filterer_test_")
+    print(f"Using temp directory: {temp_dir}")
     
-    # Take first 3 records and mark as unclassified for testing
-    for i, record in enumerate(original_data["records"][:3]):
-        test_record = record.copy()
-        test_record["classified"] = False  # Mark as unclassified
-        if "classification_timestamp" in test_record:
-            del test_record["classification_timestamp"]
-        test_data["records"].append(test_record)
-        test_data["total_duration_seconds"] += record.get("duration_seconds", 0)
-    
-    # Save test manifest
-    with test_manifest_path.open('w', encoding='utf-8') as f:
-        json.dump(test_data, f, indent=2, ensure_ascii=False)
-    
-    print(f"✅ Test manifest created: {test_manifest_path}")
-    print(f"📊 Test records: {len(test_data['records'])}")
-    return test_manifest_path
-
-
-def cleanup_test_manifest():
-    """Remove test manifest file."""
-    script_dir = Path(__file__).parent
-    test_manifest_path = script_dir / "final_audio_files" / "test_manifest.json"
-    
-    if test_manifest_path.exists():
-        test_manifest_path.unlink()
-        print(f"🗑️  Cleaned up test manifest: {test_manifest_path}")
-
+    try:
+        # Load manifest and modify first few records
+        with open('final_audio_files/manifest.json', 'r', encoding='utf-8') as f:
+            manifest = json.load(f)
+        
+        records = manifest.get('records', [])
+        test_count = min(3, len(records))  # Test with 3 records
+        
+        # Create dummy audio files and update paths
+        for i in range(test_count):
+            record = records[i]
+            # Create new path in temp directory
+            new_filename = f"test_audio_{i+1}.wav"
+            new_path = os.path.join(temp_dir, new_filename)
+            
+            # Create dummy audio file
+            create_dummy_audio_file(new_path)
+            
+            # Update record
+            record['classified'] = False
+            record['output_path'] = new_path
+            if 'classification_timestamp' in record:
+                del record['classification_timestamp']
+        
+        # Save modified manifest
+        with open('final_audio_files/manifest.json', 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+        
+        print(f"Modified {test_count} records with dummy audio files")
+        
+        # Run the filterer
+        print("\nRunning filterer on dummy audio files...")
+        result = YouTubeOutputFilterer.run_filterer()
+        
+        print(f"\nAudio Classification Test Results:")
+        print(f"  Total processed: {result.total_processed}")
+        print(f"  Files kept: {result.files_kept}")
+        print(f"  Files deleted: {result.files_deleted}")
+        print(f"  Files not found: {result.files_not_found}")
+        print(f"  Errors: {result.errors}")
+        print(f"  Processing time: {result.processing_time:.2f} seconds")
+        
+        if result.error_details:
+            print(f"\nError details:")
+            for error in result.error_details:
+                print(f"  - {error}")
+        
+        # Check what happened to our test files
+        print(f"\nChecking test files:")
+        for i in range(test_count):
+            test_file = os.path.join(temp_dir, f"test_audio_{i+1}.wav")
+            exists = os.path.exists(test_file)
+            print(f"  test_audio_{i+1}.wav: {'EXISTS' if exists else 'DELETED'}")
+        
+    finally:
+        # Cleanup
+        print(f"\nCleaning up...")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        print(f"Removed temp directory: {temp_dir}")
+        
+        # Restore original manifest
+        shutil.copy2(backup_path, "final_audio_files/manifest.json")
+        print(f"Restored manifest from: {backup_path}")
+        print("Audio classification test completed!")
 
 if __name__ == "__main__":
-    print("🧪 Audio Classification Test Setup")
-    print("=" * 50)
-    
-    # Create test manifest
-    test_path = create_test_manifest()
-    
-    print(f"\n🎯 To test the audio classification, run:")
-    print(f"python -c \"")
-    print(f"from youtube_output_validator import AudioFileClassifier")
-    print(f"from pathlib import Path")
-    print(f"classifier = AudioFileClassifier(Path('{test_path}'), max_workers=2)")
-    print(f"classifier.validate_and_classify_audio_files()\"")
-    
-    print(f"\n⚠️  Remember to clean up afterwards by running:")
-    print(f"python {__file__} --cleanup")
-    
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "--cleanup":
-        cleanup_test_manifest()
+    test_audio_classification()

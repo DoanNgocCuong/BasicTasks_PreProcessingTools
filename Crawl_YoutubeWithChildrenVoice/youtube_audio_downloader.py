@@ -428,29 +428,26 @@ class YoutubeAudioDownloader:
         return is_error_pattern(error_message, BOT_DETECTION_PATTERNS)
     
     def _organize_language_folder(self, wav_path, url):
-        """Handle language-based file organization using transcript detection."""
+        """Handle file organization - move all files to unclassified folder regardless of language."""
         try:
-            # Check if file is already in a language-specific directory
+            # Always move to unclassified folder regardless of language
             current_dir = os.path.dirname(wav_path)
-            if any(lang in current_dir for lang in ['vietnamese', 'english', 'chinese', 'spanish', 'french', 'german', 'japanese', 'korean', 'unknown']):
-                debug_print(f"File already in language folder: {os.path.basename(current_dir)}")
-                return wav_path
-                
-            # Get language-specific output directory
-            language_dir = self.config.get_language_output_dir(url)
+            
+            # Always use unclassified folder as target
+            base_output_dir = getattr(self.config, 'base_output_dir', self.config.output_dir)
+            unclassified_dir = os.path.join(base_output_dir, 'unclassified')
+            os.makedirs(unclassified_dir, exist_ok=True)
+            
             target_filename = os.path.basename(wav_path)
-            target_path = os.path.join(language_dir, target_filename)
+            target_path = os.path.join(unclassified_dir, target_filename)
             
             # Check if file needs to be moved
             current_dir = os.path.normpath(os.path.dirname(wav_path))
-            target_dir = os.path.normpath(language_dir)
+            target_dir = os.path.normpath(unclassified_dir)
             
             if current_dir != target_dir:
                 try:
-                    # Extract language folder name from path
-                    language_folder = os.path.basename(language_dir)
-                    debug_print(f"Moving to language folder ({language_folder}): {current_dir} → {target_dir}")
-                    os.makedirs(language_dir, exist_ok=True)
+                    debug_print(f"Moving to unclassified folder: {current_dir} → {target_dir}")
                     shutil.move(wav_path, target_path)
                     debug_print(f"File moved successfully: {target_path}", "SUCCESS")
                     return target_path
@@ -458,12 +455,11 @@ class YoutubeAudioDownloader:
                     debug_print(f"Could not move file: {move_error}", "WARNING")
                     return wav_path
             else:
-                language_folder = os.path.basename(language_dir)
-                debug_print(f"File already in correct language folder: {language_folder}")
+                debug_print(f"File already in unclassified folder")
                 return wav_path
                 
         except Exception as e:
-            debug_print(f"Error in language organization: {e}", "ERROR")
+            debug_print(f"Error in file organization: {e}", "ERROR")
             return wav_path
     
     def get_audio_length_from_file(self, audio_file_path):
@@ -866,13 +862,13 @@ def _setup_environment():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     final_output_dir = os.path.join(base_dir, 'final_audio_files')
     
-    # Create directories
+    # Create directories - only unclassified folder needed
     os.makedirs(final_output_dir, exist_ok=True)
-    for lang_folder in ['vietnamese', 'unknown']:
-        os.makedirs(os.path.join(final_output_dir, lang_folder), exist_ok=True)
+    unclassified_dir = os.path.join(final_output_dir, 'unclassified')
+    os.makedirs(unclassified_dir, exist_ok=True)
     
     config.output_dir = final_output_dir
-    # Ensure base_output_dir is set to prevent nested language folders
+    # Ensure base_output_dir is set to prevent nested folders
     config.base_output_dir = final_output_dir
     
     # Initialize downloader
@@ -965,15 +961,18 @@ def _run_single_download(downloader, config, final_output_dir, manifest_data, ma
         debug_print("Already downloaded in current manifest")
         return
     
-    # Language classification will be done automatically by the config
+    # Detect language for manifest but put file in unclassified folder
     language_output_dir = config.get_language_output_dir(url)
     language_folder = os.path.basename(language_output_dir)
+    debug_print(f"Detected language: {language_folder} (but will save to unclassified)")
     
-    debug_print(f"Language: {language_folder}")
+    # Always use unclassified folder for actual file storage
+    unclassified_dir = os.path.join(final_output_dir, 'unclassified')
+    os.makedirs(unclassified_dir, exist_ok=True)
     
-    # Update directories
+    # Update directories to use unclassified folder
     original_config_output_dir = config.output_dir
-    config.output_dir = language_output_dir
+    config.output_dir = unclassified_dir
     
     try:
         # Set basename
@@ -990,7 +989,7 @@ def _run_single_download(downloader, config, final_output_dir, manifest_data, ma
             wav_path, duration = result
             debug_print(f"Success: {wav_path} ({duration}s)", "SUCCESS")
             
-            # Update manifest
+            # Update manifest with detected language but actual unclassified path
             record = {
                 'video_id': vid or '',
                 'url': url,
@@ -999,7 +998,7 @@ def _run_single_download(downloader, config, final_output_dir, manifest_data, ma
                 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                 'duration_seconds': duration,
                 'title': get_video_title(url),
-                'language_folder': language_folder,
+                'language_folder': language_folder,  # Store detected language
                 'download_index': index,
                 'classified': False  # New entries need to be classified
             }

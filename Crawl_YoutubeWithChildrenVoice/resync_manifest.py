@@ -2,10 +2,16 @@
 """
 Script to resync manifest.json with actual audio files in the final_audio_files directory.
 This script will:
-1. Scan all .wav files in the final_audio_files directory
-2. Extract video IDs from the filenames
-3. Update the manifest.json to only include records for files that actually exist
-4. Create a backup of the original manifest before making changes
+1. Scan all .wav files recursively in the final_audio_files directory and subdirectories
+2. Match filenames from the manifest with actual files found on disk
+3. Update file paths in the manifest for files that have been moved (e.g., between language folders)
+4. Remove manifest entries for files that no longer exist
+5. Report audio files that exist but have no manifest entries
+6. Create a backup of the original manifest before making changes
+
+This is especially useful when files have been manually moved between directories
+(e.g., from language-specific folders to unclassified folder) and the manifest
+needs to be updated to reflect the new file locations.
 """
 
 import json
@@ -14,9 +20,9 @@ import re
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 
-def extract_index_from_filename(filename: str) -> int:
+def extract_index_from_filename(filename: str) -> Optional[int]:
     """
     Extract index number from filename pattern: {index}_{rest}.wav
     
@@ -32,15 +38,15 @@ def extract_index_from_filename(filename: str) -> int:
         return int(match.group(1))
     return None
 
-def get_actual_audio_files(directory: str) -> Dict[int, str]:
+def get_actual_audio_files(directory: str) -> Dict[str, str]:
     """
-    Scan directory for .wav files and extract index numbers.
+    Scan directory recursively for .wav files and map filename to full path.
     
     Args:
         directory: Path to the final_audio_files directory
         
     Returns:
-        Dictionary mapping index to filename
+        Dictionary mapping filename to full path
     """
     audio_files = {}
     directory_path = Path(directory)
@@ -48,12 +54,19 @@ def get_actual_audio_files(directory: str) -> Dict[int, str]:
     if not directory_path.exists():
         raise FileNotFoundError(f"Directory {directory} does not exist")
     
-    for file_path in directory_path.glob("*.wav"):
-        index = extract_index_from_filename(file_path.name)
-        if index is not None:
-            audio_files[index] = file_path.name
-        else:
-            print(f"Warning: Could not extract index from filename: {file_path.name}")
+    # Search recursively for .wav files
+    for file_path in directory_path.rglob("*.wav"):
+        filename = file_path.name
+        full_path = str(file_path)
+        
+        # If we find duplicate filenames, warn the user
+        if filename in audio_files:
+            print(f"Warning: Duplicate filename found: {filename}")
+            print(f"  Existing: {audio_files[filename]}")
+            print(f"  New: {full_path}")
+            print(f"  Using the new path")
+        
+        audio_files[filename] = full_path
     
     return audio_files
 
@@ -98,7 +111,7 @@ def create_backup(original_path: str) -> str:
 
 def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     """
-    Resync the manifest.json with actual audio files.
+    Resync the manifest.json with actual audio files, updating file paths for moved files.
     
     Args:
         manifest_path: Path to the manifest.json file
@@ -117,44 +130,46 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     original_count = len(manifest_data.get('records', []))
     print(f"Original manifest has {original_count} records")
     
-    # Get actual audio files
-    print("Scanning for actual audio files...")
+    # Get actual audio files (filename -> full_path mapping)
+    print("Scanning for actual audio files recursively...")
     actual_audio_files = get_actual_audio_files(audio_directory)
     actual_count = len(actual_audio_files)
     print(f"Found {actual_count} actual audio files")
     
-    # Create mapping from index to filename
-    index_to_filename = {}
-    for index, filename in actual_audio_files.items():
-        index_to_filename[index] = filename
-    
-    # Filter manifest records to only include those with actual audio files
-    print("Filtering manifest records...")
+    # Process manifest records and update file paths
+    print("Processing manifest records...")
     filtered_records = []
     removed_count = 0
+    updated_paths_count = 0
     used_audio_files = set()  # Track which audio files have been matched
     
-    # Create a set of actual filenames for fast lookup
-    actual_filenames = set(actual_audio_files.values())
-    
-    # Process each manifest record and check if the corresponding audio file exists
     for record in manifest_data.get('records', []):
         original_path = record.get('output_path', '')
-        if original_path:
-            # Extract just the filename from the full path
-            original_filename = Path(original_path).name
-            
-            # Check if this exact filename exists in our actual audio files
-            if original_filename in actual_filenames:
-                # Update the output_path to the current directory structure
-                record['output_path'] = str(Path(audio_directory) / original_filename)
-                filtered_records.append(record)
-                used_audio_files.add(original_filename)
-            else:
-                print(f"Warning: Audio file not found: {original_filename}")
-                removed_count += 1
-        else:
+        if not original_path:
             print(f"Warning: Manifest record has no output_path")
+            removed_count += 1
+            continue
+        
+        # Extract just the filename from the full path
+        original_filename = Path(original_path).name
+        
+        # Check if this exact filename exists in our actual audio files
+        if original_filename in actual_audio_files:
+            current_full_path = actual_audio_files[original_filename]
+            
+            # Update the output_path if it has changed
+            if original_path != current_full_path:
+                print(f"Updating path for {original_filename}:")
+                print(f"  Old: {original_path}")
+                print(f"  New: {current_full_path}")
+                record['output_path'] = current_full_path
+                updated_paths_count += 1
+            
+            filtered_records.append(record)
+            used_audio_files.add(original_filename)
+        else:
+            print(f"Warning: Audio file not found: {original_filename}")
+            print(f"  Original path in manifest: {original_path}")
             removed_count += 1
     
     # Update manifest data
@@ -166,9 +181,8 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     save_manifest(manifest_data, manifest_path)
     
     # Check for audio files without manifest records
-    # Find audio files that weren't matched to any manifest record
     unused_audio_files = []
-    for filename in actual_filenames:
+    for filename in actual_audio_files.keys():
         if filename not in used_audio_files:
             unused_audio_files.append(filename)
     
@@ -176,29 +190,41 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     unused_audio_files.sort()
     
     # Print summary
-    print("\n" + "="*50)
+    print("\n" + "="*60)
     print("RESYNC SUMMARY")
-    print("="*50)
+    print("="*60)
     print(f"Original records: {original_count}")
     print(f"Actual audio files: {actual_count}")
     print(f"Records after filtering: {len(filtered_records)}")
     print(f"Records removed: {removed_count}")
+    print(f"File paths updated: {updated_paths_count}")
     print(f"Audio files without manifest records: {len(unused_audio_files)}")
     print(f"Backup created: {backup_path}")
     print(f"Updated manifest saved: {manifest_path}")
     
+    if updated_paths_count > 0:
+        print("\n" + "="*60)
+        print("✅ FILE PATH UPDATES")
+        print("="*60)
+        print(f"Successfully updated {updated_paths_count} file paths in the manifest")
+        print("This handles files that were moved between language folders or directories")
+        print("="*60)
+    
     if unused_audio_files:
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print("⚠️  WARNING: AUDIO FILES WITHOUT MANIFEST RECORDS")
-        print("="*50)
+        print("="*60)
         print(f"Found {len(unused_audio_files)} audio files without corresponding manifest records:")
         for i, filename in enumerate(unused_audio_files[:20]):  # Show first 20
+            full_path = actual_audio_files[filename]
+            relative_path = Path(full_path).relative_to(Path(audio_directory))
             print(f"  {i+1:2d}. {filename}")
+            print(f"      Location: {relative_path}")
         if len(unused_audio_files) > 20:
             print(f"  ... and {len(unused_audio_files) - 20} more files")
-        print("="*50)
+        print("="*60)
     
-    print("="*50)
+    print("="*60)
 
 def main():
     """Main function to run the resync process."""
