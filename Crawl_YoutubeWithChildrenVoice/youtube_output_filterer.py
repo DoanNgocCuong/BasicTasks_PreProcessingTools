@@ -135,6 +135,7 @@ class YouTubeOutputFilterer:
         self.audio_classifier = audio_classifier or AudioClassifier()
         self.use_queue = use_queue and QUEUE_MANAGER_AVAILABLE
         self._lock = threading.Lock()  # For thread-safe manifest updates
+        self._processed_counter = 0  # Counter for backup frequency
         
         # Initialize queue manager if enabled
         if self.use_queue and create_queue_manager is not None:
@@ -952,8 +953,12 @@ class YouTubeOutputFilterer:
         for attempt in range(max_retries):
             try:
                 with self._lock:
-                    # Create backup first
-                    backup_path = self.backup_manifest()
+                    # Create backup only every 100 files processed
+                    backup_path = None
+                    self._processed_counter += 1
+                    if self._processed_counter >= 100:
+                        backup_path = self.backup_manifest()
+                        self._processed_counter = 0  # Reset counter
                     
                     # Load current manifest
                     with open(self.manifest_path, 'r', encoding='utf-8') as f:
@@ -998,7 +1003,7 @@ class YouTubeOutputFilterer:
                     with open(self.manifest_path, 'w', encoding='utf-8') as f:
                         json.dump(manifest_data, f, indent=2, ensure_ascii=False)
                     
-                    logger.debug(f"Manifest updated successfully (backup: {backup_path})")
+                    logger.debug(f"Manifest updated successfully{f' (backup: {backup_path})' if backup_path else ''}")
                     return
             
             except Exception as e:
