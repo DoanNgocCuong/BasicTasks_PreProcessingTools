@@ -1061,11 +1061,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python youtube_output_filterer.py  # Single-instance mode (recommended for most users)
+  python youtube_output_filterer.py  # Single-instance mode (default, recommended)
   python youtube_output_filterer.py --manifest /path/to/manifest.json
   python youtube_output_filterer.py --dry-run
-  python youtube_output_filterer.py --no-queue  # Explicitly disable queue (default behavior now)  
-  python youtube_output_filterer.py --instance-id my-instance-01  # Custom instance ID (only needed for queue mode)
+  python youtube_output_filterer.py --no-queue  # Explicitly disable queue (same as default)
+  python youtube_output_filterer.py --instance-id my-instance-01  # Custom instance ID
         """
     )
     
@@ -1090,7 +1090,7 @@ Examples:
     parser.add_argument(
         "--no-queue",
         action="store_true",
-        help="Disable queue-based coordination (recommended if experiencing file lock permission issues)"
+        help="Disable queue-based coordination (this is now the default behavior)"
     )
     
     parser.add_argument(
@@ -1154,7 +1154,8 @@ Examples:
     start_time = time.time()
     
     try:
-        use_queue = not args.no_queue
+        # Default to single-instance mode for safety (no file locking issues)
+        use_queue = False  # Always use single-instance mode by default
         result = YouTubeOutputFilterer.run_filterer(args.manifest, instance_id=args.instance_id, use_queue=use_queue)
         
         # Print detailed summary
