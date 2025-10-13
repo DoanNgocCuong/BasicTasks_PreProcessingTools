@@ -513,8 +513,10 @@ class YouTubeOutputFilterer:
                 )
             
             if has_children_voice:
-                # Keep file and mark as classified
-                self._update_record_classification(record, classified=True, has_children_voice=True)
+                # Move file to language folder and mark as classified
+                new_path = self._move_to_language_folder(record)
+                
+                self._update_record_classification(record, classified=True, has_children_voice=True, new_path=new_path)
                 return ProcessingResult(
                     record_id=video_id,
                     has_children_voice=True,
@@ -585,7 +587,55 @@ class YouTubeOutputFilterer:
             logger.error(f"Error getting current record state: {e}")
             return None
     
-    def _update_record_classification(self, record: Dict, classified: bool, has_children_voice: bool) -> None:
+    def _move_to_language_folder(self, record: Dict) -> Optional[str]:
+        """
+        Move audio file from unclassified folder to its corresponding language folder.
+        
+        Args:
+            record: Record containing language_folder and output_path information
+            
+        Returns:
+            New file path if successful, None if failed
+        """
+        current_path = record.get('output_path', '')
+        language_folder = record.get('language_folder', 'unknown')
+        
+        if not current_path or not os.path.exists(current_path):
+            logger.warning(f"Cannot move file - source file does not exist: {current_path}")
+            return None
+        
+        try:
+            # Get the base directory (should be final_audio_files)
+            current_file_path = Path(current_path)
+            base_dir = current_file_path.parent.parent  # Go up from unclassified to final_audio_files
+            
+            # Determine target directory based on language_folder
+            target_dir = base_dir / language_folder
+            target_dir.mkdir(exist_ok=True)
+            
+            # Create target file path
+            target_path = target_dir / current_file_path.name
+            
+            # Check if file is already in the correct location
+            if current_path == str(target_path):
+                logger.debug(f"File already in correct language folder: {language_folder}")
+                return current_path
+            
+            # Move the file
+            shutil.move(current_path, target_path)
+            logger.info(f"Moved file to language folder ({language_folder}): {current_file_path.name}")
+            logger.info(f"  From: {current_path}")
+            logger.info(f"  To: {target_path}")
+            
+            return str(target_path)
+            
+        except Exception as e:
+            logger.error(f"Error moving file to language folder: {e}")
+            logger.error(f"  Source: {current_path}")
+            logger.error(f"  Target language: {language_folder}")
+            return None
+    
+    def _update_record_classification(self, record: Dict, classified: bool, has_children_voice: bool, new_path: Optional[str] = None) -> None:
         """
         Update a single record's classification status in the manifest.
         
@@ -593,6 +643,7 @@ class YouTubeOutputFilterer:
             record: Record to update
             classified: Whether record has been classified
             has_children_voice: Whether children's voice was detected
+            new_path: Optional new file path if file was moved
         """
         video_id = record.get('video_id')
         updates = [{
@@ -601,6 +652,11 @@ class YouTubeOutputFilterer:
             'has_children_voice': has_children_voice,
             'classification_timestamp': datetime.now().isoformat()
         }]
+        
+        # Include path update if provided
+        if new_path:
+            updates[0]['output_path'] = new_path
+            
         self.update_manifest_safely(updates)
     
     def _delete_file_and_update_manifest(self, record: Dict) -> None:
@@ -670,6 +726,8 @@ class YouTubeOutputFilterer:
                                         record['has_children_voice'] = update['has_children_voice']
                                     if 'classification_timestamp' in update:
                                         record['classification_timestamp'] = update['classification_timestamp']
+                                    if 'output_path' in update:
+                                        record['output_path'] = update['output_path']
                                     break
                     
                     # Update records in manifest
@@ -725,6 +783,7 @@ class YouTubeOutputFilterer:
         logger.info("=" * 60)
         logger.info(f"Total processed: {result.total_processed}")
         logger.info(f"Files kept (children's voice): {result.files_kept}")
+        logger.info(f"  └─ Moved to language folders based on detection")
         logger.info(f"Files deleted (no children's voice): {result.files_deleted}")
         logger.info(f"Files not found: {result.files_not_found}")
         logger.info(f"Errors: {result.errors}")
@@ -870,6 +929,7 @@ Examples:
         print("=" * 50)
         print(f"📊 Total processed: {result.total_processed}")
         print(f"✅ Files kept (children's voice): {result.files_kept}")
+        print(f"   └─ Organized into language folders")
         print(f"🗑️  Files deleted (no children's voice): {result.files_deleted}")
         print(f"❓ Files not found: {result.files_not_found}")
         print(f"❌ Errors: {result.errors}")
