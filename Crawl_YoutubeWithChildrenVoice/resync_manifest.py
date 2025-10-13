@@ -186,13 +186,26 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     print("Saving updated manifest...")
     save_manifest(manifest_data, manifest_path)
     
-    # Check for audio files without manifest records
+    # Check for audio files without manifest records and delete them
     unused_audio_files = []
+    deleted_files_count = 0
+    failed_deletions = []
+    
     for filename in actual_audio_files.keys():
         if filename not in used_audio_files:
             unused_audio_files.append(filename)
+            file_path = actual_audio_files[filename]
+            print(f"Deleting audio file without manifest record: {filename}")
+            print(f"  Path: {file_path}")
+            try:
+                Path(file_path).unlink()
+                print(f"  ✅ Deleted: {filename}")
+                deleted_files_count += 1
+            except Exception as e:
+                print(f"  ❌ Failed to delete {filename}: {e}")
+                failed_deletions.append((filename, str(e)))
     
-    # Sort the unused files for better readability
+    # Sort the unused files for better readability (for reporting)
     unused_audio_files.sort()
     
     # Print summary
@@ -205,6 +218,9 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     print(f"Records removed: {removed_count}")
     print(f"File paths updated: {updated_paths_count}")
     print(f"Audio files without manifest records: {len(unused_audio_files)}")
+    print(f"Audio files deleted: {deleted_files_count}")
+    if failed_deletions:
+        print(f"Failed deletions: {len(failed_deletions)}")
     print(f"Backup created: {backup_path}")
     print(f"Updated manifest saved: {manifest_path}")
     
@@ -218,16 +234,25 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     
     if unused_audio_files:
         print("\n" + "="*60)
-        print("⚠️  WARNING: AUDIO FILES WITHOUT MANIFEST RECORDS")
+        print("🗑️  AUDIO FILES DELETED")
         print("="*60)
-        print(f"Found {len(unused_audio_files)} audio files without corresponding manifest records:")
+        print(f"Deleted {deleted_files_count} audio files that had no manifest records:")
         for i, filename in enumerate(unused_audio_files[:20]):  # Show first 20
+            if any(f[0] == filename for f in failed_deletions):
+                status = "❌ FAILED"
+            else:
+                status = "✅ DELETED"
             full_path = actual_audio_files[filename]
             relative_path = Path(full_path).relative_to(Path(audio_directory))
-            print(f"  {i+1:2d}. {filename}")
+            print(f"  {i+1:2d}. {filename} - {status}")
             print(f"      Location: {relative_path}")
         if len(unused_audio_files) > 20:
             print(f"  ... and {len(unused_audio_files) - 20} more files")
+        
+        if failed_deletions:
+            print(f"\nFailed to delete {len(failed_deletions)} files:")
+            for filename, error in failed_deletions:
+                print(f"  • {filename}: {error}")
         print("="*60)
     
     print("="*60)
