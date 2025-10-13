@@ -59,12 +59,18 @@ def get_actual_audio_files(directory: str) -> Dict[str, str]:
         filename = file_path.name
         full_path = str(file_path)
         
-        # If we find duplicate filenames, warn the user
+        # If we find duplicate filenames, delete the existing one and keep the new one
         if filename in audio_files:
+            existing_path = audio_files[filename]
             print(f"Warning: Duplicate filename found: {filename}")
-            print(f"  Existing: {audio_files[filename]}")
+            print(f"  Existing: {existing_path}")
             print(f"  New: {full_path}")
-            print(f"  Using the new path")
+            print(f"  Deleting existing file and using new path")
+            try:
+                Path(existing_path).unlink()
+                print(f"  ✅ Deleted: {existing_path}")
+            except Exception as e:
+                print(f"  ❌ Failed to delete {existing_path}: {e}")
         
         audio_files[filename] = full_path
     
