@@ -121,7 +121,7 @@ class FilterResult:
 class YouTubeOutputFilterer:
     """Main filterer class for processing downloaded audio files."""
     
-    def __init__(self, manifest_path: str, audio_classifier: Optional[AudioClassifier] = None, instance_id: Optional[str] = None, use_queue: bool = True):
+    def __init__(self, manifest_path: str, audio_classifier: Optional[AudioClassifier] = None, instance_id: Optional[str] = None, use_queue: bool = False):
         """
         Initialize the filterer.
         
@@ -129,7 +129,7 @@ class YouTubeOutputFilterer:
             manifest_path: Path to the manifest.json file
             audio_classifier: Optional AudioClassifier instance (creates new if None)
             instance_id: Optional unique identifier for this instance (generated if None)
-            use_queue: Whether to use queue-based coordination (default: True)
+            use_queue: Whether to use queue-based coordination (default: False, due to file locking issues)
         """
         self.manifest_path = Path(manifest_path)
         self.audio_classifier = audio_classifier or AudioClassifier()
@@ -138,9 +138,16 @@ class YouTubeOutputFilterer:
         
         # Initialize queue manager if enabled
         if self.use_queue and create_queue_manager is not None:
-            self.queue_manager = create_queue_manager(str(self.manifest_path), instance_id)
-            self.instance_id = self.queue_manager.instance_id
-            logger.info(f"Initialized with queue coordination (instance: {self.instance_id})")
+            try:
+                self.queue_manager = create_queue_manager(str(self.manifest_path), instance_id)
+                self.instance_id = self.queue_manager.instance_id
+                logger.info(f"Initialized with queue coordination (instance: {self.instance_id})")
+            except Exception as e:
+                logger.warning(f"Failed to initialize queue manager: {e}")
+                logger.warning("Falling back to single-instance mode")
+                self.queue_manager = None
+                self.use_queue = False
+                self.instance_id = instance_id or f"filterer_{os.getpid()}_{datetime.now().strftime('%H%M%S')}"
         else:
             self.instance_id = instance_id or f"filterer_{os.getpid()}_{datetime.now().strftime('%H%M%S')}"
             self.queue_manager = None
@@ -1003,7 +1010,7 @@ class YouTubeOutputFilterer:
         logger.info("=" * 60)
     
     @staticmethod
-    def run_filterer(manifest_path: Optional[str] = None, instance_id: Optional[str] = None, use_queue: bool = True) -> FilterResult:
+    def run_filterer(manifest_path: Optional[str] = None, instance_id: Optional[str] = None, use_queue: bool = False) -> FilterResult:
         """
         Single entry point for API usage.
         
@@ -1054,11 +1061,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python youtube_output_filterer.py
+  python youtube_output_filterer.py  # Single-instance mode (recommended for most users)
   python youtube_output_filterer.py --manifest /path/to/manifest.json
   python youtube_output_filterer.py --dry-run
-  python youtube_output_filterer.py --no-queue  # Single-instance mode
-  python youtube_output_filterer.py --instance-id my-instance-01  # Custom instance ID
+  python youtube_output_filterer.py --no-queue  # Explicitly disable queue (default behavior now)  
+  python youtube_output_filterer.py --instance-id my-instance-01  # Custom instance ID (only needed for queue mode)
         """
     )
     
@@ -1083,7 +1090,7 @@ Examples:
     parser.add_argument(
         "--no-queue",
         action="store_true",
-        help="Disable queue-based coordination (use legacy single-instance mode)"
+        help="Disable queue-based coordination (recommended if experiencing file lock permission issues)"
     )
     
     parser.add_argument(
@@ -1114,33 +1121,25 @@ Examples:
                 script_dir = Path(__file__).parent
                 manifest_path = str(script_dir / "final_audio_files" / "manifest.json")
             
-            use_queue = not args.no_queue
+            # Default to single-instance mode for dry-run (safer)
+            use_queue = False  # Always use single-instance for dry-run to avoid permission issues
             filterer = YouTubeOutputFilterer(manifest_path, instance_id=args.instance_id, use_queue=use_queue)
             
-            if use_queue and filterer.queue_manager:
-                # Queue-based dry run
-                added_count = filterer.queue_manager.populate_queue_from_manifest()
-                status = filterer.queue_manager.get_queue_status()
-                print(f"Queue status: {status.total_pending} pending records")
-                print(f"Active instances: {status.active_instances}")
-                if added_count > 0:
-                    print(f"Added {added_count} records to processing queue")
-            else:
-                # Legacy dry run
-                unclassified = filterer.get_unclassified_records()
-                print(f"Would process {len(unclassified)} unclassified records:")
-                for i, record in enumerate(unclassified[:10], 1):  # Show first 10
-                    video_id = record.get('video_id', 'unknown')
-                    output_path = record.get('output_path', '')
-                    file_exists = os.path.exists(output_path) if output_path else False
-                    status = "FILE EXISTS" if file_exists else "FILE MISSING"
-                    print(f"  {i}. {video_id} - {status}")
-                
-                if len(unclassified) > 10:
-                    print(f"  ... and {len(unclassified) - 10} more records")
-                
-                if len(unclassified) == 0:
-                    print("  No unclassified records found - nothing to process!")
+            # Always use legacy dry run (single-instance mode)
+            unclassified = filterer.get_unclassified_records()
+            print(f"Would process {len(unclassified)} unclassified records:")
+            for i, record in enumerate(unclassified[:10], 1):  # Show first 10
+                video_id = record.get('video_id', 'unknown')
+                output_path = record.get('output_path', '')
+                file_exists = os.path.exists(output_path) if output_path else False
+                status = "FILE EXISTS" if file_exists else "FILE MISSING"
+                print(f"  {i}. {video_id} - {status}")
+            
+            if len(unclassified) > 10:
+                print(f"  ... and {len(unclassified) - 10} more records")
+            
+            if len(unclassified) == 0:
+                print("  No unclassified records found - nothing to process!")
             
             print("\nUse without --dry-run to perform actual filtering.")
             
