@@ -11,14 +11,16 @@ Just run: python run_client.py
 import os
 import sys
 import json
+import time
 from pathlib import Path
+from typing import List, Dict, Any, Optional
 
 def main():
     print("=" * 60)
     print("🎵 YouTube Output Filterer - Client")
     print("=" * 60)
-    print("This client will send your files to the server for processing")
-    print("using the server's computational power.")
+    print("This client sends your files to the server for processing")
+    print("using the server's computational power and concurrent instances.")
     print()
     
     # Configuration
@@ -127,9 +129,9 @@ def main():
             # Full processing
             print("\n🚀 Starting full processing workflow...")
             print("This will:")
-            print("  1. Upload your manifest and audio files to the server")
-            print("  2. Process them using the server's computational power")
-            print("  3. Download the processed results back to your machine")
+            print("  1. Upload all files to the server")
+            print("  2. Process files concurrently on the server side")
+            print("  3. Download and combine results")
             print("  4. Update your local files")
             print()
             
@@ -143,32 +145,34 @@ def main():
                 print("\n👋 Cancelled by user")
                 return True
             
-            print("\n📤 Starting upload and processing...")
+            print("\n🚀 Starting full processing...")
+            start_time = time.time()
+            
             result = client.process_complete_workflow(
                 manifest_path=MANIFEST_PATH,
                 audio_files_dir=AUDIO_DIR,
                 output_dir=OUTPUT_DIR
             )
             
+            processing_time = time.time() - start_time
+            
             if result.get('success'):
-                print("\n🎉 Processing completed successfully!")
+                print(f"\n✅ Full processing completed successfully in {processing_time:.1f}s!")
                 print(f"📁 Results saved to: {result.get('output_dir')}")
-                print(f"🆔 Session ID: {result.get('session_id')}")
-                print(f"🆔 Task ID: {result.get('task_id')}")
                 
                 # Show processing statistics
                 stats = result.get('processing_stats', {})
                 if stats:
                     print("\n📊 Processing Statistics:")
-                    print(f"   Total processed: {stats.get('total_processed', 0)}")
-                    print(f"   Files kept (children's voices): {stats.get('files_kept', 0)}")
-                    print(f"   Files deleted (no children): {stats.get('files_deleted', 0)}")
-                    print(f"   Processing time: {stats.get('processing_time', 0):.2f} seconds")
+                    print(f"   Total files processed: {stats.get('total_files_processed', 0)}")
+                    print(f"   Files kept (children's voices): {stats.get('total_files_kept', 0)}")
+                    print(f"   Files deleted (no children): {stats.get('total_files_deleted', 0)}")
+                    print(f"   Processing time: {processing_time:.1f} seconds")
                 
                 print(f"\n✅ Your local files have been updated!")
                 print(f"   Check the results in: {OUTPUT_DIR}")
             else:
-                print(f"\n❌ Processing failed: {result.get('error')}")
+                print(f"\n❌ Full processing failed: {result.get('error')}")
                 return False
                 
         elif choice == '3':
@@ -187,6 +191,7 @@ def main():
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         return False
+
 
 if __name__ == "__main__":
     try:
