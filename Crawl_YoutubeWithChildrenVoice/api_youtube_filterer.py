@@ -427,8 +427,8 @@ class RemoteYouTubeFilterer(YouTubeOutputFilterer):
     Updates file paths in manifest to point to temporary uploaded files.
     """
     
-    def __init__(self, session: UploadSession, task_id: str, task_manager: TaskManager):
-        """Initialize remote filterer with session data."""
+    def __init__(self, session: UploadSession, task_id: str, task_manager: TaskManager, instance_id: Optional[str] = None, use_queue: bool = True):
+        """Initialize remote filterer with session data.""" 
         self.session = session
         self.task_id = task_id
         self.task_manager = task_manager
@@ -439,17 +439,10 @@ class RemoteYouTubeFilterer(YouTubeOutputFilterer):
         # Update manifest to point to uploaded files
         self._update_manifest_file_paths()
         
-        # Initialize audio classifier
-        try:
-            from youtube_audio_classifier import AudioClassifier
-            self.audio_classifier = AudioClassifier()
-        except Exception as e:
-            logger.error(f"Failed to initialize AudioClassifier: {e}")
-            raise
+        # Initialize with queue support
+        super().__init__(str(self.manifest_path), instance_id=instance_id, use_queue=use_queue)
         
-        self._lock = threading.Lock()
-        
-        logger.info(f"Initialized RemoteYouTubeFilterer for session {session.session_id}")
+        logger.info(f"Initialized RemoteYouTubeFilterer for session {session.session_id} (queue: {use_queue})")
     
     def _update_manifest_file_paths(self) -> None:
         """Update manifest to point to uploaded temporary files."""
@@ -689,6 +682,7 @@ class RemoteYouTubeFilterer(YouTubeOutputFilterer):
     
     def _mark_record_classified(self, record: Dict, has_children_voice: bool, analysis_result: Dict) -> None:
         """Mark a record as classified in the manifest."""
+        video_id = record.get('video_id', 'unknown')
         with self._lock:
             try:
                 # Read current manifest
@@ -696,7 +690,6 @@ class RemoteYouTubeFilterer(YouTubeOutputFilterer):
                     manifest_data = json.load(f)
                 
                 # Find and update the record
-                video_id = record.get('video_id')
                 records = manifest_data.get('records', [])
                 
                 for i, manifest_record in enumerate(records):
@@ -981,11 +974,12 @@ async def upload_files(
             validate_total_upload_size(total_size, file_size)
             
             # Save file to session
-            session.add_file(file.filename, content)
+            filename = file.filename or f"uploaded_file_{files_uploaded + 1}"
+            session.add_file(filename, content)
             total_size += file_size
             files_uploaded += 1
             
-            logger.info(f"Uploaded file: {file.filename} ({file_size / 1024 / 1024:.2f}MB)")
+            logger.info(f"Uploaded file: {filename} ({file_size / 1024 / 1024:.2f}MB)")
         
         total_size_mb = total_size / 1024 / 1024
         
@@ -1479,8 +1473,8 @@ class YouTubeFiltererClient:
         task_id = upload_result.get('task_id')
         session_id = upload_result.get('session_id')
         
-        if not task_id:
-            return {"success": False, "error": "No task ID received"}
+        if not task_id or not session_id:
+            return {"success": False, "error": "No task ID or session ID received"}
         
         completion_result = self.wait_for_completion(task_id)
         

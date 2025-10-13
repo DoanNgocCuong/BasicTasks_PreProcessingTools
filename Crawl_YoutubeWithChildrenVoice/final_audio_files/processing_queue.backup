@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "created": "2025-10-13T15:59:17.619187",
+  "last_updated": "2025-10-13T15:59:46.009189",
+  "instances": {
+    "filterer_18184_155917": {
+      "active": true,
+      "last_heartbeat": "2025-10-13T15:59:17.629022",
+      "claimed_records": [],
+      "started_at": "2025-10-13T15:59:17.629022"
+    },
+    "filterer_14132_155922": {
+      "active": true,
+      "last_heartbeat": "2025-10-13T15:59:22.746443",
+      "claimed_records": [],
+      "started_at": "2025-10-13T15:59:22.746443"
+    },
+    "filterer_18420_155946": {
+      "active": true,
+      "last_heartbeat": "2025-10-13T15:59:46.009189",
+      "claimed_records": [],
+      "started_at": "2025-10-13T15:59:46.009189"
+    }
+  },
+  "queue": {
+    "pending": [],
+    "processing": {},
+    "completed": [],
+    "failed": []
+  },
+  "records": {}
+}

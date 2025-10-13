@@ -73,6 +73,17 @@ except (ImportError, OSError) as e:
                 return False
 from env_config import config
 
+# Import QueueManager for inter-instance coordination
+try:
+    from queue_manager import QueueManager, create_queue_manager
+    QUEUE_MANAGER_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import QueueManager: {e}")
+    print("Running without queue coordination (single instance mode)")
+    QUEUE_MANAGER_AVAILABLE = False
+    QueueManager = None
+    create_queue_manager = None
+
 
 # Configure logging
 logging.basicConfig(
@@ -110,23 +121,37 @@ class FilterResult:
 class YouTubeOutputFilterer:
     """Main filterer class for processing downloaded audio files."""
     
-    def __init__(self, manifest_path: str, audio_classifier: Optional[AudioClassifier] = None):
+    def __init__(self, manifest_path: str, audio_classifier: Optional[AudioClassifier] = None, instance_id: Optional[str] = None, use_queue: bool = True):
         """
         Initialize the filterer.
         
         Args:
             manifest_path: Path to the manifest.json file
             audio_classifier: Optional AudioClassifier instance (creates new if None)
+            instance_id: Optional unique identifier for this instance (generated if None)
+            use_queue: Whether to use queue-based coordination (default: True)
         """
         self.manifest_path = Path(manifest_path)
         self.audio_classifier = audio_classifier or AudioClassifier()
+        self.use_queue = use_queue and QUEUE_MANAGER_AVAILABLE
         self._lock = threading.Lock()  # For thread-safe manifest updates
+        
+        # Initialize queue manager if enabled
+        if self.use_queue and create_queue_manager is not None:
+            self.queue_manager = create_queue_manager(str(self.manifest_path), instance_id)
+            self.instance_id = self.queue_manager.instance_id
+            logger.info(f"Initialized with queue coordination (instance: {self.instance_id})")
+        else:
+            self.instance_id = instance_id or f"filterer_{os.getpid()}_{datetime.now().strftime('%H%M%S')}"
+            self.queue_manager = None
+            self.use_queue = False
+            logger.info(f"Initialized without queue coordination (instance: {self.instance_id})")
         
         # Validate manifest file exists
         if not self.manifest_path.exists():
             raise FileNotFoundError(f"Manifest file not found: {self.manifest_path}")
         
-        logger.info(f"Initialized YouTubeOutputFilterer with manifest: {self.manifest_path}")
+        logger.info(f"YouTubeOutputFilterer initialized with manifest: {self.manifest_path}")
     
     def _split_audio_into_chunks(self, audio_file_path: str, chunk_duration_seconds: int) -> List[str]:
         """
@@ -350,6 +375,182 @@ class YouTubeOutputFilterer:
         error_details = []
         
         try:
+            if self.use_queue and self.queue_manager:
+                # Queue-based processing
+                return self._filter_with_queue()
+            else:
+                # Legacy single-instance processing
+                return self._filter_legacy()
+        
+        except Exception as e:
+            logger.error(f"Fatal error during filtering: {e}")
+            error_details.append(f"Fatal error: {str(e)}")
+            errors += 1
+        
+        processing_time = time.time() - start_time
+        
+        # Create final result
+        result = FilterResult(
+            total_processed=total_processed,
+            files_kept=files_kept,
+            files_deleted=files_deleted,
+            files_not_found=files_not_found,
+            errors=errors,
+            processing_time=processing_time,
+            error_details=error_details
+        )
+        
+        # Log summary
+        self._log_summary(result)
+        
+        return result
+    
+    def _filter_with_queue(self) -> FilterResult:
+        """
+        Filter audio files using queue-based coordination.
+        
+        Returns:
+            FilterResult containing processing statistics
+        """
+        if not self.queue_manager:
+            raise RuntimeError("Queue manager not available for queue-based filtering")
+            
+        start_time = time.time()
+        logger.info("Starting queue-based audio file filtering...")
+        
+        # Initialize counters
+        total_processed = 0
+        files_kept = 0
+        files_deleted = 0
+        files_not_found = 0
+        errors = 0
+        error_details = []
+        
+        try:
+            # Populate queue from manifest if needed
+            added_count = self.queue_manager.populate_queue_from_manifest()
+            if added_count > 0:
+                logger.info(f"Added {added_count} records to processing queue")
+            
+            # Process records in batches
+            batch_size = 5  # Process 5 records at a time
+            heartbeat_interval = 30  # Send heartbeat every 30 seconds
+            last_heartbeat = time.time()
+            
+            while True:
+                # Send heartbeat if needed
+                current_time = time.time()
+                if current_time - last_heartbeat >= heartbeat_interval:
+                    self.queue_manager.heartbeat()
+                    last_heartbeat = current_time
+                
+                # Claim a batch of records
+                claim_result = self.queue_manager.claim_records(batch_size)
+                batch_records = claim_result.claimed_records
+                
+                if not batch_records:
+                    # No more records to process
+                    logger.info("No more records to process in queue")
+                    break
+                
+                logger.info(f"Processing batch of {len(batch_records)} records")
+                
+                # Process each record in the batch
+                for record in batch_records:
+                    video_id = record.get('video_id', 'unknown')
+                    logger.info(f"Processing record: {video_id}")
+                    
+                    try:
+                        result = self.process_single_record(record)
+                        
+                        # Update counters based on result
+                        if result.action_taken == "kept":
+                            files_kept += 1
+                            self.queue_manager.complete_record(video_id)
+                        elif result.action_taken == "deleted":
+                            files_deleted += 1
+                            self.queue_manager.complete_record(video_id)
+                        elif result.action_taken == "file_not_found":
+                            files_not_found += 1
+                            self.queue_manager.complete_record(video_id)  # Still mark as complete
+                        elif result.action_taken == "error":
+                            errors += 1
+                            if result.error_message:
+                                error_details.append(result.error_message)
+                            self.queue_manager.fail_record(video_id)  # Re-queue for retry
+                        
+                        total_processed += 1
+                        
+                        # Log result
+                        if result.action_taken == "file_not_found":
+                            logger.warning(f"File does not exist: {record.get('output_path', 'unknown')}")
+                        elif result.action_taken == "error":
+                            logger.error(f"Error processing {video_id}: {result.error_message}")
+                        else:
+                            chunk_info = ""
+                            if result.was_chunked and result.chunks_analyzed is not None:
+                                if result.positive_chunk_index is not None:
+                                    chunk_info = f" (found in chunk {result.positive_chunk_index}/{result.chunks_analyzed})"
+                                else:
+                                    chunk_info = f" (analyzed {result.chunks_analyzed} chunks)"
+                            logger.info(f"Record {video_id} -> {result.action_taken}{chunk_info}")
+                    
+                    except Exception as e:
+                        logger.error(f"Unexpected error processing {video_id}: {e}")
+                        errors += 1
+                        error_details.append(f"Record {video_id}: {str(e)}")
+                        self.queue_manager.fail_record(video_id)
+                        total_processed += 1
+                
+                # Check queue status
+                status = claim_result.queue_status
+                logger.info(f"Queue status: {status.total_pending} pending, {status.total_processing} processing, {status.active_instances} active instances")
+                
+                # Small delay between batches to prevent tight looping
+                time.sleep(0.1)
+            
+            # Final heartbeat
+            self.queue_manager.heartbeat()
+            
+        except Exception as e:
+            logger.error(f"Fatal error during queue-based filtering: {e}")
+            error_details.append(f"Fatal error: {str(e)}")
+            errors += 1
+        
+        processing_time = time.time() - start_time
+        
+        # Create final result
+        result = FilterResult(
+            total_processed=total_processed,
+            files_kept=files_kept,
+            files_deleted=files_deleted,
+            files_not_found=files_not_found,
+            errors=errors,
+            processing_time=processing_time,
+            error_details=error_details
+        )
+        
+        return result
+    
+    def _filter_legacy(self) -> FilterResult:
+        """
+        Filter audio files using legacy single-instance processing.
+        
+        Returns:
+            FilterResult containing processing statistics
+        """
+        start_time = time.time()
+        logger.info("Starting legacy single-instance audio file filtering...")
+        
+        # Initialize counters
+        total_processed = 0
+        files_kept = 0
+        files_deleted = 0
+        files_not_found = 0
+        errors = 0
+        error_details = []
+        
+        try:
             # Get unclassified records
             unclassified_records = self.get_unclassified_records()
             total_processed = len(unclassified_records)
@@ -401,7 +602,7 @@ class YouTubeOutputFilterer:
                     logger.info(f"Record {record.get('video_id', 'unknown')} -> {result.action_taken}{chunk_info}")
         
         except Exception as e:
-            logger.error(f"Fatal error during filtering: {e}")
+            logger.error(f"Fatal error during legacy filtering: {e}")
             error_details.append(f"Fatal error: {str(e)}")
             errors += 1
         
@@ -417,9 +618,6 @@ class YouTubeOutputFilterer:
             processing_time=processing_time,
             error_details=error_details
         )
-        
-        # Log summary
-        self._log_summary(result)
         
         return result
     
@@ -805,12 +1003,14 @@ class YouTubeOutputFilterer:
         logger.info("=" * 60)
     
     @staticmethod
-    def run_filterer(manifest_path: Optional[str] = None) -> FilterResult:
+    def run_filterer(manifest_path: Optional[str] = None, instance_id: Optional[str] = None, use_queue: bool = True) -> FilterResult:
         """
         Single entry point for API usage.
         
         Args:
             manifest_path: Path to manifest.json (defaults to standard location)
+            instance_id: Optional unique identifier for this instance
+            use_queue: Whether to use queue-based coordination (default: True)
             
         Returns:
             FilterResult containing processing statistics
@@ -820,8 +1020,9 @@ class YouTubeOutputFilterer:
             script_dir = Path(__file__).parent
             manifest_path = str(script_dir / "final_audio_files" / "manifest.json")
         
+        filterer = None
         try:
-            filterer = YouTubeOutputFilterer(str(manifest_path))
+            filterer = YouTubeOutputFilterer(str(manifest_path), instance_id=instance_id, use_queue=use_queue)
             return filterer.filter_audio_files()
         except Exception as e:
             logger.error(f"Error running filterer: {e}")
@@ -834,6 +1035,14 @@ class YouTubeOutputFilterer:
                 processing_time=0.0,
                 error_details=[str(e)]
             )
+        finally:
+            # Clean up queue manager if it exists
+            if filterer and filterer.queue_manager:
+                try:
+                    filterer.queue_manager.unregister_instance()
+                    logger.info(f"Unregistered instance: {filterer.queue_manager.instance_id}")
+                except Exception as e:
+                    logger.warning(f"Error unregistering instance: {e}")
 
 
 def main():
@@ -848,6 +1057,8 @@ Examples:
   python youtube_output_filterer.py
   python youtube_output_filterer.py --manifest /path/to/manifest.json
   python youtube_output_filterer.py --dry-run
+  python youtube_output_filterer.py --no-queue  # Single-instance mode
+  python youtube_output_filterer.py --instance-id my-instance-01  # Custom instance ID
         """
     )
     
@@ -867,6 +1078,18 @@ Examples:
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging"
+    )
+    
+    parser.add_argument(
+        "--no-queue",
+        action="store_true",
+        help="Disable queue-based coordination (use legacy single-instance mode)"
+    )
+    
+    parser.add_argument(
+        "--instance-id",
+        default=None,
+        help="Unique identifier for this filterer instance (auto-generated if not provided)"
     )
     
     args = parser.parse_args()
@@ -891,22 +1114,33 @@ Examples:
                 script_dir = Path(__file__).parent
                 manifest_path = str(script_dir / "final_audio_files" / "manifest.json")
             
-            filterer = YouTubeOutputFilterer(manifest_path)
-            unclassified = filterer.get_unclassified_records()
+            use_queue = not args.no_queue
+            filterer = YouTubeOutputFilterer(manifest_path, instance_id=args.instance_id, use_queue=use_queue)
             
-            print(f"Would process {len(unclassified)} unclassified records:")
-            for i, record in enumerate(unclassified[:10], 1):  # Show first 10
-                video_id = record.get('video_id', 'unknown')
-                output_path = record.get('output_path', '')
-                file_exists = os.path.exists(output_path) if output_path else False
-                status = "FILE EXISTS" if file_exists else "FILE MISSING"
-                print(f"  {i}. {video_id} - {status}")
-            
-            if len(unclassified) > 10:
-                print(f"  ... and {len(unclassified) - 10} more records")
-            
-            if len(unclassified) == 0:
-                print("  No unclassified records found - nothing to process!")
+            if use_queue and filterer.queue_manager:
+                # Queue-based dry run
+                added_count = filterer.queue_manager.populate_queue_from_manifest()
+                status = filterer.queue_manager.get_queue_status()
+                print(f"Queue status: {status.total_pending} pending records")
+                print(f"Active instances: {status.active_instances}")
+                if added_count > 0:
+                    print(f"Added {added_count} records to processing queue")
+            else:
+                # Legacy dry run
+                unclassified = filterer.get_unclassified_records()
+                print(f"Would process {len(unclassified)} unclassified records:")
+                for i, record in enumerate(unclassified[:10], 1):  # Show first 10
+                    video_id = record.get('video_id', 'unknown')
+                    output_path = record.get('output_path', '')
+                    file_exists = os.path.exists(output_path) if output_path else False
+                    status = "FILE EXISTS" if file_exists else "FILE MISSING"
+                    print(f"  {i}. {video_id} - {status}")
+                
+                if len(unclassified) > 10:
+                    print(f"  ... and {len(unclassified) - 10} more records")
+                
+                if len(unclassified) == 0:
+                    print("  No unclassified records found - nothing to process!")
             
             print("\nUse without --dry-run to perform actual filtering.")
             
@@ -921,7 +1155,8 @@ Examples:
     start_time = time.time()
     
     try:
-        result = YouTubeOutputFilterer.run_filterer(args.manifest)
+        use_queue = not args.no_queue
+        result = YouTubeOutputFilterer.run_filterer(args.manifest, instance_id=args.instance_id, use_queue=use_queue)
         
         # Print detailed summary
         print("\n" + "=" * 50)
