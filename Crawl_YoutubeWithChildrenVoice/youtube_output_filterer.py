@@ -585,8 +585,8 @@ class YouTubeOutputFilterer:
                 # Update counters based on result
                 if result.action_taken == "kept":
                     files_kept += 1
-                elif result.action_taken == "deleted":
-                    files_deleted += 1
+                elif result.action_taken == "marked_not_children":
+                    files_deleted += 1  # Using files_deleted counter for marked_not_children
                 elif result.action_taken == "file_not_found":
                     files_not_found += 1
                 elif result.action_taken == "error":
@@ -733,12 +733,12 @@ class YouTubeOutputFilterer:
                     was_chunked=True
                 )
             else:
-                # Delete file and remove from manifest
-                self._delete_file_and_update_manifest(record)
+                # Mark record as not containing children's voice (keep file but mark for skipping future downloads)
+                self._mark_record_not_children(record)
                 return ProcessingResult(
                     record_id=video_id,
                     has_children_voice=False,
-                    action_taken="deleted",
+                    action_taken="marked_not_children",
                     error_message=None,
                     processing_time=time.time() - start_time,
                     chunks_analyzed=chunks_analyzed,
@@ -890,6 +890,25 @@ class YouTubeOutputFilterer:
         }]
         self.update_manifest_safely(updates)
     
+    def _mark_record_not_children(self, record: Dict) -> None:
+        """
+        Mark a record as not containing children's voice (keep file but prevent future downloads).
+        
+        Args:
+            record: Record to mark
+        """
+        video_id = record.get('video_id')
+        
+        updates = [{
+            'video_id': video_id,
+            'classified': True,
+            'has_children_voice': False,
+            'not_children': True,
+            'classification_timestamp': datetime.now().isoformat()
+        }]
+        self.update_manifest_safely(updates)
+        logger.info(f"Marked record {video_id} as not containing children's voice")
+    
     def update_manifest_safely(self, updates: List[Dict]) -> None:
         """
         Safely update manifest with concurrent access protection.
@@ -929,6 +948,8 @@ class YouTubeOutputFilterer:
                                         record['classified'] = update['classified']
                                     if 'has_children_voice' in update:
                                         record['has_children_voice'] = update['has_children_voice']
+                                    if 'not_children' in update:
+                                        record['not_children'] = update['not_children']
                                     if 'classification_timestamp' in update:
                                         record['classification_timestamp'] = update['classification_timestamp']
                                     if 'output_path' in update:
@@ -989,7 +1010,7 @@ class YouTubeOutputFilterer:
         logger.info(f"Total processed: {result.total_processed}")
         logger.info(f"Files kept (children's voice): {result.files_kept}")
         logger.info(f"  └─ Moved to language folders based on detection")
-        logger.info(f"Files deleted (no children's voice): {result.files_deleted}")
+        logger.info(f"Files marked as not children: {result.files_deleted}")
         logger.info(f"Files not found: {result.files_not_found}")
         logger.info(f"Errors: {result.errors}")
         logger.info(f"Processing time: {result.processing_time:.2f} seconds")
@@ -1165,7 +1186,7 @@ Examples:
         print(f"📊 Total processed: {result.total_processed}")
         print(f"✅ Files kept (children's voice): {result.files_kept}")
         print(f"   └─ Organized into language folders")
-        print(f"🗑️  Files deleted (no children's voice): {result.files_deleted}")
+        print(f"� Files marked as not children: {result.files_deleted}")
         print(f"❓ Files not found: {result.files_not_found}")
         print(f"❌ Errors: {result.errors}")
         print(f"⏱️  Processing time: {result.processing_time:.2f} seconds")

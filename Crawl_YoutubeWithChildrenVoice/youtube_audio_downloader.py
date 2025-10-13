@@ -410,10 +410,24 @@ class YoutubeAudioDownloader:
             return False
         
         if video_id and video_id in self.unified_index:
+            record = self.unified_index[video_id]['record']
+            # Check if this record has been marked as not containing children's voice
+            if record.get('not_children', False):
+                source = self.unified_index[video_id]['source']
+                debug_print(f"Skipping video {video_id} - previously classified as not containing children's voice ({source} manifest)", "WARNING")
+                return True
+            
             source = self.unified_index[video_id]['source']
             debug_print(f"Duplicate found by video_id {video_id} in {source} manifest", "WARNING")
             return True
         if url and f"url_{url}" in self.unified_index:
+            record = self.unified_index[f"url_{url}"]['record']
+            # Check if this record has been marked as not containing children's voice
+            if record.get('not_children', False):
+                source = self.unified_index[f"url_{url}"]['source']
+                debug_print(f"Skipping URL - previously classified as not containing children's voice ({source} manifest)", "WARNING")
+                return True
+            
             source = self.unified_index[f"url_{url}"]['source']
             debug_print(f"Duplicate found by URL in {source} manifest", "WARNING")
             return True
@@ -1032,11 +1046,18 @@ def _process_urls_from_file(downloader, config, final_output_dir, manifest_data,
     
     debug_print(f"Processing {len(urls)} URLs", "INFO")
     
-    # Filter already downloaded
+    # Filter already downloaded or previously classified as not children
     urls_to_process = []
     for url in urls:
         vid = downloader._extract_video_id(url)
-        if not (vid and vid in manifest_index and manifest_index[vid].get('status') == 'success'):
+        should_skip = False
+        
+        if vid and vid in manifest_index:
+            record = manifest_index[vid]
+            if record.get('status') == 'success' or record.get('not_children', False):
+                should_skip = True
+        
+        if not should_skip:
             urls_to_process.append(url)
     
     debug_print(f"{len(urls_to_process)} URLs to process", "INFO")
