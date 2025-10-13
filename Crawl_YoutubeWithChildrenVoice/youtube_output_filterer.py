@@ -585,8 +585,8 @@ class YouTubeOutputFilterer:
                 # Update counters based on result
                 if result.action_taken == "kept":
                     files_kept += 1
-                elif result.action_taken == "marked_not_children":
-                    files_deleted += 1  # Using files_deleted counter for marked_not_children
+                elif result.action_taken == "deleted":
+                    files_deleted += 1
                 elif result.action_taken == "file_not_found":
                     files_not_found += 1
                 elif result.action_taken == "error":
@@ -733,12 +733,12 @@ class YouTubeOutputFilterer:
                     was_chunked=True
                 )
             else:
-                # Mark record as not containing children's voice (keep file but mark for skipping future downloads)
-                self._mark_record_not_children(record)
+                # Delete file and mark record as not containing children's voice
+                self._delete_file_and_mark_not_children(record)
                 return ProcessingResult(
                     record_id=video_id,
                     has_children_voice=False,
-                    action_taken="marked_not_children",
+                    action_taken="deleted",
                     error_message=None,
                     processing_time=time.time() - start_time,
                     chunks_analyzed=chunks_analyzed,
@@ -890,6 +890,36 @@ class YouTubeOutputFilterer:
         }]
         self.update_manifest_safely(updates)
     
+    def _delete_file_and_mark_not_children(self, record: Dict) -> None:
+        """
+        Delete audio file and mark record as not containing children's voice (keep manifest entry).
+        
+        Args:
+            record: Record to mark
+        """
+        output_path = record.get('output_path', '')
+        video_id = record.get('video_id')
+        
+        # Delete the file
+        try:
+            if output_path and os.path.exists(output_path):
+                os.remove(output_path)
+                logger.info(f"Deleted file (no children's voice): {output_path}")
+        except Exception as e:
+            logger.error(f"Error deleting file {output_path}: {e}")
+            # Continue with manifest update even if file deletion fails
+        
+        # Mark record as not containing children's voice (keep in manifest)
+        updates = [{
+            'video_id': video_id,
+            'classified': True,
+            'has_children_voice': False,
+            'not_children': True,
+            'classification_timestamp': datetime.now().isoformat()
+        }]
+        self.update_manifest_safely(updates)
+        logger.info(f"Marked record {video_id} as not containing children's voice (file deleted)")
+    
     def _mark_record_not_children(self, record: Dict) -> None:
         """
         Mark a record as not containing children's voice (keep file but prevent future downloads).
@@ -1010,7 +1040,7 @@ class YouTubeOutputFilterer:
         logger.info(f"Total processed: {result.total_processed}")
         logger.info(f"Files kept (children's voice): {result.files_kept}")
         logger.info(f"  └─ Moved to language folders based on detection")
-        logger.info(f"Files marked as not children: {result.files_deleted}")
+        logger.info(f"Files deleted (no children's voice): {result.files_deleted}")
         logger.info(f"Files not found: {result.files_not_found}")
         logger.info(f"Errors: {result.errors}")
         logger.info(f"Processing time: {result.processing_time:.2f} seconds")

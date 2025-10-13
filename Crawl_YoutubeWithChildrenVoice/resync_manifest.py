@@ -38,43 +38,51 @@ def extract_index_from_filename(filename: str) -> Optional[int]:
         return int(match.group(1))
     return None
 
-def get_actual_audio_files(directory: str) -> Dict[str, str]:
+def get_actual_audio_files(directory: str) -> tuple[Dict[str, str], int]:
     """
     Scan directory recursively for .wav files and map filename to full path.
+    Handles duplicate filenames by keeping the first one found and deleting others.
     
     Args:
         directory: Path to the final_audio_files directory
         
     Returns:
-        Dictionary mapping filename to full path
+        Tuple of (dictionary mapping filename to full path, number of duplicates deleted)
     """
     audio_files = {}
     directory_path = Path(directory)
+    duplicates_deleted = 0
     
     if not directory_path.exists():
         raise FileNotFoundError(f"Directory {directory} does not exist")
     
-    # Search recursively for .wav files
+    # First pass: collect all files
+    all_files = []
     for file_path in directory_path.rglob("*.wav"):
         filename = file_path.name
         full_path = str(file_path)
-        
-        # If we find duplicate filenames, delete the existing one and keep the new one
+        all_files.append((filename, full_path))
+    
+    # Sort by path to ensure consistent ordering
+    all_files.sort(key=lambda x: x[1])
+    
+    # Second pass: handle duplicates
+    for filename, full_path in all_files:
         if filename in audio_files:
             existing_path = audio_files[filename]
             print(f"Warning: Duplicate filename found: {filename}")
-            print(f"  Existing: {existing_path}")
-            print(f"  New: {full_path}")
-            print(f"  Deleting existing file and using new path")
+            print(f"  Keeping: {existing_path}")
+            print(f"  Deleting duplicate: {full_path}")
             try:
-                Path(existing_path).unlink()
-                print(f"  ✅ Deleted: {existing_path}")
+                Path(full_path).unlink()
+                print(f"  ✅ Deleted duplicate: {full_path}")
+                duplicates_deleted += 1
             except Exception as e:
-                print(f"  ❌ Failed to delete {existing_path}: {e}")
-        
-        audio_files[filename] = full_path
+                print(f"  ❌ Failed to delete duplicate {full_path}: {e}")
+        else:
+            audio_files[filename] = full_path
     
-    return audio_files
+    return audio_files, duplicates_deleted
 
 def load_manifest(manifest_path: str) -> Dict:
     """
@@ -138,9 +146,11 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     
     # Get actual audio files (filename -> full_path mapping)
     print("Scanning for actual audio files recursively...")
-    actual_audio_files = get_actual_audio_files(audio_directory)
+    actual_audio_files_result = get_actual_audio_files(audio_directory)
+    actual_audio_files, duplicates_deleted = actual_audio_files_result
     actual_count = len(actual_audio_files)
     print(f"Found {actual_count} actual audio files")
+    print(f"Deleted {duplicates_deleted} duplicate files during scan")
     
     # Process manifest records and update file paths
     print("Processing manifest records...")
@@ -174,9 +184,17 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
             filtered_records.append(record)
             used_audio_files.add(original_filename)
         else:
-            print(f"Warning: Audio file not found: {original_filename}")
-            print(f"  Original path in manifest: {original_path}")
-            removed_count += 1
+            # File doesn't exist on disk
+            # Check if this is a record that was intentionally deleted (marked as not_children)
+            if record.get('not_children', False):
+                print(f"Keeping manifest entry for intentionally deleted file: {original_filename}")
+                print(f"  Record marked as not_children: {record.get('video_id', 'unknown')}")
+                # Keep the record in manifest even though file is gone
+                filtered_records.append(record)
+            else:
+                print(f"Warning: Audio file not found: {original_filename}")
+                print(f"  Original path in manifest: {original_path}")
+                removed_count += 1
     
     # Update manifest data
     manifest_data['records'] = filtered_records
@@ -185,6 +203,10 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     # Save updated manifest
     print("Saving updated manifest...")
     save_manifest(manifest_data, manifest_path)
+    
+    # Count different types of records
+    kept_deleted_records = sum(1 for r in filtered_records if r.get('not_children', False))
+    normal_records = len(filtered_records) - kept_deleted_records
     
     # Check for audio files without manifest records and delete them
     unused_audio_files = []
@@ -215,8 +237,11 @@ def resync_manifest(manifest_path: str, audio_directory: str) -> None:
     print(f"Original records: {original_count}")
     print(f"Actual audio files: {actual_count}")
     print(f"Records after filtering: {len(filtered_records)}")
+    print(f"  └─ Normal records: {normal_records}")
+    print(f"  └─ Kept deleted records (not_children): {kept_deleted_records}")
     print(f"Records removed: {removed_count}")
     print(f"File paths updated: {updated_paths_count}")
+    print(f"Duplicate files deleted: {duplicates_deleted}")
     print(f"Audio files without manifest records: {len(unused_audio_files)}")
     print(f"Audio files deleted: {deleted_files_count}")
     if failed_deletions:
