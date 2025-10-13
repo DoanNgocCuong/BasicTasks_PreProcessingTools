@@ -26,7 +26,7 @@ def main():
     # Configuration
     SERVER_URL = 'http://localhost:8001'  # Change this to your server's URL
     MANIFEST_PATH = './final_audio_files/manifest.json'
-    AUDIO_DIR = './final_audio_files/audio_files'
+    AUDIO_DIR = './final_audio_files/unclassified'
     OUTPUT_DIR = './processed_results'
     
     print(f"🌐 Server URL: {SERVER_URL}")
@@ -44,7 +44,7 @@ def main():
     
     if not os.path.exists(AUDIO_DIR):
         print(f"❌ Audio directory not found: {AUDIO_DIR}")
-        print("Please ensure you have audio files in the final_audio_files/audio_files directory")
+        print("Please ensure you have audio files in the final_audio_files/unclassified directory")
         return False
     
     # Count audio files
