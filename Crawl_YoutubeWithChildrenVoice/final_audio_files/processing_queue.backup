@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "created": "2025-10-13T15:59:17.619187",
-  "last_updated": "2025-10-13T15:59:46.009189",
+  "last_updated": "2025-10-13T21:54:57.182915",
   "instances": {
     "filterer_18184_155917": {
       "active": true,
@@ -20,6 +20,18 @@
       "last_heartbeat": "2025-10-13T15:59:46.009189",
       "claimed_records": [],
       "started_at": "2025-10-13T15:59:46.009189"
+    },
+    "filterer_10112_160332": {
+      "active": true,
+      "last_heartbeat": "2025-10-13T16:03:32.248519",
+      "claimed_records": [],
+      "started_at": "2025-10-13T16:03:32.248519"
+    },
+    "filterer_3624_215457": {
+      "active": true,
+      "last_heartbeat": "2025-10-13T21:54:57.181006",
+      "claimed_records": [],
+      "started_at": "2025-10-13T21:54:57.181020"
     }
   },
   "queue": {
