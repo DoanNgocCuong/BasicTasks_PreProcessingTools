@@ -280,6 +280,11 @@ class YouTubeOutputFilterer:
         chunk_files = []
         
         try:
+            # Set context on audio classifier CLASS for mock testing support
+            # (Mock checks class variable, not instance variable)
+            if hasattr(self.audio_classifier.__class__, '_current_processing_file'):
+                self.audio_classifier.__class__._current_processing_file = audio_file_path
+            
             # Get chunk duration from config (same as crawler)
             chunk_duration = config.MAX_AUDIO_DURATION_SECONDS
             if chunk_duration is None:

@@ -2,9 +2,21 @@
 """
 YouTube Output Filterer API - Client-Server Architecture
 
-FastAPI-based API for remote audio file processing.
-Enables clients to send audio files to a server for children's voice detection processing,
-utilizing the server's computational resources while modifying the client's files.
+FastAPI-based API wrapper for youtube_output_filterer.py
+This module provides a remote processing interface while delegating all core logic
+to the YouTubeOutputFilterer class.
+
+ARCHITECTURE:
+    This API is TIGHTLY COUPLED to youtube_output_filterer.py and serves as a thin wrapper.
+    - youtube_output_filterer.py: Contains ALL core audio processing logic
+    - api_youtube_filterer.py: Provides HTTP API interface and session management
+    
+    The RemoteYouTubeFilterer class inherits from YouTubeOutputFilterer and only adds:
+    - Temporary file path management for uploaded files
+    - Progress tracking for remote processing
+    - Session and task coordination
+    
+    ALL actual audio analysis, classification, and file management is delegated to the parent class.
 
 Features:
     - Upload manifest and audio files for processing (POST /upload)
@@ -42,41 +54,8 @@ from pydantic import BaseModel, Field
 import aiofiles
 import aiofiles.os
 
-# Import the filterer module
-try:
-    from youtube_output_filterer import YouTubeOutputFilterer, FilterResult, ProcessingResult
-except ImportError as e:
-    print(f"Warning: Could not import filterer module: {e}")
-    # Create mock classes for testing
-    @dataclass
-    class ProcessingResult:
-        """Result of processing a single audio file record."""
-        record_id: str
-        has_children_voice: bool
-        action_taken: str  # "kept", "deleted", "error", "skipped", "file_not_found"
-        error_message: Optional[str]
-        processing_time: float
-        chunks_analyzed: Optional[int] = None
-        positive_chunk_index: Optional[int] = None
-        was_chunked: bool = False
-    
-    @dataclass
-    class FilterResult:
-        """Overall result of the filtering operation."""
-        total_processed: int
-        files_kept: int
-        files_deleted: int
-        files_not_found: int
-        errors: int
-        processing_time: float
-        error_details: List[str]
-    
-    class YouTubeOutputFilterer:
-        def __init__(self, manifest_path):
-            self.manifest_path = manifest_path
-        
-        def get_unclassified_records(self):
-            return []
+# Import the filterer module - this is REQUIRED, API is a wrapper around the filterer
+from youtube_output_filterer import YouTubeOutputFilterer, FilterResult, ProcessingResult
 
 # Configure logging
 logging.basicConfig(
@@ -423,8 +402,23 @@ class TaskManager:
 
 class RemoteYouTubeFilterer(YouTubeOutputFilterer):
     """
-    Modified filterer that works with uploaded files and temporary storage.
-    Updates file paths in manifest to point to temporary uploaded files.
+    Remote wrapper for YouTubeOutputFilterer that works with uploaded files.
+    
+    This class is TIGHTLY COUPLED to YouTubeOutputFilterer and serves as a thin wrapper
+    that adapts the filterer for API/remote usage. It:
+    
+    1. Inherits ALL core processing logic from YouTubeOutputFilterer
+    2. Only overrides methods to add API-specific functionality:
+       - Updates temporary file paths in manifest for uploaded files
+       - Adds progress reporting for remote task tracking
+       - Filters records to only process uploaded files
+       
+    3. Delegates the actual audio processing to parent class methods:
+       - _analyze_audio_chunks() - chunked audio analysis
+       - process_single_record() - record processing pipeline
+       - filter_audio_files() - main filtering workflow
+       
+    DO NOT duplicate parent class logic here - this is a wrapper, not a reimplementation!
     """
     
     def __init__(self, session: UploadSession, task_id: str, task_manager: TaskManager, instance_id: Optional[str] = None, use_queue: bool = True):
@@ -514,204 +508,39 @@ class RemoteYouTubeFilterer(YouTubeOutputFilterer):
             raise
     
     def filter_audio_files(self) -> FilterResult:
-        """Override to add progress reporting for remote processing."""
-        start_time = time.time()
+        """
+        Override to add progress reporting for remote processing.
+        Wraps parent's implementation with task progress updates.
+        """
         logger.info(f"Starting remote audio file filtering for session {self.session.session_id}")
         
-        # Initialize counters
-        total_processed = 0
-        files_kept = 0
-        files_deleted = 0
-        files_not_found = 0
-        errors = 0
-        error_details = []
+        # Update progress: starting
+        self.task_manager.update_progress(self.task_id, 0, 1, "Initializing...")
         
-        try:
-            # Get unclassified records
-            unclassified_records = self.get_unclassified_records()
-            total_processed = len(unclassified_records)
-            
-            # Update total in task manager
-            self.task_manager.update_progress(self.task_id, 0, total_processed)
-            
-            if total_processed == 0:
-                logger.info("No unclassified records with uploaded files found")
-                return FilterResult(
-                    total_processed=0,
-                    files_kept=0,
-                    files_deleted=0,
-                    files_not_found=0,
-                    errors=0,
-                    processing_time=time.time() - start_time,
-                    error_details=[]
-                )
-            
-            logger.info(f"Processing {total_processed} uploaded records")
-            
-            # Process each record
-            for i, record in enumerate(unclassified_records, 1):
-                video_id = record.get('video_id', 'unknown')
-                
-                # Update progress
-                self.task_manager.update_progress(
-                    self.task_id, i - 1, total_processed, 
-                    f"Processing {video_id}"
-                )
-                
-                logger.info(f"Processing record {i}/{total_processed}: {video_id}")
-                
-                result = self.process_single_record(record)
-                
-                # Update counters based on result
-                if result.action_taken == "kept":
-                    files_kept += 1
-                elif result.action_taken == "deleted":
-                    files_deleted += 1
-                elif result.action_taken == "file_not_found":
-                    files_not_found += 1
-                elif result.action_taken == "error":
-                    errors += 1
-                    if result.error_message:
-                        error_details.append(result.error_message)
-                
-                # Log result
-                if result.action_taken == "file_not_found":
-                    logger.warning(f"File does not exist: {record.get('output_path', 'unknown')}")
-                elif result.action_taken == "error":
-                    logger.error(f"Error processing {video_id}: {result.error_message}")
-                else:
-                    chunk_info = ""
-                    if result.was_chunked and result.chunks_analyzed is not None:
-                        chunk_info = f" (analyzed {result.chunks_analyzed} chunks"
-                        if result.positive_chunk_index is not None:
-                            chunk_info += f", positive at chunk {result.positive_chunk_index + 1})"
-                        else:
-                            chunk_info += ")"
-                    logger.info(f"Record {video_id} -> {result.action_taken}{chunk_info}")
-            
-            # Final progress update
-            self.task_manager.update_progress(self.task_id, total_processed, total_processed, "Completed")
+        # Call parent's implementation - this does all the real work!
+        result = super().filter_audio_files()
         
-        except Exception as e:
-            logger.error(f"Fatal error during remote filtering: {e}")
-            error_details.append(f"Fatal error: {str(e)}")
-            errors += 1
-        
-        processing_time = time.time() - start_time
-        
-        # Create final result
-        result = FilterResult(
-            total_processed=total_processed,
-            files_kept=files_kept,
-            files_deleted=files_deleted,
-            files_not_found=files_not_found,
-            errors=errors,
-            processing_time=processing_time,
-            error_details=error_details
+        # Final progress update
+        self.task_manager.update_progress(
+            self.task_id, 
+            result.total_processed, 
+            result.total_processed, 
+            "Completed"
         )
-        
-        # Log summary
-        self._log_summary(result)
         
         return result
     
     def process_single_record(self, record: Dict) -> ProcessingResult:
-        """Process a single audio file record."""
-        start_time = time.time()
-        video_id = record.get('video_id', 'unknown')
-        output_path = record.get('output_path', '')
-        
-        try:
-            # Check if file exists
-            if not output_path or not os.path.exists(output_path):
-                return ProcessingResult(
-                    record_id=video_id,
-                    has_children_voice=False,
-                    action_taken="file_not_found",
-                    error_message=f"File not found: {output_path}",
-                    processing_time=time.time() - start_time
-                )
-            
-            # Analyze audio for children's voice
-            analysis_result = self.audio_classifier.analyze_audio_chunked(
-                output_path, 
-                max_chunks=3,  # Analyze first 3 chunks only
-                early_exit=True  # Exit early on positive detection
-            )
-            
-            has_children_voice = analysis_result['has_children_voice']
-            chunks_analyzed = analysis_result.get('chunks_analyzed', 0)
-            positive_chunk_index = analysis_result.get('positive_chunk_index')
-            was_chunked = analysis_result.get('was_chunked', False)
-            
-            if has_children_voice:
-                # Keep file - mark as classified
-                self._mark_record_classified(record, True, analysis_result)
-                action = "kept"
-            else:
-                # Delete file - mark as classified and remove file
-                self._mark_record_classified(record, False, analysis_result)
-                try:
-                    os.remove(output_path)
-                    logger.info(f"Deleted file: {output_path}")
-                except OSError as e:
-                    logger.warning(f"Could not delete file {output_path}: {e}")
-                action = "deleted"
-            
-            return ProcessingResult(
-                record_id=video_id,
-                has_children_voice=has_children_voice,
-                action_taken=action,
-                error_message=None,
-                processing_time=time.time() - start_time,
-                chunks_analyzed=chunks_analyzed,
-                positive_chunk_index=positive_chunk_index,
-                was_chunked=was_chunked
-            )
-            
-        except Exception as e:
-            error_msg = f"Error processing {video_id}: {str(e)}"
-            logger.error(error_msg)
-            return ProcessingResult(
-                record_id=video_id,
-                has_children_voice=False,
-                action_taken="error",
-                error_message=error_msg,
-                processing_time=time.time() - start_time
-            )
-    
-    def _mark_record_classified(self, record: Dict, has_children_voice: bool, analysis_result: Dict) -> None:
-        """Mark a record as classified in the manifest."""
-        video_id = record.get('video_id', 'unknown')
-        with self._lock:
-            try:
-                # Read current manifest
-                with open(self.manifest_path, 'r', encoding='utf-8') as f:
-                    manifest_data = json.load(f)
-                
-                # Find and update the record
-                records = manifest_data.get('records', [])
-                
-                for i, manifest_record in enumerate(records):
-                    if manifest_record.get('video_id') == video_id:
-                        # Update record
-                        records[i]['classified'] = True
-                        records[i]['has_children_voice'] = has_children_voice
-                        records[i]['classification_date'] = datetime.now().isoformat()
-                        records[i]['chunks_analyzed'] = analysis_result.get('chunks_analyzed', 0)
-                        records[i]['was_chunked'] = analysis_result.get('was_chunked', False)
-                        if analysis_result.get('positive_chunk_index') is not None:
-                            records[i]['positive_chunk_index'] = analysis_result['positive_chunk_index']
-                        break
-                
-                # Write updated manifest
-                manifest_data['records'] = records
-                with open(self.manifest_path, 'w', encoding='utf-8') as f:
-                    json.dump(manifest_data, f, indent=2, ensure_ascii=False)
-                    
-            except Exception as e:
-                logger.error(f"Error marking record {video_id} as classified: {e}")
-                raise
+        """
+        Process a single audio file record using parent class implementation.
+        The parent class handles all the core processing logic including:
+        - Chunked audio analysis
+        - Children's voice detection
+        - File organization
+        - Manifest updates
+        """
+        # Simply delegate to parent class - proper coupling!
+        return super().process_single_record(record)
     
     def _log_summary(self, result: FilterResult) -> None:
         """Log a summary of the filtering results."""
