@@ -29,6 +29,13 @@ import librosa
 import soundfile as sf
 import tempfile
 from youtube_audio_downloader import YoutubeAudioDownloader, Config as AudioDownloaderConfig, _setup_environment, _load_manifest, _backfill_missing_titles, _process_urls_from_file
+
+# Import filterer client for automatic audio classification
+try:
+    from api_youtube_filterer import YouTubeFiltererClient
+    FILTERER_CLIENT_AVAILABLE = True
+except ImportError:
+    FILTERER_CLIENT_AVAILABLE = False
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
 from youtube_output_validator import YouTubeURLValidator
@@ -90,6 +97,7 @@ class CrawlerConfig:
     enable_language_detection: bool = True
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
     download_batch_size: int = 1
+    filterer_api: Optional[Dict[str, Any]] = None
 
 
 class ConfigLoader:
@@ -159,7 +167,8 @@ class ConfigLoader:
                 cookie_settings=config_data.get('cookie_settings', None),
                 enable_language_detection=config_data.get('enable_language_detection', True),
                 user_agent=config_data.get('user_agent', "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"),
-                download_batch_size=config_data.get('download_batch_size', 1)
+                download_batch_size=config_data.get('download_batch_size', 1),
+                filterer_api=config_data.get('filterer_api', None)
             )
             
             # Report loaded configuration
@@ -209,6 +218,18 @@ class ConfigLoader:
         self.output.print_info(f"Total queries: {len(config.search_queries)}")
         self.output.print_info(f"Download strategy: yt-dlp (Android client) → pytube fallback")
         self.output.print_info(f"Download batch size: {config.download_batch_size}")
+        
+        # Report filterer API configuration
+        if config.filterer_api:
+            filterer_enabled = config.filterer_api.get('enabled', False)
+            filterer_server = config.filterer_api.get('server_url', 'Not configured')
+            auto_filter = config.filterer_api.get('auto_filter_after_download', False)
+            self.output.print_info(f"Filterer API: {'Enabled' if filterer_enabled else 'Disabled'}")
+            if filterer_enabled:
+                self.output.print_info(f"Filterer server: {filterer_server}")
+                self.output.print_info(f"Auto-filter after download: {'Enabled' if auto_filter else 'Disabled'}")
+        else:
+            self.output.print_info("Filterer API: Not configured")
         
         total_target_count = config.target_videos_per_query * len(config.search_queries)
         self.output.print_info(f"Total target videos: {total_target_count}")
@@ -2769,6 +2790,58 @@ class YouTubeVideoCrawler:
             except Exception:
                 pass
     
+    def _call_filterer_api_after_batch(self) -> None:
+        """Call the filterer API to automatically classify downloaded audio files."""
+        if not self.config.filterer_api or not self.config.filterer_api.get('enabled', False):
+            return
+        
+        if not self.config.filterer_api.get('auto_filter_after_download', False):
+            return
+        
+        server_url = self.config.filterer_api.get('server_url')
+        if not server_url:
+            self.output.print_warning("Filterer API enabled but no server URL configured")
+            return
+        
+        try:
+            self.output.print_info("🔄 Calling filterer API for automatic audio classification...")
+            
+            # Import the filterer client
+            try:
+                from api_youtube_filterer import YouTubeFiltererClient
+            except ImportError:
+                self.output.print_warning("YouTubeFiltererClient not available - skipping automatic filtering")
+                return
+            
+            # Get the output directory (same as used by the downloader)
+            _, _, final_output_dir = _setup_environment()
+            
+            # Create filterer client and process
+            filterer_client = YouTubeFiltererClient(server_url=server_url)
+            
+            # Get paths for the filterer API call
+            manifest_path = os.path.join(final_output_dir, 'manifest.json')
+            audio_files_dir = os.path.join(final_output_dir, 'audio_files')
+            output_dir = os.path.join(final_output_dir, 'processed_results')
+            
+            result = filterer_client.process_complete_workflow(
+                manifest_path=manifest_path,
+                audio_files_dir=audio_files_dir,
+                output_dir=output_dir
+            )
+            
+            if result.get('success', False):
+                processed_count = result.get('processed_count', 0)
+                classified_count = result.get('classified_count', 0)
+                self.output.print_success(f"✅ Filterer API completed: {processed_count} files processed, {classified_count} classified")
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                self.output.print_warning(f"⚠️  Filterer API completed with issues: {error_msg}")
+                
+        except Exception as e:
+            self.output.print_error(f"❌ Filterer API call failed: {e}")
+            self.output.print_info("Continuing with collection process...")
+    
     def collect_videos(self) -> List[str]:
         """
         Main algorithm to collect videos with children's voices using multiple queries.
@@ -2852,6 +2925,7 @@ class YouTubeVideoCrawler:
                     batch_urls.append(current_video_processing['url'])
                     if len(batch_urls) >= self.config.download_batch_size:
                         self._process_batch(batch_urls)
+                        self._call_filterer_api_after_batch()
                         batch_urls = []
                 
                 self.reporter.report_total_progress(
@@ -2872,6 +2946,7 @@ class YouTubeVideoCrawler:
         # Process any remaining URLs in the batch
         if batch_urls:
             self._process_batch(batch_urls)
+            self._call_filterer_api_after_batch()
         
         # Report timing summary
         timing_summary = self.get_timing_summary()
@@ -3002,6 +3077,14 @@ class YouTubeVideoCrawler:
             
         except Exception as e:
               self.error_reporter.report_file_error("validating URLs", e)
+
+# Import downloader functions for tight coupling
+from youtube_audio_downloader import (
+    _setup_environment,
+    _load_manifest,
+    _backfill_missing_titles,
+    _process_urls_from_file
+)
 
 def main():
     """Main function to run the YouTube video searcher."""

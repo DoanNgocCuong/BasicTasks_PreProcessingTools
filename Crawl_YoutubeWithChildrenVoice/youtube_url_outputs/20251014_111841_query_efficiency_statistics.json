@@ -1,0 +1,46 @@
+{
+  "collection_metadata": {
+    "collection_date": "2025-10-14T11:18:41.197853",
+    "total_queries": 2,
+    "target_per_query": 2,
+    "total_target_count": 4,
+    "videos_collected_current_session": 0,
+    "total_videos_in_file": 9860,
+    "target_achievement_rate": "0.00%",
+    "total_videos_evaluated": 0,
+    "total_videos_with_children_voice": 0,
+    "overall_efficiency": "0.00%"
+  },
+  "query_statistics": [
+    {
+      "query": "bé giới thiệu bản thân",
+      "videos_collected": 0,
+      "videos_reviewed": 2,
+      "videos_evaluated": 0,
+      "videos_with_children_voice": 0,
+      "videos_vietnamese": 0,
+      "videos_not_vietnamese": 0,
+      "efficiency_rate": 0.0,
+      "children_voice_rate": 0,
+      "vietnamese_rate": 0,
+      "new_channels_found": 0
+    },
+    {
+      "query": "trẻ em hát",
+      "videos_collected": 0,
+      "videos_reviewed": 2,
+      "videos_evaluated": 0,
+      "videos_with_children_voice": 0,
+      "videos_vietnamese": 0,
+      "videos_not_vietnamese": 0,
+      "efficiency_rate": 0.0,
+      "children_voice_rate": 0,
+      "vietnamese_rate": 0,
+      "new_channels_found": 0
+    }
+  ],
+  "query_list": [
+    "bé giới thiệu bản thân",
+    "trẻ em hát"
+  ]
+}

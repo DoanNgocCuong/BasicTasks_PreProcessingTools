@@ -15,9 +15,10 @@ import os
 import sys
 from pathlib import Path
 
-# Add the current directory to Python path for imports
+# Add the parent directory to Python path for imports
 current_dir = Path(__file__).parent
-sys.path.insert(0, str(current_dir))
+parent_dir = current_dir.parent
+sys.path.insert(0, str(parent_dir))
 
 from youtube_video_crawler import YouTubeVideoCrawler, CrawlerConfig
 
