@@ -12,9 +12,9 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import FiltererAPIConfig
-from models import VideoMetadata
-from utils import get_output_manager
+from ..config import FiltererAPIConfig
+from ..models import VideoMetadata
+from ..utils import get_output_manager
 
 
 @dataclass
@@ -156,6 +156,7 @@ class FiltererAPIClient:
         # Make API request with retries
         for attempt in range(self.config.max_retries + 1):
             try:
+                assert self.session is not None  # Session should be initialized by filter_videos
                 async with self.session.post(
                     f"{self.config.server_url}/filter",
                     json=request_data,
@@ -271,6 +272,7 @@ class FiltererAPIClient:
             await self.start()
 
         try:
+            assert self.session is not None  # Session should be initialized by health_check
             async with self.session.get(f"{self.config.server_url}/health") as response:
                 return response.status == 200
         except Exception:

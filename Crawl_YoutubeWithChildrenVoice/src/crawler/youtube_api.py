@@ -7,15 +7,15 @@ including search, video metadata retrieval, and quota management.
 
 import time
 import random
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Callable
 from datetime import datetime
 
 import googleapiclient.discovery
 from googleapiclient.errors import HttpError
 
-from config import YouTubeAPIConfig
-from models import VideoMetadata, VideoSource
-from utils import get_output_manager
+from ..config import YouTubeAPIConfig
+from ..models import VideoMetadata, VideoSource
+from ..utils import get_output_manager
 
 
 class YouTubeAPIError(Exception):
@@ -50,18 +50,6 @@ class YouTubeAPIClient:
             raise YouTubeAPIError("No YouTube API keys provided")
 
         self.current_key_index = 0
-        self.youtube_service = None
-        self._init_service()
-
-        # Quota and rate limiting
-        self.quota_exceeded = False
-        self.request_count = 0
-        self.last_request_time = 0.0
-
-        self.output.debug(f"Initialized YouTube API client with {len(self.api_keys)} keys")
-
-    def _init_service(self) -> None:
-        """Initialize YouTube Data API service with current API key."""
         try:
             self.youtube_service = googleapiclient.discovery.build(
                 "youtube", "v3",
@@ -71,6 +59,13 @@ class YouTubeAPIClient:
             self.output.debug(f"Initialized YouTube API service with key {self.current_key_index + 1}")
         except Exception as e:
             raise YouTubeAPIError(f"Failed to initialize YouTube API service: {e}")
+
+        # Quota and rate limiting
+        self.quota_exceeded = False
+        self.request_count = 0
+        self.last_request_time = 0.0
+
+        self.output.debug(f"Initialized YouTube API client with {len(self.api_keys)} keys")
 
     @property
     def _current_key(self) -> str:
@@ -95,7 +90,11 @@ class YouTubeAPIClient:
         self.output.debug(f"Current key: ...{self._current_key[-4:]}")
 
         try:
-            self._init_service()
+            self.youtube_service = googleapiclient.discovery.build(
+                "youtube", "v3",
+                developerKey=self._current_key,
+                cache_discovery=False
+            )
             self.quota_exceeded = False
             return True
         except Exception as e:
@@ -117,7 +116,16 @@ class YouTubeAPIClient:
                 if self._test_key_quota(key):
                     self.output.success(f"API key {i + 1} is available")
                     self.current_key_index = i
-                    self._init_service()
+                    try:
+                        self.youtube_service = googleapiclient.discovery.build(
+                            "youtube", "v3",
+                            developerKey=self._current_key,
+                            cache_discovery=False
+                        )
+                        self.output.debug(f"Reinitialized YouTube API service with key {self.current_key_index + 1}")
+                    except Exception as e:
+                        self.output.error(f"Failed to reinitialize YouTube API service: {e}")
+                        continue
                     self.quota_exceeded = False
                     return
 
@@ -199,7 +207,7 @@ class YouTubeAPIClient:
         # Other errors
         raise YouTubeAPIError(f"YouTube API error during {operation}: {error}")
 
-    def _make_api_request(self, operation: str, max_retries: int = 3) -> Any:
+    def _make_api_request(self, operation: Callable[[], Any], max_retries: int = 3) -> Any:
         """
         Make an API request with error handling and retries.
 

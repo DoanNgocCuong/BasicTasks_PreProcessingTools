@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional, Callable, Any, Dict
 from enum import Enum
+from contextlib import contextmanager
 
 from .output_manager import get_output_manager
 
@@ -172,6 +173,37 @@ class ProgressTracker:
             callback: Function that takes ProgressMetrics as argument
         """
         self.update_callback = callback
+
+    @contextmanager
+    def create_progress_bar(self, total: int, description: str = "", unit: str = "item"):
+        """
+        Create a progress bar context manager.
+
+        Args:
+            total: Total number of items
+            description: Description of the operation
+            unit: Unit name for items
+
+        Yields:
+            Progress bar object with update() method
+        """
+        # Set total and start tracking
+        self.set_total(total)
+        self.start()
+
+        class ProgressBar:
+            def __init__(self, tracker):
+                self.tracker = tracker
+
+            def update(self, n: int = 1):
+                self.tracker.update(completed=n)
+
+        progress_bar = ProgressBar(self)
+
+        try:
+            yield progress_bar
+        finally:
+            self.complete()
 
     def _display_progress_bar(self) -> None:
         """Display progress bar in console."""

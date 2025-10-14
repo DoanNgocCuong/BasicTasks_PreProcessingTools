@@ -308,6 +308,10 @@ class Video:
 class QueryStatistics:
     """Statistics for a search query."""
     query: str
+    videos_found: int = 0
+    new_videos: int = 0
+    total_videos_so_far: int = 0
+    timestamp: Optional[datetime] = None
     videos_collected: int = 0
     videos_reviewed: int = 0
     videos_evaluated: int = 0
@@ -316,6 +320,26 @@ class QueryStatistics:
     videos_not_vietnamese: int = 0
     total_analysis_time: float = 0.0
     efficiency_rate: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "query": self.query,
+            "videos_found": self.videos_found,
+            "new_videos": self.new_videos,
+            "total_videos_so_far": self.total_videos_so_far,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "videos_collected": self.videos_collected,
+            "videos_reviewed": self.videos_reviewed,
+            "videos_evaluated": self.videos_evaluated,
+            "videos_with_children_voice": self.videos_with_children_voice,
+            "videos_vietnamese": self.videos_vietnamese,
+            "videos_not_vietnamese": self.videos_not_vietnamese,
+            "total_analysis_time": self.total_analysis_time,
+            "efficiency_rate": self.efficiency_rate,
+            "children_voice_rate": self.children_voice_rate,
+            "vietnamese_rate": self.vietnamese_rate,
+        }
 
     @property
     def children_voice_rate(self) -> float:

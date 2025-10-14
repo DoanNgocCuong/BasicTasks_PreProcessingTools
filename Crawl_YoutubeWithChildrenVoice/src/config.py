@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 @dataclass
@@ -185,6 +186,9 @@ class CrawlerConfig:
     @classmethod
     def from_env(cls) -> 'CrawlerConfig':
         """Create configuration from environment variables."""
+        # Load .env file if it exists
+        load_dotenv()
+        
         config = cls()
 
         # YouTube API keys

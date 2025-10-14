@@ -12,13 +12,13 @@ import argparse
 from pathlib import Path
 from typing import List, Optional
 
-from config import load_config, CrawlerConfig
-from crawler import SearchEngine
-from downloader import AudioDownloader
-from analyzer import VoiceClassifier, LanguageDetector
-from filterer import FiltererAPIClient
-from models import VideoMetadata
-from utils import get_output_manager, get_progress_tracker
+from .config import load_config, CrawlerConfig
+from .crawler import SearchEngine
+from .downloader import AudioDownloader
+from .analyzer import VoiceClassifier, LanguageDetector
+from .filterer import FiltererAPIClient
+from .models import VideoMetadata
+from .utils import get_output_manager, get_progress_tracker
 
 
 async def run_crawler_workflow(config: CrawlerConfig) -> bool:

@@ -10,10 +10,10 @@ import time
 from typing import List, Dict, Set, Optional, Any
 from datetime import datetime
 
-from config import CrawlerConfig, YouTubeAPIConfig
-from models import VideoMetadata, QueryStatistics
-from crawler.youtube_api import YouTubeAPIClient, QuotaExceededError
-from utils import get_output_manager, get_progress_tracker
+from ..config import CrawlerConfig, YouTubeAPIConfig
+from ..models import VideoMetadata, QueryStatistics
+from ..crawler.youtube_api import YouTubeAPIClient, QuotaExceededError
+from ..utils import get_output_manager, get_progress_tracker
 
 
 class SearchEngine:
@@ -97,7 +97,7 @@ class SearchEngine:
 
                     # Rate limiting between queries
                     if i < total_queries - 1:
-                        await asyncio.sleep(self.crawler_config.query_delay_seconds)
+                        await asyncio.sleep(self.youtube_config.min_request_interval)
 
                 except QuotaExceededError:
                     self.output.error(f"Quota exceeded during query '{query}' - stopping search")
@@ -127,7 +127,7 @@ class SearchEngine:
             # Perform search
             videos = self.api_client.search_videos(
                 query=query,
-                max_results=self.crawler_config.max_videos_per_query
+                max_results=self.crawler_config.search.target_videos_per_query
             )
 
             # Get detailed metadata for all videos
@@ -143,7 +143,7 @@ class SearchEngine:
                         video.view_count = detailed.view_count
                         video.like_count = detailed.like_count
                         video.comment_count = detailed.comment_count
-                        video.duration = detailed.duration
+                        video.duration_seconds = detailed.duration_seconds
                         video.tags = detailed.tags
 
             return videos

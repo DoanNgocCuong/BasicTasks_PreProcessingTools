@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
-from config import AnalysisConfig
-from utils import get_output_manager
+from ..config import AnalysisConfig
+from ..utils import get_output_manager
 
 
 @dataclass

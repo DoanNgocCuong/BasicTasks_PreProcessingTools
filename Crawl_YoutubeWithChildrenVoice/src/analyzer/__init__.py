@@ -8,11 +8,11 @@ and other audio analysis tasks for children's voice content.
 """
 
 from .voice_classifier import VoiceClassifier, VoiceClassificationResult
-from .language_detector import LanguageDetector, LanguageDetectionResult
+from .language_detector import LanguageDetector, LanguageDetectionResultLocal
 
 __all__ = [
     "VoiceClassifier",
     "VoiceClassificationResult",
     "LanguageDetector",
-    "LanguageDetectionResult"
+    "LanguageDetectionResultLocal"
 ]

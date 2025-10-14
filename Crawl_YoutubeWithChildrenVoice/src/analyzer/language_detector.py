@@ -13,9 +13,9 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 
-from config import AnalysisConfig
-from models import LanguageDetectionResult
-from utils import get_output_manager
+from ..config import AnalysisConfig
+from ..models import LanguageDetectionResult
+from ..utils import get_output_manager
 
 
 class Language(Enum):
@@ -26,7 +26,7 @@ class Language(Enum):
 
 
 @dataclass
-class LanguageDetectionResult:
+class LanguageDetectionResultLocal:
     """Result of language detection analysis."""
     detected_language: Language
     confidence: float
@@ -112,7 +112,7 @@ class LanguageDetector:
         model.eval()  # Set to evaluation mode
         return model
 
-    def detect_language_file(self, audio_path: Path) -> LanguageDetectionResult:
+    def detect_language_file(self, audio_path: Path) -> LanguageDetectionResultLocal:
         """
         Detect language in an audio file.
 
@@ -130,7 +130,7 @@ class LanguageDetector:
             features = self._extract_features(audio_path)
 
             if features is None:
-                return LanguageDetectionResult(
+                return LanguageDetectionResultLocal(
                     detected_language=Language.UNKNOWN,
                     confidence=0.0,
                     language_probabilities={},
@@ -141,7 +141,7 @@ class LanguageDetector:
             # Detect language using model
             detected_lang, confidence, probabilities = self._detect_language(features)
 
-            return LanguageDetectionResult(
+            return LanguageDetectionResultLocal(
                 detected_language=detected_lang,
                 confidence=confidence,
                 language_probabilities=probabilities,
@@ -151,7 +151,7 @@ class LanguageDetector:
 
         except Exception as e:
             self.output.error(f"Language detection failed for {audio_path}: {e}")
-            return LanguageDetectionResult(
+            return LanguageDetectionResultLocal(
                 detected_language=Language.UNKNOWN,
                 confidence=0.0,
                 language_probabilities={},
@@ -288,7 +288,7 @@ class LanguageDetector:
 
         return np.array(vector, dtype=np.float32)
 
-    def analyze_audio_chunk(self, audio_chunk: np.ndarray, sample_rate: int) -> LanguageDetectionResult:
+    def analyze_audio_chunk(self, audio_chunk: np.ndarray, sample_rate: int) -> LanguageDetectionResultLocal:
         """
         Analyze a chunk of audio data directly.
 
@@ -307,7 +307,7 @@ class LanguageDetector:
             features = self._extract_features_from_array(audio_chunk, sample_rate)
 
             if features is None:
-                return LanguageDetectionResult(
+                return LanguageDetectionResultLocal(
                     detected_language=Language.UNKNOWN,
                     confidence=0.0,
                     language_probabilities={},
@@ -318,7 +318,7 @@ class LanguageDetector:
             # Detect language
             detected_lang, confidence, probabilities = self._detect_language(features)
 
-            return LanguageDetectionResult(
+            return LanguageDetectionResultLocal(
                 detected_language=detected_lang,
                 confidence=confidence,
                 language_probabilities=probabilities,
@@ -328,7 +328,7 @@ class LanguageDetector:
 
         except Exception as e:
             self.output.error(f"Audio chunk analysis failed: {e}")
-            return LanguageDetectionResult(
+            return LanguageDetectionResultLocal(
                 detected_language=Language.UNKNOWN,
                 confidence=0.0,
                 language_probabilities={},
