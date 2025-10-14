@@ -1,387 +1,232 @@
-# YouTube Children's Voice Crawler
+# YouTube Children's Voice Crawler - Functionality Overview
 
-## Quota auto-resume (YouTube Data API v3)
+## Core System Functionality
 
-The crawler now automatically pauses when all API keys hit the daily quota and resumes the moment any key is available again. It periodically probes each configured key with a low-cost request and switches to the first key that recovers.
+The YouTube Children's Voice Crawler is a comprehensive, modular system designed to automatically discover, analyze, and curate children's voice content from YouTube. The system operates through four interconnected phases: video discovery, audio extraction, content analysis, and quality filtering.
 
-- Configure polling interval in `.env`:
-  - `POLL_INTERVAL_SECONDS=300` (default). Example: set to `120` for faster pickup.
-- Configure API keys in `.env` (either method works):
-  - `YOUTUBE_API_KEYS=AIza...A1,AIza...B2,AIza...C3`
-  - or `YOUTUBE_API_KEY_1=...`, `YOUTUBE_API_KEY_2=...`, `YOUTUBE_API_KEY_3=...`
-- While waiting, the crawler logs a heartbeat line every few cycles: "Still waiting... elapsed XmYYs".
+## 🏗️ System Architecture
 
-## Enhanced Long Video Processing with Chunking
+### Main Orchestrator (`main.py`)
 
-**NEW: Intelligent Chunk Analysis for Long Videos**
+The central coordination module that manages the entire crawling workflow:
 
-The crawler now processes long videos by splitting them into chunks and analyzing sequentially with early exit:
+- **Workflow Orchestration**: Coordinates the four-phase pipeline (search → download → analyze → filter)
+- **Configuration Management**: Loads and validates system configuration from multiple sources
+- **Error Handling**: Implements comprehensive error recovery and graceful degradation
+- **Progress Tracking**: Provides real-time progress monitoring and detailed statistics
+- **CLI Interface**: Supports command-line arguments for configuration overrides and dry-run validation
 
-### How It Works
+### Configuration System (`config.py`)
 
-1. **Smart Duration Detection**: Videos exceeding `MAX_AUDIO_DURATION_SECONDS` are automatically chunked
-2. **Sequential Analysis**: Processes chunks one by one until finding Vietnamese children's voice
-3. **Early Exit Optimization**: Stops at the first positive match, saving processing time
-4. **Full URL Collection**: Adds the complete video URL when any chunk meets criteria
+Unified configuration management providing:
 
-### Configuration
+- **Multi-Source Configuration**: Supports environment variables, JSON files, and CLI overrides
+- **Type-Safe Settings**: Strongly typed configuration classes with validation
+- **Hierarchical Structure**: Organized configuration for YouTube API, search, download, analysis, and filtering
+- **Dynamic Validation**: Runtime configuration validation with detailed error reporting
+- **Environment Integration**: Seamless integration with environment variables and configuration files
 
-Set the maximum chunk duration (in seconds) via `.env`:
+## 🔍 Video Discovery Phase
 
-```
-MAX_AUDIO_DURATION_SECONDS=1200
-```
+### Search Engine (`crawler/search_engine.py`)
 
-**Behavior by Setting:**
+Intelligent video discovery system that:
 
-- **With limit (e.g., 1200s)**: Videos > 20min are chunked into 20min segments
-- **No limit (None)**: All videos processed normally, no chunking
-- **Legacy behavior**: Previously long videos were skipped entirely
+- **Multi-Query Processing**: Executes searches across multiple Vietnamese children's content queries
+- **API Quota Management**: Automatically rotates through multiple YouTube API keys when quotas are exceeded
+- **Duplicate Prevention**: Maintains collections of discovered video IDs to prevent duplicates
+- **Rate Limiting**: Implements intelligent delays between queries to respect API limits
+- **Statistics Tracking**: Records comprehensive search metrics and performance data
+- **Batch Processing**: Handles large-scale video discovery with configurable batch sizes
 
-### Example Workflow
+### YouTube API Client (`crawler/youtube_api.py`)
 
-```
-🎬 30-minute video detected
-📏 Limit: 20 minutes → Will chunk
-🧩 Creating 2 chunks: 0-20min, 20-30min
-🔍 Analyzing chunk 1/2...
-🎯 SUCCESS: Vietnamese children's voice found!
-⚡ Early exit: Skipping remaining chunks
-➕ Adding full video URL to collection
-```
+Robust YouTube Data API v3 interface providing:
 
-### Performance Benefits
+- **Authentication Management**: Handles multiple API keys with automatic failover
+- **Quota Monitoring**: Tracks API usage and implements quota-aware request scheduling
+- **Error Recovery**: Exponential backoff retry logic for transient failures
+- **Data Parsing**: Converts YouTube API responses into structured video metadata
+- **Batch Operations**: Efficient bulk retrieval of video details and search results
+- **Rate Limiting**: Enforces minimum request intervals to prevent API throttling
 
-- **Processing Speed**: 2-3x faster than full video analysis
-- **Storage Efficiency**: Processes chunks without storing full video
-- **Early Detection**: Stops immediately when criteria are met
-- **Memory Optimization**: Automatic cleanup of temporary chunk files
+## 📥 Audio Extraction Phase
 
-### Testing
+### Audio Downloader (`downloader/audio_downloader.py`)
 
-Run the test suite to verify chunking functionality:
+Multi-strategy audio extraction system featuring:
 
-```powershell
-python test_chunk_analysis.py
-```
+- **Dual Download Methods**: Primary yt-dlp extraction with API-assisted fallback
+- **Concurrent Processing**: Configurable parallel downloads for improved throughput
+- **Format Conversion**: Automatic conversion to MP3 with quality optimization
+- **Fallback Mechanisms**: Graceful degradation when primary methods fail
+- **Progress Monitoring**: Real-time download progress with success/failure tracking
+- **Error Classification**: Detailed error categorization for troubleshooting
+- **Resource Management**: Connection pooling and timeout handling
 
-Notes:
+## 🧠 Content Analysis Phase
 
-- The main crawler (`youtube_video_crawler.py`) now uses intelligent chunking
-- The standalone alternative downloader (`youtube_audio_downloader_alternative.py`) currently trims to 5 minutes; use the main crawler for chunk-based analysis
+### Voice Classification (`analyzer/voice_classifier.py`)
 
-## Batch download audio from collected URLs
+Machine learning-based voice analysis system that:
 
-Two downloader scripts can now batch-download all URLs from `youtube_url_outputs/collected_video_urls.txt` into `youtube_audio_outputs/` when run from the terminal without arguments.
+- **Acoustic Feature Extraction**: Computes MFCCs, spectral features, and voice characteristics
+- **Children's Voice Detection**: ML model trained to identify children's vocal patterns
+- **Confidence Scoring**: Provides probability scores for voice classification decisions
+- **Chunk Processing**: Handles long videos through intelligent audio segmentation
+- **Feature Engineering**: Extracts domain-specific acoustic features for voice analysis
+- **Model Inference**: Efficient PyTorch-based classification with GPU acceleration support
 
-### youtube_audio_downloader.py (yt-dlp based)
+### Language Detection (`analyzer/language_detector.py`)
 
-- Default batch (uses `youtube_url_outputs/collected_video_urls.txt` if present):
+Advanced language identification system specializing in:
 
-```
-python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader.py
-```
+- **Vietnamese Speech Recognition**: Specialized detection of Vietnamese language patterns
+- **Acoustic Language Modeling**: Uses speech acoustics rather than transcription
+- **Multi-Language Support**: Handles Vietnamese, English, and other languages
+- **Confidence Assessment**: Provides confidence scores for language identification
+- **Feature-Based Classification**: Leverages spectral and prosodic features for language discrimination
+- **Real-time Processing**: Efficient analysis of audio streams and chunks
 
-- Batch from custom file:
+## ✅ Content Filtering Phase
 
-```
-python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader.py --from-file D:\path\to\urls.txt
-```
+### Filterer API Client (`filterer/api_client.py`)
 
-- Options (can be combined as applicable):
-  - `--cookies-file <path>`: Use Netscape-format cookies
-  - `--cookies-browser <name>`: Use browser cookies (chrome, firefox, safari, edge, opera, brave)
-  - `--test-duration`: Only inspect duration/metadata, do not download
+Content validation and quality assurance system that:
 
-### youtube_audio_downloader_alternative.py (pytube/pytubefix based)
+- **API Integration**: Communicates with external filtering service for content validation
+- **Batch Processing**: Efficient bulk filtering of multiple videos
+- **Quality Assessment**: Evaluates content appropriateness and quality metrics
+- **Retry Logic**: Robust error handling with automatic retries
+- **Result Aggregation**: Combines multiple filtering criteria into final decisions
+- **Performance Monitoring**: Tracks filtering success rates and processing times
 
-- Default batch (uses `youtube_url_outputs/collected_video_urls.txt` if present):
+## 📊 Data Management
 
-```
-python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader_alternative.py
-```
+### Type-Safe Data Models (`models/models.py`)
 
-- Batch from custom file or pass direct URLs:
+Comprehensive data structure definitions including:
 
-```
-python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader_alternative.py --from-file D:\path\to\urls.txt
-python BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/youtube_audio_downloader_alternative.py https://youtu.be/.. https://www.youtube.com/watch?v=..
-```
+- **Video Metadata**: Structured representation of YouTube video information
+- **Analysis Results**: Typed containers for voice and language detection outcomes
+- **Download Records**: Detailed tracking of audio extraction attempts and results
+- **Processing Batches**: Organization of videos into manageable processing units
+- **Session Management**: Complete crawler session tracking and statistics
+- **Manifest Generation**: Structured output data for dataset curation
 
-All outputs are saved to `youtube_audio_outputs/`.
+## 🛠️ Utility Systems
 
-## .env loading behavior
+### Output Management (`utils/output_manager.py`)
 
-Environment variables are loaded automatically when any module imports `env_config`.
+Centralized user interface and logging system providing:
 
-- Search locations (in order):
-  1. `.env` in this folder (`BasicTasks_PreProcessingTools/Crawl_YoutubeWithChildrenVoice/.env`)
-  2. `.env` in the current working directory (CWD)
-- Supports both python-dotenv and a manual parser fallback.
-- Values already present in the process environment are not overridden.
+- **Multi-Level Logging**: Debug, info, warning, and error message categorization
+- **Progress Visualization**: Real-time progress bars and status indicators
+- **File Output**: Optional logging to files with timestamps
+- **User Feedback**: Clear, emoji-enhanced messages for different operation types
+- **Statistics Display**: Formatted presentation of processing metrics
+- **Session Summaries**: Comprehensive workflow completion reports
 
-Key variables:
+### File Management (`utils/file_manager.py`)
 
-- `YOUTUBE_API_KEYS` (comma-separated) or `YOUTUBE_API_KEY_1..3`
-- `POLL_INTERVAL_SECONDS` (default 300)
-- `MAX_AUDIO_DURATION_SECONDS` (e.g., 1200)
+Robust file system operations including:
 
-## Overview
+- **Directory Structure**: Maintains organized output directories for different data types
+- **Path Resolution**: Handles absolute and relative paths across different environments
+- **File Validation**: Verifies file existence and integrity
+- **Cleanup Operations**: Safe file deletion and temporary file management
+- **Batch Operations**: Efficient handling of multiple files and directories
 
-AI-powered crawler that automatically searches, downloads, and analyzes YouTube videos to collect URLs of videos containing Vietnamese children's voices using machine learning models.
+### Progress Tracking (`utils/progress_tracker.py`)
 
-**Key Features:**
+Advanced progress monitoring system featuring:
 
-- **YouTube Data API Integration** - Official API for faster, more reliable metadata retrieval
-- **Automated Configuration** - JSON-based configuration file for seamless operation
-- **Comprehensive Logging** - Detailed logging of all operations with timestamps
-- **Anti-Detection Measures** - Advanced techniques to avoid YouTube bot detection
-- **Enhanced Error Handling** - Robust retry mechanisms and graceful degradation
-- **Cookie Support** - Enhanced YouTube access with browser cookies
+- **Multi-Level Tracking**: Tracks progress across queries, videos, and processing phases
+- **Performance Metrics**: Records timing, success rates, and throughput statistics
+- **Real-time Updates**: Live progress reporting with ETA calculations
+- **Historical Data**: Maintains processing history for analysis and optimization
+- **Resource Monitoring**: Tracks system resource usage during operations
 
-## Quick Start
+## 🔧 Specialized Components
 
-### Prerequisites
+### Voice Analysis Pipeline
 
-- Python 3.8+
-- Internet connection
-- YouTube Data API v3 key (optional but recommended)
-- FFmpeg installed
+Integrated audio processing workflow that:
 
-### 1. Setup Environment
+- **Audio Preprocessing**: Normalizes sample rates and formats for consistent analysis
+- **Feature Extraction**: Computes acoustic features optimized for voice classification
+- **Model Inference**: Applies trained models for children's voice detection
+- **Confidence Calibration**: Adjusts classification thresholds based on audio quality
+- **Chunk Analysis**: Processes long videos in segments with overlap handling
+- **Result Aggregation**: Combines chunk-level results into video-level decisions
 
-**Get YouTube API Key (Recommended):**
+### Language Identification System
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create new project or select existing one
-3. Enable "YouTube Data API v3" in APIs & Services
-4. Create credentials → API key
-5. Copy the API key
+Sophisticated language detection pipeline featuring:
 
-**Configure environment:**
+- **Acoustic Modeling**: Uses speech acoustics rather than requiring transcription
+- **Vietnamese Optimization**: Specialized features for Vietnamese phonetics
+- **Multi-hypothesis Handling**: Considers multiple language possibilities
+- **Confidence Weighting**: Adjusts confidence based on audio clarity and duration
+- **Fallback Mechanisms**: Graceful handling when language detection is uncertain
 
-1. Copy the example environment file:
+### Quality Assurance Framework
 
-   ```powershell
-   # Windows PowerShell
-   Copy-Item .env.example .env
+Comprehensive content validation system that:
 
-   # Mac/Linux
-   cp .env.example .env
-   ```
+- **Multi-Criteria Evaluation**: Assesses voice quality, language clarity, and content appropriateness
+- **Automated Filtering**: Removes unsuitable content based on configurable thresholds
+- **Quality Metrics**: Computes audio quality scores and processing reliability
+- **False Positive Reduction**: Minimizes incorrect inclusions through layered validation
+- **Dataset Curation**: Ensures final dataset meets research and quality standards
 
-2. Edit `.env` file and replace `your_youtube_api_key_here` with your actual API key:
+## 📈 Performance Optimization
 
-   ```
-   YOUTUBE_API_KEY=your_actual_api_key_here
-   ```
+### Asynchronous Processing
 
-3. Optional: Adjust other settings in `.env` as needed:
-   - `MAX_WORKERS=4` (parallel processing threads)
-   - `CHILD_THRESHOLD=0.5` (confidence threshold for children's voice)
-   - `DEBUG_MODE=false` (enable detailed logging)
+Full async/await implementation enabling:
 
-### 2. Install Dependencies
+- **Concurrent Operations**: Parallel video downloads and analysis
+- **Non-blocking I/O**: Efficient API calls and file operations
+- **Resource Pooling**: Connection reuse and thread pool management
+- **Scalable Architecture**: Handles increasing loads through concurrency
 
-**Python packages:**
+### Memory Management
 
-```powershell
-# Windows/Mac/Linux
-pip install -r requirements.txt
-```
+Efficient resource utilization through:
 
-**Install FFmpeg:**
+- **Streaming Processing**: Processes large audio files without full loading
+- **Batch Processing**: Groups operations to optimize memory usage
+- **Garbage Collection**: Explicit cleanup of temporary resources
+- **Chunked Analysis**: Processes audio in segments to manage memory footprint
 
-**Windows:**
+### Error Resilience
 
-```powershell
-# Download from https://ffmpeg.org/download.html
-# Extract to C:\ffmpeg and add C:\ffmpeg\bin to system PATH
-```
+Robust error handling and recovery mechanisms:
 
-**Mac:**
+- **Graceful Degradation**: Continues processing when individual components fail
+- **Automatic Retries**: Exponential backoff for transient failures
+- **State Persistence**: Saves progress to resume interrupted operations
+- **Failure Classification**: Different handling strategies for different error types
 
-```bash
-brew install ffmpeg
-```
+## 🔒 System Reliability
 
-**Linux (Ubuntu/Debian):**
+### Data Integrity
 
-```bash
-sudo apt update && sudo apt install ffmpeg
-```
+Ensures data consistency through:
 
-**Linux (CentOS/RHEL):**
+- **Atomic Operations**: File writes and database updates are atomic
+- **Backup Creation**: Automatic backups before destructive operations
+- **Validation Checks**: Continuous validation of data integrity
+- **Recovery Mechanisms**: Ability to recover from partial failures
 
-```bash
-sudo yum install ffmpeg
-# or for newer versions:
-sudo dnf install ffmpeg
-```
+### Monitoring and Observability
 
-### 3. Verify Setup
+Comprehensive system monitoring including:
 
-```powershell
-# Windows PowerShell
-ffmpeg -version
-Get-Content .env | Select-String "YOUTUBE_API_KEY"
-python -c "import torch, transformers; print('Dependencies OK')"
-```
+- **Performance Metrics**: Tracks throughput, latency, and resource usage
+- **Error Tracking**: Detailed error logging with context and stack traces
+- **Progress Monitoring**: Real-time visibility into processing status
+- **Statistics Aggregation**: Comprehensive metrics for optimization and debugging
 
-```bash
-# Mac/Linux
-ffmpeg -version
-grep "YOUTUBE_API_KEY" .env
-python -c "import torch, transformers; print('Dependencies OK')"
-```
-
-### 4. Run the Crawler
-
-```powershell
-# Windows PowerShell
-python youtube_video_crawler.py
-```
-
-```bash
-# Mac/Linux
-python youtube_video_crawler.py
-# or if python3 is required:
-python3 youtube_video_crawler.py
-```
-
-The crawler will automatically:
-
-- Load configuration from `crawler_config.json` (created on first run)
-- Search YouTube using configured queries
-- Download and analyze audio from each video
-- Detect Vietnamese language and children's voices using ML
-- Explore channels with promising content
-- Generate comprehensive reports and statistics
-- Log all operations with timestamps for debugging
-
-## Configuration
-
-The crawler uses a JSON configuration file (`crawler_config.json`) for automated operation. See [CONFIG_GUIDE.md](CONFIG_GUIDE.md) for detailed configuration options including:
-
-- Search query customization
-- Cookie configuration for enhanced YouTube access
-- Debug mode settings
-- Download method selection
-- Performance tuning parameters
-
-## Enhanced Features
-
-### 🔧 YouTube Data API Integration
-
-The crawler prioritizes YouTube Data API v3 for metadata retrieval:
-
-- **Faster metadata retrieval** - Official API is more reliable than scraping
-- **Higher rate limits** - API has better quota management
-- **Structured data** - Consistent, well-formatted metadata
-- **Automatic fallback** - Falls back to yt-dlp if API unavailable
-
-### 📝 Comprehensive Logging
-
-All operations are logged with detailed information:
-
-- **Timestamped entries** - Every operation includes precise timestamps
-- **Progress tracking** - Real-time progress updates during collection
-- **Error reporting** - Detailed error messages with context
-- **Performance metrics** - Timing and efficiency statistics
-
-### 🛡️ Anti-Detection Features
-
-Enhanced downloader with multiple anti-detection measures:
-
-- **User Agent Rotation** - Cycles through realistic browser user agents
-- **Intelligent Rate Limiting** - Adaptive delays based on request patterns
-- **Enhanced HTTP Headers** - Browser-like headers to avoid detection
-- **Retry Logic** - Exponential backoff with random delays
-- **Bot Detection Recovery** - Extended delays when detection triggered
-
-### 📁 Output Files
-
-The enhanced crawler generates timestamped files:
-
-```
-youtube_url_outputs/
-├── YYYYMMDD_HHMMSS_collection_report.txt    # Video collection report
-├── YYYYMMDD_HHMMSS_multi_query_collected_video_urls.txt
-├── YYYYMMDD_HHMMSS_detailed_collection_results.json
-├── YYYYMMDD_HHMMSS_query_efficiency_statistics.json
-└── YYYYMMDD_HHMMSS_backup_collected_videos.txt
-```
-
-## Performance Optimizations
-
-### 1. Use YouTube Data API
-
-- Set up API key for 10x faster metadata retrieval
-- Reduces load on YouTube's video pages
-- More reliable than web scraping
-
-### 2. Batch Processing
-
-- API supports up to 50 video IDs per request
-- Reduces total API calls needed
-- Faster overall processing
-
-### 3. Intelligent Caching
-
-- Reuses classifier models across videos
-- Caches API responses
-- Minimizes redundant operations
-
-## Troubleshooting
-
-### YouTube Bot Detection
-
-If you encounter bot detection:
-
-1. **Check delays** - Increase rate limiting intervals
-2. **Reduce concurrency** - Lower `MAX_WORKERS` in config
-3. **Verify user agents** - Ensure realistic user agent strings
-4. **Review patterns** - Check for repetitive behavior
-
-### API Quota Issues
-
-For YouTube Data API quota management:
-
-1. **Monitor usage** - Check Google Cloud Console
-2. **Implement caching** - Store metadata to reduce API calls
-3. **Batch requests** - Process multiple videos per API call
-4. **Fallback gracefully** - Ensure yt-dlp fallback works
-
-### Configuration Issues
-
-If the crawler fails to start:
-
-1. **Check .env file** - Ensure YOUTUBE_API_KEY is set correctly
-2. **Verify config file** - Check `crawler_config.json` syntax
-3. **File permissions** - Ensure write access to output directory
-4. **Dependencies** - Verify all packages are installed correctly
-
-## Security Considerations
-
-1. **API Key Protection** - Keep YouTube API key secure
-2. **Rate Limiting** - Respect YouTube's terms of service
-3. **User Agent Honesty** - Use realistic, non-deceptive user agents
-4. **Data Privacy** - Handle video metadata responsibly
-
-## Background Execution
-
-Since the script uses automated configuration, it can be run in the background:
-
-### Windows (PowerShell)
-
-```powershell
-Start-Process python -ArgumentList "youtube_video_crawler.py" -WindowStyle Hidden
-```
-
-### Linux/Mac
-
-```bash
-nohup python youtube_video_crawler.py > crawler.log 2>&1 &
-```
-
-For detailed configuration options and advanced features, see [CONFIG_GUIDE.md](CONFIG_GUIDE.md).
+This modular architecture enables the system to efficiently process thousands of YouTube videos, extracting high-quality children's voice data in Vietnamese while maintaining strict quality standards and operational reliability.
