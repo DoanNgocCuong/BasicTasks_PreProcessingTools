@@ -25,20 +25,52 @@ class YouTubeAPIConfig:
 @dataclass
 class SearchConfig:
     """Configuration for video search and collection."""
-    queries: List[str] = field(default_factory=lambda: [
-        "bé giới thiệu bản thân",
-        "bé tập nói tiếng Việt",
-        "trẻ em kể chuyện",
-        "bé hát ca dao",
-        "em bé học nói",
-        "trẻ con nói chuyện",
-        "bé đọc thơ"
-    ])
+    queries: List[str] = field(default_factory=lambda: SearchConfig._load_queries_from_file())
     target_videos_per_query: int = 20
     max_recommended_per_query: int = 100
     min_target_count: int = 1
     enable_channel_exploration: bool = True
     max_similar_videos_per_channel: int = 10
+
+    @staticmethod
+    def _load_queries_from_file() -> List[str]:
+        """Load search queries from queries.txt file."""
+        queries_file = Path("queries.txt")
+        if queries_file.exists():
+            try:
+                with open(queries_file, 'r', encoding='utf-8') as f:
+                    queries = [line.strip() for line in f if line.strip()]
+                return queries if queries else [
+                    "bé giới thiệu bản thân",
+                    "bé tập nói tiếng Việt",
+                    "trẻ em kể chuyện",
+                    "bé hát ca dao",
+                    "em bé học nói",
+                    "trẻ con nói chuyện",
+                    "bé đọc thơ"
+                ]
+            except Exception as e:
+                print(f"Warning: Could not load queries from {queries_file}: {e}")
+                return [
+                    "bé giới thiệu bản thân",
+                    "bé tập nói tiếng Việt",
+                    "trẻ em kể chuyện",
+                    "bé hát ca dao",
+                    "em bé học nói",
+                    "trẻ con nói chuyện",
+                    "bé đọc thơ"
+                ]
+        else:
+            # Fallback to default queries if file doesn't exist
+            return [
+                "bé giới thiệu bản thân",
+                "bé tập nói tiếng Việt",
+                "trẻ em kể chuyện",
+                "bé hát ca dao",
+                "em bé học nói",
+                "trẻ con nói chuyện",
+                "bé đọc thơ"
+            ]
 
 
 @dataclass
@@ -81,6 +113,10 @@ class OutputConfig:
     url_outputs_dir: Path = field(default_factory=lambda: Path("output/url_outputs"))
     audio_outputs_dir: Path = field(default_factory=lambda: Path("output/audio_outputs"))
     final_audio_dir: Path = field(default_factory=lambda: Path("output/final_audio"))
+    # Backup directories
+    url_backups_dir: Path = field(default_factory=lambda: Path("output/url_outputs/backups"))
+    audio_backups_dir: Path = field(default_factory=lambda: Path("output/audio_outputs/backups"))
+    final_audio_backups_dir: Path = field(default_factory=lambda: Path("output/final_audio/backups"))
     manifest_file: str = "manifest.json"
     backup_prefix: str = "backup"
 
@@ -125,7 +161,10 @@ class CrawlerConfig:
             self.output.base_dir,
             self.output.url_outputs_dir,
             self.output.audio_outputs_dir,
-            self.output.final_audio_dir
+            self.output.final_audio_dir,
+            self.output.url_backups_dir,
+            self.output.audio_backups_dir,
+            self.output.final_audio_backups_dir
         ]
         return all(dir_path.exists() for dir_path in dirs_to_check)
 
@@ -135,7 +174,10 @@ class CrawlerConfig:
             self.output.base_dir,
             self.output.url_outputs_dir,
             self.output.audio_outputs_dir,
-            self.output.final_audio_dir
+            self.output.final_audio_dir,
+            self.output.url_backups_dir,
+            self.output.audio_backups_dir,
+            self.output.final_audio_backups_dir
         ]
         for dir_path in dirs_to_create:
             dir_path.mkdir(parents=True, exist_ok=True)

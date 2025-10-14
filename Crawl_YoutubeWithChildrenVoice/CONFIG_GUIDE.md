@@ -12,16 +12,6 @@ The script automatically looks for `crawler_config.json` in the same directory a
 {
   "debug_mode": false,
   "target_videos_per_query": 20,
-  "search_queries": [
-    "bé giới thiệu bản thân",
-    "bé tập nói tiếng Việt",
-    "trẻ em kể chuyện",
-    "bé hát ca dao",
-    "em bé học nói",
-    "trẻ con nói chuyện",
-    "bé đọc thơ",
-    "con nít kể chuyện"
-  ],
   "max_recommended_per_query": 100,
   "min_target_count": 1,
   "download_method": "api_assisted",
@@ -32,21 +22,20 @@ The script automatically looks for `crawler_config.json` in the same directory a
     "cookies_file_path": "cookies.txt",
     "description": "Cookie configuration for YouTube access. Set enabled to true to use cookies. Method can be 'browser' (uses browser cookies) or 'file' (uses cookies.txt file). For browser method, specify browser_name (chrome, firefox, safari, edge, opera, brave). For file method, specify cookies_file_path."
   },
-  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, set download_method to 'api_assisted' (recommended) or 'yt_dlp_only', and configure cookie_settings for enhanced access to YouTube content."
+  "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, set download_method to 'api_assisted' (recommended) or 'yt_dlp_only', and configure cookie_settings for enhanced access to YouTube content. Search queries are loaded from queries.txt file."
 }
 ```
 
 ### Configuration Parameters
 
-| Parameter                   | Type             | Description                                           | Default                   |
-| --------------------------- | ---------------- | ----------------------------------------------------- | ------------------------- |
-| `debug_mode`                | boolean          | Enable detailed debug logging                         | `false`                   |
-| `target_videos_per_query`   | integer          | Number of videos to collect per search query          | `20`                      |
-| `search_queries`            | array of strings | List of YouTube search queries to use                 | See default queries above |
-| `max_recommended_per_query` | integer          | Maximum recommended videos per query (for validation) | `100`                     |
-| `min_target_count`          | integer          | Minimum target count validation                       | `1`                       |
-| `download_method`           | string           | Download method: "api_assisted" or "yt_dlp_only"      | `"api_assisted"`          |
-| `cookie_settings`           | object           | Cookie configuration for YouTube access               | See cookie section below  |
+| Parameter                   | Type    | Description                                           | Default                  |
+| --------------------------- | ------- | ----------------------------------------------------- | ------------------------ |
+| `debug_mode`                | boolean | Enable detailed debug logging                         | `false`                  |
+| `target_videos_per_query`   | integer | Number of videos to collect per search query          | `20`                     |
+| `max_recommended_per_query` | integer | Maximum recommended videos per query (for validation) | `100`                    |
+| `min_target_count`          | integer | Minimum target count validation                       | `1`                      |
+| `download_method`           | string  | Download method: "api_assisted" or "yt_dlp_only"      | `"api_assisted"`         |
+| `cookie_settings`           | object  | Cookie configuration for YouTube access               | See cookie section below |
 
 ### Cookie Configuration
 
@@ -63,16 +52,17 @@ The `cookie_settings` object allows you to configure YouTube access using cookie
 
 #### Cookie Settings Parameters
 
-| Parameter           | Type    | Description                                    | Default     |
-| ------------------- | ------- | ---------------------------------------------- | ----------- |
-| `enabled`           | boolean | Enable cookie support                          | `false`     |
-| `method`            | string  | Cookie method: "browser" or "file"             | `"browser"` |
-| `browser_name`      | string  | Browser name for cookie extraction             | `"chrome"`  |
-| `cookies_file_path` | string  | Path to cookies.txt file                       | `"cookies.txt"` |
+| Parameter           | Type    | Description                        | Default         |
+| ------------------- | ------- | ---------------------------------- | --------------- |
+| `enabled`           | boolean | Enable cookie support              | `false`         |
+| `method`            | string  | Cookie method: "browser" or "file" | `"browser"`     |
+| `browser_name`      | string  | Browser name for cookie extraction | `"chrome"`      |
+| `cookies_file_path` | string  | Path to cookies.txt file           | `"cookies.txt"` |
 
 #### Supported Browsers
 
 When using the "browser" method, the following browsers are supported:
+
 - `chrome`
 - `firefox`
 - `safari`
@@ -104,11 +94,13 @@ This method automatically extracts cookies from your browser:
 This method uses a Netscape format cookies file:
 
 1. **Install a browser extension** to export cookies:
+
    - **Chrome/Firefox**: "Get cookies.txt" extension
    - **Firefox**: "Cookie Quick Manager" extension
    - **Chrome**: "EditThisCookie" extension
 
 2. **Export cookies from YouTube**:
+
    - Go to YouTube and log in
    - Use the extension to export cookies
    - Save as `cookies.txt` in your project directory
@@ -153,6 +145,7 @@ If you prefer to create the cookies file manually:
 ### Cookie Configuration Examples
 
 #### Using Chrome Browser Cookies
+
 ```json
 "cookie_settings": {
   "enabled": true,
@@ -162,6 +155,7 @@ If you prefer to create the cookies file manually:
 ```
 
 #### Using Firefox Browser Cookies
+
 ```json
 "cookie_settings": {
   "enabled": true,
@@ -171,6 +165,7 @@ If you prefer to create the cookies file manually:
 ```
 
 #### Using Cookies File
+
 ```json
 "cookie_settings": {
   "enabled": true,
@@ -180,6 +175,7 @@ If you prefer to create the cookies file manually:
 ```
 
 #### Disabling Cookies
+
 ```json
 "cookie_settings": {
   "enabled": false
@@ -240,11 +236,13 @@ export YOUTUBE_COOKIES_BROWSER="chrome"
 ### Common Cookie Issues
 
 1. **"Cookies not found" error**:
+
    - Ensure you're logged into YouTube in the specified browser
    - Check that the browser name is correct
    - Try using a different browser
 
 2. **"Invalid cookies file" error**:
+
    - Ensure the cookies file is in Netscape format
    - Check that the file path is correct
    - Verify the file contains valid YouTube cookies
@@ -257,6 +255,7 @@ export YOUTUBE_COOKIES_BROWSER="chrome"
 ### Cookie File Format Validation
 
 A valid cookies.txt file should:
+
 - Start with a comment line: `# Netscape HTTP Cookie File`
 - Contain tab-separated fields
 - Include YouTube domain cookies
@@ -268,9 +267,8 @@ The following parameters are required and must be present in the configuration f
 
 - `debug_mode`
 - `target_videos_per_query`
-- `search_queries`
 
-Optional parameters will use default values if not specified.
+Optional parameters will use default values if not specified. Search queries are loaded from the `queries.txt` file in the project root.
 
 ## Running the Script
 
@@ -279,7 +277,7 @@ Optional parameters will use default values if not specified.
 Simply run the script without any arguments:
 
 ```bash
-python youtube_video_crawler.py
+python src/main.py
 ```
 
 The script will:
@@ -307,11 +305,6 @@ After the file is created, edit it according to your needs and run the script ag
 {
   "debug_mode": false,
   "target_videos_per_query": 50,
-  "search_queries": [
-    "bé giới thiệu bản thân",
-    "trẻ em kể chuyện",
-    "bé hát ca dao"
-  ],
   "cookie_settings": {
     "enabled": true,
     "method": "browser",
@@ -326,7 +319,6 @@ After the file is created, edit it according to your needs and run the script ag
 {
   "debug_mode": true,
   "target_videos_per_query": 5,
-  "search_queries": ["bé giới thiệu bản thân"],
   "cookie_settings": {
     "enabled": true,
     "method": "file",
@@ -337,22 +329,26 @@ After the file is created, edit it according to your needs and run the script ag
 
 ### Custom Search Queries
 
-```json
-{
-  "debug_mode": false,
-  "target_videos_per_query": 25,
-  "search_queries": [
-    "trẻ em học tiếng Anh",
-    "bé học đếm số",
-    "con nít học chữ cái",
-    "em bé hát đồng dao",
-    "trẻ con kể chuyện cổ tích"
-  ],
-  "cookie_settings": {
-    "enabled": false
-  }
-}
+Search queries are loaded from the `queries.txt` file in the project root directory. Each line in the file represents one search query. To modify the search queries:
+
+1. Open `queries.txt` in a text editor
+2. Add or modify queries (one per line)
+3. Save the file
+4. Restart the crawler
+
+Example `queries.txt` content:
+
 ```
+trẻ em học tiếng Anh
+bé học đếm số
+con nít học chữ cái
+em bé hát đồng dao
+trẻ con kể chuyện cổ tích
+bé giới thiệu bản thân
+bé tập nói tiếng Việt
+```
+
+**Note**: Empty lines and lines starting with `#` are ignored. The system will automatically load queries from this file when it starts.
 
 ## Background Execution
 
@@ -361,18 +357,18 @@ Since the script no longer requires user input, it can be run in the background:
 ### Windows (PowerShell)
 
 ```powershell
-Start-Process python -ArgumentList "youtube_video_crawler.py" -WindowStyle Hidden
+Start-Process python -ArgumentList "src/main.py" -WindowStyle Hidden
 ```
 
 ### Linux/Mac
 
 ```bash
-nohup python youtube_video_crawler.py > crawler.log 2>&1 &
+nohup python src/main.py > crawler.log 2>&1 &
 ```
 
 ## Output Files
 
-The script generates timestamped output files in the `youtube_url_outputs/` directory:
+The script generates timestamped output files in the `output/url_outputs/` directory:
 
 - `{timestamp}_multi_query_collected_video_urls.txt` - List of collected video URLs
 - Various analysis and validation reports
@@ -389,9 +385,9 @@ Common configuration errors:
 
 - Missing required fields
 - Invalid JSON syntax
-- Empty search queries array
 - Non-positive target video count
 - Invalid cookie configuration
+- Missing or empty `queries.txt` file
 
 ## Migration from Interactive Mode
 

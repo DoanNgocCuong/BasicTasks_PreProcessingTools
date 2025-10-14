@@ -38,15 +38,24 @@ class FileManager:
         self.url_outputs_dir = config.output.url_outputs_dir
         self.audio_outputs_dir = config.output.audio_outputs_dir
         self.final_audio_dir = config.output.final_audio_dir
+        # Backup directories
+        self.url_backups_dir = config.output.url_backups_dir
+        self.audio_backups_dir = config.output.audio_backups_dir
+        self.final_audio_backups_dir = config.output.final_audio_backups_dir
 
     def ensure_directories(self, *dirs: Path) -> None:
-        """Ensure all specified directories exist."""
-        for dir_path in dirs:
+        """Ensure all specified directories exist, including backup directories."""
+        all_dirs = list(dirs) + [
+            self.url_backups_dir,
+            self.audio_backups_dir,
+            self.final_audio_backups_dir
+        ]
+        for dir_path in all_dirs:
             dir_path.mkdir(parents=True, exist_ok=True)
 
     def create_backup(self, file_path: Path, suffix: Optional[str] = None) -> Path:
         """
-        Create a backup of a file with timestamp.
+        Create a backup of a file with timestamp in the appropriate backup directory.
 
         Args:
             file_path: Path to the file to backup
@@ -58,13 +67,19 @@ class FileManager:
         if not file_path.exists():
             return file_path
 
+        # Determine the appropriate backup directory based on file location
+        backup_dir = self._get_backup_directory(file_path)
+
+        # Ensure backup directory exists
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if suffix:
             backup_name = f"{file_path.stem}_backup_{suffix}_{timestamp}{file_path.suffix}"
         else:
             backup_name = f"{file_path.stem}_backup_{timestamp}{file_path.suffix}"
 
-        backup_path = file_path.parent / backup_name
+        backup_path = backup_dir / backup_name
 
         try:
             shutil.copy2(file_path, backup_path)
@@ -73,6 +88,33 @@ class FileManager:
         except Exception as e:
             self.output.warning(f"Failed to create backup of {file_path}: {e}")
             return file_path
+
+    def _get_backup_directory(self, file_path: Path) -> Path:
+        """
+        Determine the appropriate backup directory for a file.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            Path to the backup directory
+        """
+        # Resolve to absolute paths for comparison
+        abs_file_path = file_path.resolve()
+        abs_url_outputs = self.url_outputs_dir.resolve()
+        abs_audio_outputs = self.audio_outputs_dir.resolve()
+        abs_final_audio = self.final_audio_dir.resolve()
+
+        # Check which output directory the file belongs to
+        if abs_file_path.is_relative_to(abs_url_outputs):
+            return self.url_backups_dir
+        elif abs_file_path.is_relative_to(abs_audio_outputs):
+            return self.audio_backups_dir
+        elif abs_file_path.is_relative_to(abs_final_audio):
+            return self.final_audio_backups_dir
+        else:
+            # Default to a general backups directory in the base output dir
+            return self.base_dir / "backups"
 
     def load_json(self, file_path: Path, default: Any = None) -> Any:
         """
