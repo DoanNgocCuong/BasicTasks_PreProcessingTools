@@ -2751,6 +2751,24 @@ class YouTubeVideoCrawler:
             new_channels_found=self._count_new_channels_for_query(query)
         )
     
+    def _process_url_batch(self, batch_urls: List[str]) -> None:
+        """
+        Process a batch of URLs by downloading audio and automatically classifying with filterer API.
+        
+        This function encapsulates both downloading and filtering steps in the pipeline.
+        
+        Args:
+            batch_urls (List[str]): List of YouTube URLs to process
+        """
+        if not batch_urls:
+            return
+        
+        # Step 1: Download audio files
+        self._process_batch(batch_urls)
+        
+        # Step 2: Automatically classify downloaded audio (if enabled)
+        self._call_filterer_api_after_batch()
+    
     def _process_batch(self, batch_urls: List[str]) -> None:
         """Process a batch of URLs by running the audio downloader."""
         if not batch_urls:
@@ -2924,8 +2942,7 @@ class YouTubeVideoCrawler:
                 if video_added:
                     batch_urls.append(current_video_processing['url'])
                     if len(batch_urls) >= self.config.download_batch_size:
-                        self._process_batch(batch_urls)
-                        self._call_filterer_api_after_batch()
+                        self._process_url_batch(batch_urls)
                         batch_urls = []
                 
                 self.reporter.report_total_progress(
@@ -2945,8 +2962,7 @@ class YouTubeVideoCrawler:
         
         # Process any remaining URLs in the batch
         if batch_urls:
-            self._process_batch(batch_urls)
-            self._call_filterer_api_after_batch()
+            self._process_url_batch(batch_urls)
         
         # Report timing summary
         timing_summary = self.get_timing_summary()
