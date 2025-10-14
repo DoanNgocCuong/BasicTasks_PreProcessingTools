@@ -30,12 +30,18 @@ import soundfile as sf
 import tempfile
 from youtube_audio_downloader import YoutubeAudioDownloader, Config as AudioDownloaderConfig, _setup_environment, _load_manifest, _backfill_missing_titles, _process_urls_from_file
 
-# Import filterer client for automatic audio classification
+# Import validator and resync functions for tight coupling
 try:
-    from api_youtube_filterer import YouTubeFiltererClient
-    FILTERER_CLIENT_AVAILABLE = True
+    from youtube_output_validator import YouTubeURLValidator, AudioFileClassifier
+    VALIDATOR_AVAILABLE = True
 except ImportError:
-    FILTERER_CLIENT_AVAILABLE = False
+    VALIDATOR_AVAILABLE = False
+
+try:
+    from resync_manifest import resync_manifest
+    RESYNC_AVAILABLE = True
+except ImportError:
+    RESYNC_AVAILABLE = False
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
 from youtube_output_validator import YouTubeURLValidator
@@ -2753,9 +2759,14 @@ class YouTubeVideoCrawler:
     
     def _process_url_batch(self, batch_urls: List[str]) -> None:
         """
-        Process a batch of URLs by downloading audio and automatically classifying with filterer API.
+        Process a batch of URLs by downloading audio, automatically classifying with filterer API,
+        validating URLs, and resyncing manifest.
         
-        This function encapsulates both downloading and filtering steps in the pipeline.
+        This function encapsulates the complete batch processing pipeline:
+        1. Download audio files
+        2. Automatically classify downloaded audio (if enabled)
+        3. Validate and clean collected URLs
+        4. Resync manifest with actual files
         
         Args:
             batch_urls (List[str]): List of YouTube URLs to process
@@ -2768,6 +2779,12 @@ class YouTubeVideoCrawler:
         
         # Step 2: Automatically classify downloaded audio (if enabled)
         self._call_filterer_api_after_batch()
+        
+        # Step 3: Validate and clean collected URLs
+        self._validate_collected_urls()
+        
+        # Step 4: Resync manifest with actual audio files
+        self._resync_manifest()
     
     def _process_batch(self, batch_urls: List[str]) -> None:
         """Process a batch of URLs by running the audio downloader."""
@@ -2858,6 +2875,66 @@ class YouTubeVideoCrawler:
                 
         except Exception as e:
             self.output.print_error(f"❌ Filterer API call failed: {e}")
+            self.output.print_info("Continuing with collection process...")
+    
+    def _validate_collected_urls(self) -> None:
+        """Validate and clean collected URLs using YouTubeURLValidator."""
+        if not VALIDATOR_AVAILABLE:
+            self.output.print_warning("⚠️  YouTubeURLValidator not available - skipping URL validation")
+            return
+        
+        try:
+            self.output.print_info("🔍 Validating and cleaning collected URLs...")
+            
+            # Get the path to the collected URLs file
+            urls_file_path = Path(Config.DEFAULT_URLS_FILE)
+            
+            if not urls_file_path.exists():
+                self.output.print_warning(f"⚠️  URLs file not found: {urls_file_path}")
+                return
+            
+            # Initialize validator and clean the file
+            validator = YouTubeURLValidator()
+            result = validator.validate_and_clean_file(urls_file_path)
+            
+            if result.duplicate_count > 0:
+                self.output.print_success(f"✅ Cleaned {result.duplicate_count} duplicate URLs from collected file")
+            else:
+                self.output.print_info("✅ No duplicate URLs found in collected file")
+                
+        except Exception as e:
+            self.output.print_error(f"❌ URL validation failed: {e}")
+            self.output.print_info("Continuing with collection process...")
+    
+    def _resync_manifest(self) -> None:
+        """Resync manifest.json with actual audio files on disk."""
+        if not RESYNC_AVAILABLE:
+            self.output.print_warning("⚠️  Manifest resync not available - skipping manifest synchronization")
+            return
+        
+        try:
+            self.output.print_info("🔄 Resyncing manifest with actual audio files...")
+            
+            # Get paths for resync
+            script_dir = Path(__file__).parent
+            final_audio_files_dir = script_dir / "final_audio_files"
+            manifest_path = final_audio_files_dir / "manifest.json"
+            
+            if not manifest_path.exists():
+                self.output.print_warning(f"⚠️  Manifest file not found: {manifest_path}")
+                return
+            
+            if not final_audio_files_dir.exists():
+                self.output.print_warning(f"⚠️  Audio files directory not found: {final_audio_files_dir}")
+                return
+            
+            # Run manifest resync
+            resync_manifest(str(manifest_path), str(final_audio_files_dir))
+            
+            self.output.print_success("✅ Manifest resync completed successfully")
+            
+        except Exception as e:
+            self.output.print_error(f"❌ Manifest resync failed: {e}")
             self.output.print_info("Continuing with collection process...")
     
     def collect_videos(self) -> List[str]:
