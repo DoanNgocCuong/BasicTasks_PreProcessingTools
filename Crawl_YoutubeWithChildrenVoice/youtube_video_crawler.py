@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import librosa
 import soundfile as sf
 import tempfile
-from youtube_audio_downloader import YoutubeAudioDownloader, Config as AudioDownloaderConfig
+from youtube_audio_downloader import YoutubeAudioDownloader, Config as AudioDownloaderConfig, _setup_environment, _load_manifest, _backfill_missing_titles, _process_urls_from_file
 from youtube_audio_classifier import AudioClassifier
 from youtube_output_analyzer import YouTubeOutputAnalyzer, QueryStatistics
 from youtube_output_validator import YouTubeURLValidator
@@ -89,6 +89,7 @@ class CrawlerConfig:
     cookie_settings: Optional[Dict[str, Any]] = None
     enable_language_detection: bool = True
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
+    download_batch_size: int = 1
 
 
 class ConfigLoader:
@@ -156,7 +157,9 @@ class ConfigLoader:
                 download_method=config_data.get('download_method', 'api_assisted'),
                 yt_dlp_primary=config_data.get('yt_dlp_primary', True),
                 cookie_settings=config_data.get('cookie_settings', None),
-                enable_language_detection=config_data.get('enable_language_detection', True)
+                enable_language_detection=config_data.get('enable_language_detection', True),
+                user_agent=config_data.get('user_agent', "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"),
+                download_batch_size=config_data.get('download_batch_size', 1)
             )
             
             # Report loaded configuration
@@ -189,6 +192,7 @@ class ConfigLoader:
             "download_method": "api_assisted",
             "yt_dlp_primary": True,
             "enable_language_detection": True,
+            "download_batch_size": 1,
             "description": "Configuration file for YouTube Video Crawler. Set debug_mode to true for detailed logging, adjust target_videos_per_query for collection size, modify search_queries array to change what videos to search for, set yt_dlp_primary to true (uses yt-dlp as primary) or false (uses pytube as primary), and set enable_language_detection to false to disable language filtering and assume all videos are in Vietnamese."
         }
         
@@ -204,6 +208,7 @@ class ConfigLoader:
         self.output.print_info(f"Target videos per query: {config.target_videos_per_query}")
         self.output.print_info(f"Total queries: {len(config.search_queries)}")
         self.output.print_info(f"Download strategy: yt-dlp (Android client) → pytube fallback")
+        self.output.print_info(f"Download batch size: {config.download_batch_size}")
         
         total_target_count = config.target_videos_per_query * len(config.search_queries)
         self.output.print_info(f"Total target videos: {total_target_count}")
@@ -2725,6 +2730,45 @@ class YouTubeVideoCrawler:
             new_channels_found=self._count_new_channels_for_query(query)
         )
     
+    def _process_batch(self, batch_urls: List[str]) -> None:
+        """Process a batch of URLs by running the audio downloader."""
+        if not batch_urls:
+            return
+        
+        # Create a temporary file for the batch
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as temp_file:
+            for url in batch_urls:
+                temp_file.write(url + '\n')
+            temp_file_path = temp_file.name
+        
+        try:
+            # Run the downloader functions directly
+            self.output.print_info(f"Running audio downloader on batch of {len(batch_urls)} URLs...")
+            
+            # Setup downloader environment
+            config_dl, downloader, final_output_dir = _setup_environment()
+            
+            # Load manifest
+            manifest_path = os.path.join(final_output_dir, 'manifest.json')
+            manifest_data, manifest_index = _load_manifest(manifest_path)
+            
+            # Backfill missing titles
+            _backfill_missing_titles(downloader, manifest_data, manifest_path)
+            
+            # Process URLs from file
+            _process_urls_from_file(downloader, config_dl, final_output_dir, manifest_data, manifest_index, manifest_path, temp_file_path)
+            
+            self.output.print_success("Audio downloader completed successfully")
+        except Exception as e:
+            self.output.print_error(f"Audio downloader failed: {e}")
+        finally:
+            # Clean up temp file
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
+    
     def collect_videos(self) -> List[str]:
         """
         Main algorithm to collect videos with children's voices using multiple queries.
@@ -2733,6 +2777,8 @@ class YouTubeVideoCrawler:
             List[str]: List of video URLs
         """
         self.reporter.report_collection_start(self.target_video_count_per_query, len(self.query_list))
+        
+        batch_urls = []  # Batch of URLs to download
         
         # Main loop for each query
         for query_index, current_query in enumerate(self.query_list, 1):
@@ -2802,6 +2848,12 @@ class YouTubeVideoCrawler:
                 # Process the video
                 video_added = self._process_main_video(current_video_processing, query_stats)
                 
+                if video_added:
+                    batch_urls.append(current_video_processing['url'])
+                    if len(batch_urls) >= self.config.download_batch_size:
+                        self._process_batch(batch_urls)
+                        batch_urls = []
+                
                 self.reporter.report_total_progress(
                     self.current_session_collected_count, 
                     self.total_target_count,
@@ -2816,6 +2868,10 @@ class YouTubeVideoCrawler:
             
             # Print query statistics
             self.reporter.report_query_statistics(current_query_stats)
+        
+        # Process any remaining URLs in the batch
+        if batch_urls:
+            self._process_batch(batch_urls)
         
         # Report timing summary
         timing_summary = self.get_timing_summary()
