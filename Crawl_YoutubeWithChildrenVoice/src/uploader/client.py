@@ -32,7 +32,7 @@ def main(manifest_path: str):
     for i, record in enumerate(records):
         if (record.get("classified") == True and 
             record.get("containing_children_voice") == True and 
-            record.get("uploaded") == False):
+            record.get("uploaded", False) == False):
             targets.append((i, record))
     
     if not targets:
@@ -70,8 +70,11 @@ def main(manifest_path: str):
                 print(f"Failed to upload: {e}")
     
     # Update manifest
+    targeted_indices = [idx for idx, _ in targets]
+    for idx in targeted_indices:
+        records[idx]["uploaded"] = False  # Mark as failed initially
     for idx in successful_uploads:
-        records[idx]["uploaded"] = True
+        records[idx]["uploaded"] = True   # Override to true for successful uploads
     
     # Write back
     with open(manifest_path, "w", encoding="utf-8") as f:
