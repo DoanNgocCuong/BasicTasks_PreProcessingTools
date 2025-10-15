@@ -1,8 +1,5 @@
 {
-  "include": [
-    "src",
-    "tests"
-  ],
+  "include": ["src", "tests"],
   "exclude": [
     "output",
     "crawler_outputs",
@@ -20,9 +17,7 @@
       "root": ".",
       "pythonVersion": "3.12",
       "pythonPlatform": "Windows",
-      "extraPaths": [
-        "src"
-      ]
+      "extraPaths": ["src"]
     }
   ]
 }
