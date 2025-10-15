@@ -323,6 +323,10 @@ class VoiceClassifier:
                 except ImportError:
                     self.device = 'cpu'
 
+            # Ensure model is on the correct device
+            if self.model is not None:
+                self.model.to(self.device)
+
             # Prepare features for model input
             feature_vector = self._features_to_vector(features)
 
