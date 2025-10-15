@@ -286,16 +286,41 @@ class YouTubeAPIClient:
             self.output.error(f"Search failed for query '{query}': {e}")
             return []
 
-    def get_video_details(self, video_ids: List[str]) -> Dict[str, VideoMetadata]:
+    def search_videos_in_channel(self, channel_id: str, query: str, max_results: int = 50) -> List[VideoMetadata]:
         """
-        Get detailed metadata for multiple videos.
+        Search for videos within a specific channel using YouTube Data API.
 
         Args:
-            video_ids: List of video IDs
+            channel_id: YouTube channel ID
+            query: Search query
+            max_results: Maximum number of results to return
 
         Returns:
-            Dictionary mapping video IDs to VideoMetadata
+            List of VideoMetadata objects from the channel
         """
+        self.output.debug(f"Searching channel {channel_id} for videos: '{query}' (max {max_results})")
+
+        def _channel_search_request():
+            request = self.youtube_service.search().list(
+                part="snippet",
+                q=query,
+                type="video",
+                channelId=channel_id,
+                maxResults=min(max_results, 50),  # API limit is 50
+                order="relevance",
+                safeSearch="strict"
+            )
+            return request.execute()
+
+        try:
+            response = self._make_api_request(_channel_search_request)
+            return self._parse_search_response(response)
+        except QuotaExceededError:
+            raise
+        except Exception as e:
+            self.output.error(f"Channel search failed for channel {channel_id} with query '{query}': {e}")
+            return []
+    def get_video_details_batch(self, video_ids: List[str]) -> Dict[str, VideoMetadata]:
         if not video_ids:
             return {}
 

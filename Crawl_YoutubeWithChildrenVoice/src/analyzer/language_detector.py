@@ -34,6 +34,11 @@ class LanguageDetectionResultLocal:
     processing_time: float
     model_version: str
 
+    @property
+    def is_successful(self) -> bool:
+        """Check if language detection was successful."""
+        return self.detected_language != Language.UNKNOWN and self.confidence > 0.0
+
 
 class LanguageDetector:
     """
@@ -332,6 +337,255 @@ class LanguageDetector:
                 detected_language=Language.UNKNOWN,
                 confidence=0.0,
                 language_probabilities={},
+                processing_time=time.time() - start_time,
+                model_version=self.model_version
+            )
+
+    def detect_language_from_youtube_transcript(self, video_id: str) -> LanguageDetectionResultLocal:
+        """
+        Detect language from YouTube video using auto-generated transcripts.
+        This is much more accurate than audio-based detection.
+
+        Args:
+            video_id: YouTube video ID
+
+        Returns:
+            Language detection result
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            # Import YouTube Transcript API (similar to working example)
+            try:
+                from youtube_transcript_api import YouTubeTranscriptApi
+                transcript_api_available = True
+            except ImportError:
+                self.output.warning("youtube-transcript-api not available, falling back to audio-based detection")
+                return LanguageDetectionResultLocal(
+                    detected_language=Language.UNKNOWN,
+                    confidence=0.0,
+                    language_probabilities={
+                        Language.VIETNAMESE.value: 0.0,
+                        Language.ENGLISH.value: 0.0
+                    },
+                    processing_time=time.time() - start_time,
+                    model_version=self.model_version
+                )
+
+            # Get available transcripts (similar to working example)
+            try:
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            except Exception as e:
+                self.output.debug(f"No transcripts available for video {video_id}: {e}")
+                return LanguageDetectionResultLocal(
+                    detected_language=Language.UNKNOWN,
+                    confidence=0.0,
+                    language_probabilities={
+                        Language.VIETNAMESE.value: 0.0,
+                        Language.ENGLISH.value: 0.0
+                    },
+                    processing_time=time.time() - start_time,
+                    model_version=self.model_version
+                )
+
+            # Find auto-generated transcript (similar to working example)
+            auto_generated_transcript = None
+            for transcript in transcript_list:
+                if transcript.is_generated:  # Check if auto-generated
+                    auto_generated_transcript = transcript
+                    break
+
+            if auto_generated_transcript is None:
+                self.output.debug(f"No auto-generated transcript found for video {video_id}")
+                return LanguageDetectionResultLocal(
+                    detected_language=Language.UNKNOWN,
+                    confidence=0.0,
+                    language_probabilities={
+                        Language.VIETNAMESE.value: 0.0,
+                        Language.ENGLISH.value: 0.0
+                    },
+                    processing_time=time.time() - start_time,
+                    model_version=self.model_version
+                )
+
+            # Get the language code directly (much simpler than working example)
+            language_code = auto_generated_transcript.language_code
+
+            # Map language codes to our enum
+            if language_code.lower() == 'vi':
+                detected_lang = Language.VIETNAMESE
+                vietnamese_prob = 1.0
+                english_prob = 0.0
+                confidence = 1.0
+            elif language_code.lower() in ['en', 'en-us', 'en-gb']:
+                detected_lang = Language.ENGLISH
+                vietnamese_prob = 0.0
+                english_prob = 1.0
+                confidence = 1.0
+            else:
+                # Unknown language
+                detected_lang = Language.UNKNOWN
+                vietnamese_prob = 0.0
+                english_prob = 0.0
+                confidence = 0.0
+
+            self.output.debug(f"Transcript language detection for {video_id}: {language_code} -> {detected_lang.value}")
+
+            return LanguageDetectionResultLocal(
+                detected_language=detected_lang,
+                confidence=confidence,
+                language_probabilities={
+                    Language.VIETNAMESE.value: vietnamese_prob,
+                    Language.ENGLISH.value: english_prob
+                },
+                processing_time=time.time() - start_time,
+                model_version=self.model_version
+            )
+
+        except Exception as e:
+            self.output.error(f"YouTube transcript language detection failed for {video_id}: {e}")
+            return LanguageDetectionResultLocal(
+                detected_language=Language.UNKNOWN,
+                confidence=0.0,
+                language_probabilities={
+                    Language.VIETNAMESE.value: 0.0,
+                    Language.ENGLISH.value: 0.0
+                },
+                processing_time=time.time() - start_time,
+                model_version=self.model_version
+            )
+
+    def detect_language_from_text(self, text: str) -> LanguageDetectionResultLocal:
+        """
+        Detect language from text content using transcript analysis.
+
+        Args:
+            text: Text content to analyze
+
+        Returns:
+            Language detection result
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            # Use transcript-based language detection similar to the working example
+            # Check for Vietnamese vs English patterns in transcript text
+
+            if not text or not text.strip():
+                return LanguageDetectionResultLocal(
+                    detected_language=Language.UNKNOWN,
+                    confidence=0.0,
+                    language_probabilities={
+                        Language.VIETNAMESE.value: 0.0,
+                        Language.ENGLISH.value: 0.0
+                    },
+                    processing_time=time.time() - start_time,
+                    model_version=self.model_version
+                )
+
+            text_lower = text.lower()
+
+            # Vietnamese language patterns (from the working example)
+            vietnamese_indicators = {
+                'chars': set('ăâêôưđ'),  # Vietnamese specific characters
+                'words': [
+                    'cái', 'là', 'của', 'và', 'có', 'không', 'được', 'cho', 'với', 'như',
+                    'tôi', 'bạn', 'anh', 'chị', 'em', 'cháu', 'bố', 'mẹ', 'con',
+                    'nhà', 'đi', 'đến', 'từ', 'ở', 'làm', 'học', 'chơi', 'ăn', 'uống'
+                ],
+                'particles': ['ạ', 'ạh', 'ơi', 'nha', 'đi', 'mà', 'là', 'thì', 'mới', 'đã']
+            }
+
+            # English language patterns
+            english_indicators = {
+                'words': [
+                    'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+                    'this', 'that', 'these', 'those', 'here', 'there', 'where', 'when', 'why', 'how',
+                    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them'
+                ]
+            }
+
+            vietnamese_score = 0.0
+            english_score = 0.0
+
+            # Check for Vietnamese specific characters (strong indicator)
+            vietnamese_chars_found = sum(1 for char in vietnamese_indicators['chars'] if char in text_lower)
+            if vietnamese_chars_found > 0:
+                vietnamese_score += vietnamese_chars_found * 2.0  # Strong weight for Vietnamese chars
+
+            # Check for Vietnamese words
+            vietnamese_words_found = 0
+            for word in vietnamese_indicators['words']:
+                if word in text_lower:
+                    vietnamese_words_found += 1
+            vietnamese_score += vietnamese_words_found * 0.5
+
+            # Check for Vietnamese particles (common in speech)
+            vietnamese_particles_found = 0
+            for particle in vietnamese_indicators['particles']:
+                # Use word boundaries for particles
+                if f' {particle} ' in f' {text_lower} ':
+                    vietnamese_particles_found += 1
+            vietnamese_score += vietnamese_particles_found * 0.3
+
+            # Check for English words
+            english_words_found = 0
+            for word in english_indicators['words']:
+                if f' {word} ' in f' {text_lower} ':
+                    english_words_found += 1
+            english_score += english_words_found * 0.5
+
+            # Length-based scoring (longer transcripts are more reliable)
+            text_length = len(text.split())
+            length_bonus = min(text_length / 50.0, 1.0)  # Bonus for longer transcripts
+
+            # Normalize scores
+            total_score = vietnamese_score + english_score
+            if total_score > 0:
+                vietnamese_prob = (vietnamese_score / total_score) * length_bonus
+                english_prob = (english_score / total_score) * length_bonus
+            else:
+                # No clear indicators found
+                vietnamese_prob = 0.0
+                english_prob = 0.0
+
+            # Determine final language with confidence threshold
+            confidence_threshold = 0.6
+
+            if vietnamese_prob > english_prob and vietnamese_prob > confidence_threshold:
+                detected_lang = Language.VIETNAMESE
+                confidence = vietnamese_prob
+            elif english_prob > vietnamese_prob and english_prob > confidence_threshold:
+                detected_lang = Language.ENGLISH
+                confidence = english_prob
+            else:
+                detected_lang = Language.UNKNOWN
+                confidence = max(vietnamese_prob, english_prob)
+
+            probabilities = {
+                Language.VIETNAMESE.value: vietnamese_prob,
+                Language.ENGLISH.value: english_prob
+            }
+
+            return LanguageDetectionResultLocal(
+                detected_language=detected_lang,
+                confidence=confidence,
+                language_probabilities=probabilities,
+                processing_time=time.time() - start_time,
+                model_version=self.model_version
+            )
+
+        except Exception as e:
+            self.output.error(f"Text language detection failed: {e}")
+            return LanguageDetectionResultLocal(
+                detected_language=Language.UNKNOWN,
+                confidence=0.0,
+                language_probabilities={
+                    Language.VIETNAMESE.value: 0.0,
+                    Language.ENGLISH.value: 0.0
+                },
                 processing_time=time.time() - start_time,
                 model_version=self.model_version
             )

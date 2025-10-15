@@ -98,11 +98,10 @@ class AnalysisConfig:
 
 
 @dataclass
-class FiltererAPIConfig:
-    """Configuration for the filterer API."""
-    enabled: bool = True
-    server_url: str = "http://localhost:8001"
-    auto_filter_after_download: bool = True
+class AnalysisAPIConfig:
+    """Configuration for the analysis API."""
+    enabled: bool = False  # Default to offline/local mode
+    server_url: str = "http://localhost:8002"
     timeout_seconds: int = 300
     max_retries: int = 3
 
@@ -145,7 +144,7 @@ class CrawlerConfig:
     search: SearchConfig = field(default_factory=SearchConfig)
     download: DownloadConfig = field(default_factory=DownloadConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
-    filterer_api: FiltererAPIConfig = field(default_factory=FiltererAPIConfig)
+    analysis_api: AnalysisAPIConfig = field(default_factory=AnalysisAPIConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -222,8 +221,8 @@ class CrawlerConfig:
             config.analysis.child_voice_threshold = float(child_threshold)
 
         # Filterer API
-        if filterer_url := os.getenv('FILTERER_API_URL'):
-            config.filterer_api.server_url = filterer_url
+        if filterer_url := os.getenv('ANALYSIS_API_URL'):
+            config.analysis_api.server_url = filterer_url
 
         # Logging
         config.logging.debug_mode = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
@@ -257,9 +256,9 @@ class CrawlerConfig:
             analysis_data = data['analysis']
             config.analysis = AnalysisConfig(**analysis_data)
 
-        if 'filterer_api' in data:
-            filterer_data = data['filterer_api']
-            config.filterer_api = FiltererAPIConfig(**filterer_data)
+        if 'analysis_api' in data:
+            analysis_api_data = data['analysis_api']
+            config.analysis_api = AnalysisAPIConfig(**analysis_api_data)
 
         if 'output' in data:
             output_data = data['output']
@@ -311,9 +310,9 @@ class CrawlerConfig:
         if not (0 <= self.analysis.child_voice_threshold <= 1):
             errors.append("Child voice threshold must be between 0 and 1")
 
-        # Check filterer API
-        if self.filterer_api.enabled and not self.filterer_api.server_url:
-            errors.append("Filterer API enabled but no server URL configured")
+        # Check analysis API
+        if self.analysis_api.enabled and not self.analysis_api.server_url:
+            errors.append("Analysis API enabled but no server URL configured")
 
         return errors
 
@@ -372,7 +371,7 @@ def load_config(
         if config_path.exists():
             file_config = CrawlerConfig.from_json_file(config_path)
             # Manually merge - copy attributes
-            for attr in ['youtube_api', 'search', 'download', 'analysis', 'filterer_api', 'output', 'logging']:
+            for attr in ['youtube_api', 'search', 'download', 'analysis', 'analysis_api', 'output', 'logging']:
                 if hasattr(file_config, attr):
                     setattr(config, attr, getattr(file_config, attr))
         else:
@@ -395,6 +394,12 @@ def load_config(
 
     if cli_overrides.get("verbose"):
         config.logging.debug_mode = cli_overrides["verbose"]
+
+    if cli_overrides.get("online"):
+        # Enable online mode - use API servers for analysis
+        config.analysis_api.enabled = True
+        # Optionally change server URL if needed for online mode
+        # config.analysis_api.server_url = "https://api.example.com"  # Uncomment if needed
 
     # Validate final configuration
     errors = config.validate()

@@ -187,20 +187,43 @@ class SearchEngine:
             for i, stats in enumerate(top_queries, 1):
                 self.output.info(f"  {i}. '{stats.query}': {stats.new_videos} new videos")
 
-    def get_search_summary(self) -> Dict[str, Any]:
+    async def _search_channel_videos(self, channel_id: str, query: str, max_results: int) -> List[VideoMetadata]:
         """
-        Get comprehensive search summary.
+        Search for videos in a specific channel using a query.
+
+        Args:
+            channel_id: YouTube channel ID
+            query: Search query
+            max_results: Maximum number of results to return
 
         Returns:
-            Dictionary with search statistics and metadata
+            List of VideoMetadata objects from the channel
         """
-        quota_status = self.api_client.get_quota_status()
+        try:
+            # Use YouTube API to search within a channel
+            videos = self.api_client.search_videos_in_channel(
+                channel_id=channel_id,
+                query=query,
+                max_results=max_results
+            )
 
-        return {
-            "total_queries": len(self.query_statistics),
-            "total_videos_found": sum(s.videos_found for s in self.query_statistics),
-            "unique_videos_collected": len(self.collected_video_ids),
-            "query_statistics": [s.to_dict() for s in self.query_statistics],
-            "api_quota_status": quota_status,
-            "search_completed": len(self.query_statistics) > 0
-        }
+            # Get detailed metadata for all videos
+            if videos:
+                video_ids = [v.video_id for v in videos]
+                detailed_metadata = self.api_client.get_video_details(video_ids)
+
+                # Update videos with detailed metadata
+                for video in videos:
+                    if video.video_id in detailed_metadata:
+                        detailed = detailed_metadata[video.video_id]
+                        video.view_count = detailed.view_count
+                        video.like_count = detailed.like_count
+                        video.comment_count = detailed.comment_count
+                        video.duration_seconds = detailed.duration_seconds
+                        video.tags = detailed.tags
+
+            return videos
+
+        except Exception as e:
+            self.output.error(f"Channel search failed for channel {channel_id} with query '{query}': {e}")
+            return []

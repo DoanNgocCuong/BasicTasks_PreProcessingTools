@@ -11,6 +11,7 @@ import torch.nn as nn
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
+import threading
 
 from ..config import AnalysisConfig
 from ..utils import get_output_manager
@@ -31,8 +32,13 @@ class VoiceClassifier:
     Machine learning model for classifying voices as children or adults.
 
     Uses acoustic features and deep learning to identify children's voices
-    with high accuracy.
+    with high accuracy. Includes model caching and memory management.
     """
+
+    # Class-level shared instances for memory efficiency (from working example)
+    _shared_classifier: Optional['VoiceClassifier'] = None
+    _shared_model: Optional[nn.Module] = None
+    _lock = threading.Lock()  # Thread safety for shared instances
 
     def __init__(self, config: AnalysisConfig):
         """
@@ -45,7 +51,6 @@ class VoiceClassifier:
         self.output = get_output_manager()
 
         # Model parameters
-        self.model = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model_version = "1.0.0"
 
@@ -57,9 +62,45 @@ class VoiceClassifier:
 
         self.output.debug("Initialized voice classifier")
 
+    @classmethod
+    def _get_or_create_shared_model(cls) -> nn.Module:
+        """Get existing model or create new one if needed (thread-safe)"""
+        with cls._lock:
+            if cls._shared_model is None:
+                print("🚀 Loading voice classification model for the first time...")
+                # Create model using class method
+                cls._shared_model = cls._create_shared_model()
+                if cls._shared_model is not None:
+                    cls._shared_model.eval()
+                print("✅ Voice classification model loaded and cached")
+            else:
+                print("🔄 Reusing existing voice classification model")
+            return cls._shared_model
+
+    @classmethod
+    def _create_shared_model(cls) -> nn.Module:
+        """Create a placeholder model for demonstration."""
+        class SimpleVoiceClassifier(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(13, 64)  # 13 MFCC features
+                self.fc2 = nn.Linear(64, 32)
+                self.fc3 = nn.Linear(32, 1)
+                self.dropout = nn.Dropout(0.3)
+
+            def forward(self, x):
+                x = torch.relu(self.fc1(x))
+                x = self.dropout(x)
+                x = torch.relu(self.fc2(x))
+                x = self.dropout(x)
+                x = torch.sigmoid(self.fc3(x))
+                return x
+
+        return SimpleVoiceClassifier()
+
     def load_model(self, model_path: Optional[Path] = None) -> bool:
         """
-        Load the voice classification model.
+        Load the voice classification model with caching.
 
         Args:
             model_path: Path to model file (optional)
@@ -68,15 +109,42 @@ class VoiceClassifier:
             True if model loaded successfully
         """
         try:
-            # For now, create a simple placeholder model
-            # In production, this would load a trained PyTorch model
-            self.model = self._create_placeholder_model()
+            # Get shared model instance
+            self.model = self._get_or_create_shared_model()
+
+            # Clear CUDA cache before loading models (from working example)
+            self._clear_cuda_cache()
+
             self.output.debug("Voice classification model loaded")
             return True
 
         except Exception as e:
             self.output.error(f"Failed to load voice classification model: {e}")
             return False
+
+    @staticmethod
+    def _clear_cuda_cache() -> None:
+        """Clear CUDA cache if available (from working example)"""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+    @staticmethod
+    def _force_garbage_collection() -> None:
+        """Force garbage collection (from working example)"""
+        import gc
+        gc.collect()
+
+    @classmethod
+    def clear_model_cache(cls) -> None:
+        """Clear cached model instances to free memory (thread-safe)"""
+        with cls._lock:
+            if cls._shared_model is not None:
+                print("🗑️ Clearing voice classifier cache...")
+                cls._clear_cuda_cache()
+                cls._shared_model = None
+                cls._force_garbage_collection()
+                print("✅ Voice classifier cache cleared")
 
     def _create_placeholder_model(self) -> nn.Module:
         """Create a placeholder model for demonstration."""
