@@ -30,6 +30,7 @@ from .utils import get_output_manager, get_progress_tracker
 from .crawler.youtube_api import YouTubeAPIClient
 from .analyzer.analysis_phases import run_analysis_phase, run_local_analysis
 from .filterer.filtering_phases import run_filtering_phase, run_local_filtering
+from .uploader.upload_phases import run_upload_phase
 
 # Optional import for transcript API
 # Import is handled inside functions to avoid linter errors for optional dependencies
@@ -70,6 +71,11 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         output.info("Batch Phase 4: Content Filtering")
         await run_filtering_phase(config, [])
         output.success("Batch Phase 4 complete: Content filtering finished")
+
+        # Phase 5: File Upload
+        output.info("Batch Phase 5: File Upload")
+        await run_upload_phase(config, [])
+        output.success("Batch Phase 5 complete: Files uploaded")
 
         output.info("=== Batch Processing Complete ===")
 
