@@ -76,7 +76,7 @@ docs = [
 ]
 
 [project.scripts]
-yt-crawler = "main:main"
+yt-crawler = "src.main:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/youtube-children-voice-crawler"
@@ -84,8 +84,7 @@ Repository = "https://github.com/your-org/youtube-children-voice-crawler.git"
 Issues = "https://github.com/your-org/youtube-children-voice-crawler/issues"
 
 [tool.setuptools]
-packages = ["src"]
-package-dir = {"" = "src"}
+packages.find = {where = ["src"]}
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.txt", "*.md"]

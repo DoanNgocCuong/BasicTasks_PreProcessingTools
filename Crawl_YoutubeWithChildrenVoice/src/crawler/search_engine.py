@@ -133,7 +133,7 @@ class SearchEngine:
             # Get detailed metadata for all videos
             if videos:
                 video_ids = [v.video_id for v in videos]
-                detailed_metadata = self.api_client.get_video_details(video_ids)
+                detailed_metadata = self.api_client.get_video_details_batch(video_ids)
 
                 # Update videos with detailed metadata
                 for video in videos:
@@ -210,7 +210,7 @@ class SearchEngine:
             # Get detailed metadata for all videos
             if videos:
                 video_ids = [v.video_id for v in videos]
-                detailed_metadata = self.api_client.get_video_details(video_ids)
+                detailed_metadata = self.api_client.get_video_details_batch(video_ids)
 
                 # Update videos with detailed metadata
                 for video in videos:

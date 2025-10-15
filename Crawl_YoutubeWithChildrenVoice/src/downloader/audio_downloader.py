@@ -44,6 +44,7 @@ class DownloadAttempt:
     error_message: Optional[str] = None
     file_size: Optional[int] = None
     duration: Optional[float] = None
+    output_path: Optional[Path] = None
 
     @property
     def completed(self) -> bool:
