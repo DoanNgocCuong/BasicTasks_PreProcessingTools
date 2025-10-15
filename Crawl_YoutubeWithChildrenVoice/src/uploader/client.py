@@ -46,9 +46,8 @@ def main(manifest_path: str):
     uploads = []
     for idx, record in targets:
         output_path = record["output_path"]
-        # Assuming output_path is relative to the directory of manifest
-        manifest_dir = os.path.dirname(manifest_path)
-        full_path = os.path.join(manifest_dir, output_path.replace("\\", os.sep))
+        # Assuming output_path is relative to the project root
+        full_path = output_path.replace("\\", os.sep)
         filename = os.path.basename(full_path)
         uploads.append((folder_id, full_path, filename, idx))
     
