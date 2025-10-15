@@ -8,7 +8,7 @@ This module contains the implementation of the video discovery and search phase.
 
 import asyncio
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Callable, Awaitable
 
 from ..config import CrawlerConfig
 from ..crawler import SearchEngine
@@ -21,12 +21,13 @@ from ..analyzer.voice_classifier import VoiceClassifier
 ANALYZERS_AVAILABLE = True  # Will be set to False if import fails during runtime
 
 
-async def run_search_phase(config: CrawlerConfig) -> List[VideoMetadata]:
+async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Callable[[], Awaitable[None]]] = None) -> List[VideoMetadata]:
     """
     Run the search and discovery phase.
 
     Args:
         config: Crawler configuration
+        batch_callback: Optional callback to run when 20 URLs are collected
 
     Returns:
         List of discovered videos (empty since we only collect URLs)
@@ -47,6 +48,9 @@ async def run_search_phase(config: CrawlerConfig) -> List[VideoMetadata]:
                 existing_urls = set(line.strip() for line in f if line.strip())
 
         output.info(f"Loaded {len(existing_urls)} existing URLs from {url_output_file}")
+
+        # Track URL count for batch processing
+        last_batch_count = len(existing_urls)
 
         # Process each query
         for query in config.search.queries:
@@ -127,6 +131,13 @@ async def run_search_phase(config: CrawlerConfig) -> List[VideoMetadata]:
                             new_urls_added += 1
 
                     output.success(f"Added {new_urls_added} additional URLs from channel {first_video.channel_title}")
+
+                    # Check if we should trigger batch processing
+                    current_url_count = len(existing_urls)
+                    if batch_callback and current_url_count - last_batch_count >= 20:
+                        output.info(f"Collected {current_url_count - last_batch_count} new URLs, triggering batch processing")
+                        await batch_callback()
+                        last_batch_count = current_url_count
                 else:
                     output.info(f"No children's voice detected in {first_video.video_id} (confidence: {voice_result.confidence:.2f}) - skipping query")
             else:

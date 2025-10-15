@@ -51,28 +51,37 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
     output.info("=== YouTube Children's Voice Crawler ===")
     output.info(f"Starting workflow with {len(config.search.queries)} queries")
 
+    # Define callback for batch processing (phases 2-4)
+    async def process_batch():
+        """Process a batch of collected URLs through phases 2-4."""
+        output.info("=== Processing Batch ===")
+
+        # Phase 2: Audio Download
+        output.info("Batch Phase 2: Audio Download")
+        downloaded_count = await run_download_phase_from_urls(config)
+        output.success(f"Batch Phase 2 complete: {downloaded_count} audios downloaded")
+
+        # Phase 3: Audio Analysis
+        output.info("Batch Phase 3: Audio Analysis")
+        await run_analysis_phase(config, [])
+        output.success("Batch Phase 3 complete: Audio analysis finished")
+
+        # Phase 4: Content Filtering
+        output.info("Batch Phase 4: Content Filtering")
+        await run_filtering_phase(config, [])
+        output.success("Batch Phase 4 complete: Content filtering finished")
+
+        output.info("=== Batch Processing Complete ===")
+
     try:
-        # Phase 1: Video Discovery - collects URLs, no videos returned
+        # Phase 1: Video Discovery - collects URLs, triggers batch processing every 20 URLs
         output.info("Phase 1: Video Discovery")
-        await run_search_phase(config)
+        await run_search_phase(config, process_batch)
         output.success("Phase 1 complete: URL collection finished")
 
-        # Phase 2: Audio Download - downloads based on URLs, updates manifest
-        output.info("Phase 2: Audio Download")
-        # We do not pass videos from phase 1 since it returns empty list
-        # Instead, download phase reads URLs from the file created in phase 1
-        downloaded_count = await run_download_phase_from_urls(config)
-        output.success(f"Phase 2 complete: {downloaded_count} audios downloaded")
-
-        # Phase 3: Audio Analysis - analyzes downloaded files, updates manifest
-        output.info("Phase 3: Audio Analysis")
-        await run_analysis_phase(config, [])  # Empty list since analysis works with manifest
-        output.success("Phase 3 complete: Audio analysis finished")
-
-        # Phase 4: Content Filtering - filters and organizes files
-        output.info("Phase 4: Content Filtering")
-        await run_filtering_phase(config, [])  # Empty list since filtering works with manifest
-        output.success("Phase 4 complete: Content filtering finished")
+        # Final batch processing for any remaining URLs
+        output.info("Running final batch processing")
+        await process_batch()
 
         # Final Summary
         output.info("=== Workflow Complete ===")
