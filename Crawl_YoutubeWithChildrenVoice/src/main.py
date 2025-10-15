@@ -26,7 +26,7 @@ from .config import load_config, CrawlerConfig
 from .crawler import SearchEngine, run_search_phase
 from .downloader import AudioDownloader, run_download_phase_from_urls
 from .models import VideoMetadata, VideoSource
-from .utils import get_output_manager, get_progress_tracker
+from .utils import get_output_manager, get_progress_tracker, get_file_manager
 from .crawler.youtube_api import YouTubeAPIClient
 from .analyzer.analysis_phases import run_analysis_phase, run_local_analysis
 from .filterer.filtering_phases import run_filtering_phase, run_local_filtering
@@ -52,6 +52,20 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
     output.info("=== YouTube Children's Voice Crawler ===")
     output.info(f"Starting workflow with {len(config.search.queries)} queries")
 
+    # Helper function to create manifest backup
+    def create_manifest_backup(phase_name: str) -> None:
+        """Create a backup of the manifest after a phase completes."""
+        try:
+            file_manager = get_file_manager()
+            manifest_path = config.output.final_audio_dir / "manifest.json"
+            if manifest_path.exists():
+                backup_path = file_manager.create_backup(manifest_path, suffix=f"phase_{phase_name}")
+                output.debug(f"Created manifest backup after {phase_name}: {backup_path}")
+            else:
+                output.debug(f"Manifest not found for backup after {phase_name}")
+        except Exception as e:
+            output.warning(f"Failed to create manifest backup after {phase_name}: {e}")
+
     # Define callback for batch processing (phases 2-4)
     async def process_batch():
         """Process a batch of collected URLs through phases 2-4."""
@@ -61,21 +75,25 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         output.info("Batch Phase 2: Audio Download")
         downloaded_count = await run_download_phase_from_urls(config)
         output.success(f"Batch Phase 2 complete: {downloaded_count} audios downloaded")
+        create_manifest_backup("download")
 
         # Phase 3: Audio Analysis
         output.info("Batch Phase 3: Audio Analysis")
         await run_analysis_phase(config, [])
         output.success("Batch Phase 3 complete: Audio analysis finished")
+        create_manifest_backup("analysis")
 
         # Phase 4: Content Filtering
         output.info("Batch Phase 4: Content Filtering")
         await run_filtering_phase(config, [])
         output.success("Batch Phase 4 complete: Content filtering finished")
+        create_manifest_backup("filtering")
 
         # Phase 5: File Upload
         output.info("Batch Phase 5: File Upload")
         await run_upload_phase(config, [])
         output.success("Batch Phase 5 complete: Files uploaded")
+        create_manifest_backup("upload")
 
         output.info("=== Batch Processing Complete ===")
 
@@ -84,10 +102,12 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         output.info("Phase 1: Video Discovery")
         await run_search_phase(config, process_batch)
         output.success("Phase 1 complete: URL collection finished")
+        create_manifest_backup("discovery")
 
         # Final batch processing for any remaining URLs
         output.info("Running final batch processing")
         await process_batch()
+        create_manifest_backup("final")
 
         # Final Summary
         output.info("=== Workflow Complete ===")
