@@ -5,17 +5,18 @@ import concurrent.futures
 import argparse
 from typing import List, Dict, Any
 
-SERVER_URL = "http://localhost:8000"
+SERVER_URL = "http://103.253.20.30:8081/"
 
 def start_upload_session() -> str:
     response = requests.post(f"{SERVER_URL}/start_upload")
     response.raise_for_status()
     return response.json()["folder_id"]
 
-def upload_file(folder_id: str, file_path: str, filename: str):
+def upload_file(folder_id: str, file_path: str, filename: str, language: str = "unknown"):
     with open(file_path, "rb") as f:
         files = {"file": (filename, f)}
-        response = requests.post(f"{SERVER_URL}/upload/{folder_id}", files=files)
+        data = {"language": language}
+        response = requests.post(f"{SERVER_URL}/upload/{folder_id}", files=files, data=data)
         response.raise_for_status()
     return filename
 
@@ -26,11 +27,11 @@ def main(manifest_path: str):
     
     records = manifest.get("records", [])
     
-    # Filter targets: classified: true, children_voice: true, uploaded: false
+    # Filter targets: classified: true, containing_children_voice: true, uploaded: false
     targets = []
     for i, record in enumerate(records):
         if (record.get("classified") == True and 
-            record.get("children_voice") == True and 
+            record.get("containing_children_voice") == True and 
             record.get("uploaded") == False):
             targets.append((i, record))
     
@@ -49,18 +50,19 @@ def main(manifest_path: str):
         # Assuming output_path is relative to the project root
         full_path = output_path.replace("\\", os.sep)
         filename = os.path.basename(full_path)
-        uploads.append((folder_id, full_path, filename, idx))
+        language = record.get("language_folder", "unknown")
+        uploads.append((folder_id, full_path, filename, language, idx))
     
     # Upload with multithreading
     successful_uploads = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(upload_file, fid, path, fname) for fid, path, fname, idx in uploads]
+        futures = [executor.submit(upload_file, fid, path, fname, lang) for fid, path, fname, lang, idx in uploads]
         for future in concurrent.futures.as_completed(futures):
             try:
                 filename = future.result()
                 print(f"Uploaded {filename}")
                 # Find the idx
-                for fid, path, fname, idx in uploads:
+                for fid, path, fname, lang, idx in uploads:
                     if fname == filename:
                         successful_uploads.append(idx)
                         break

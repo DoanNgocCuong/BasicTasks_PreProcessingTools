@@ -26,9 +26,10 @@ This is a self-contained API for uploading classified children voice audio files
 The client will:
 
 - Read the manifest.json
-- Find records where `classified: true`, `children_voice: true`, and `uploaded: false`
+- Find records where `classified: true`, `containing_children_voice: true`, and `uploaded: false`
 - Start an upload session to get a unique folder ID
 - Upload the files in parallel using multithreading
+- Organize files into language subfolders based on `language_folder` field
 - Update the manifest to set `uploaded: true` for successfully uploaded files
 
 ## Requirements
@@ -36,8 +37,9 @@ The client will:
 The manifest.json should have records with the following fields:
 
 - `classified`: boolean
-- `children_voice`: boolean
+- `containing_children_voice`: boolean
 - `uploaded`: boolean
 - `output_path`: string path to the audio file
+- `language_folder`: string language code (e.g., "en", "vi", "unknown")
 
-Files are uploaded to `uploaded_files/{folder_id}/` on the server side.
+Files are uploaded to `uploaded_files/{folder_id}/{language_folder}/` on the server side.

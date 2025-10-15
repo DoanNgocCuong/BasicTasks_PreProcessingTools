@@ -67,7 +67,7 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
             output.warning(f"Failed to create manifest backup after {phase_name}: {e}")
 
     # Define callback for batch processing (phases 2-4)
-    async def process_batch():
+    async def process_batch(include_upload: bool = True):
         """Process a batch of collected URLs through phases 2-4."""
         output.info("=== Processing Batch ===")
 
@@ -89,11 +89,12 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         output.success("Batch Phase 4 complete: Content filtering finished")
         create_manifest_backup("filtering")
 
-        # Phase 5: File Upload
-        output.info("Batch Phase 5: File Upload")
-        await run_upload_phase(config, [])
-        output.success("Batch Phase 5 complete: Files uploaded")
-        create_manifest_backup("upload")
+        # Phase 5: File Upload (only if requested)
+        if include_upload:
+            output.info("Batch Phase 5: File Upload")
+            await run_upload_phase(config, [])
+            output.success("Batch Phase 5 complete: Files uploaded")
+            create_manifest_backup("upload")
 
         output.info("=== Batch Processing Complete ===")
 
@@ -106,7 +107,7 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
 
         # Final batch processing for any remaining URLs
         output.info("Running final batch processing")
-        await process_batch()
+        await process_batch(include_upload=True)
         create_manifest_backup("final")
 
         # Final Summary

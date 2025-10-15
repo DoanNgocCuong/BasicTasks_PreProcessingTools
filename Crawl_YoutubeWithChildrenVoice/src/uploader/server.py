@@ -21,7 +21,7 @@ async def start_upload():
     return {"folder_id": folder_name}
 
 @app.post("/upload/{folder_id}")
-async def upload_file(folder_id: str, file: UploadFile = File(...)):
+async def upload_file(folder_id: str, language: str = "unknown", file: UploadFile = File(...)):
     folder_path = os.path.join(UPLOAD_BASE_DIR, folder_id)
     if not os.path.exists(folder_path):
         raise HTTPException(status_code=404, detail="Folder not found")
@@ -29,11 +29,15 @@ async def upload_file(folder_id: str, file: UploadFile = File(...)):
     if file.filename is None:
         raise HTTPException(status_code=400, detail="Filename is required")
     
-    file_path = os.path.join(folder_path, file.filename)
+    # Create language subfolder
+    language_folder = os.path.join(folder_path, language)
+    os.makedirs(language_folder, exist_ok=True)
+    
+    file_path = os.path.join(language_folder, file.filename)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    return {"message": f"File {file.filename} uploaded successfully"}
+    return {"message": f"File {file.filename} uploaded successfully to {language} folder"}
 
 if __name__ == "__main__":
     import uvicorn

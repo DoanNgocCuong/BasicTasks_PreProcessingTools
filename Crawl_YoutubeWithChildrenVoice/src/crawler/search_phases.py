@@ -21,13 +21,13 @@ from ..analyzer.voice_classifier import VoiceClassifier
 ANALYZERS_AVAILABLE = True  # Will be set to False if import fails during runtime
 
 
-async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Callable[[], Awaitable[None]]] = None) -> List[VideoMetadata]:
+async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Callable[[bool], Awaitable[None]]] = None) -> List[VideoMetadata]:
     """
     Run the search and discovery phase.
 
     Args:
         config: Crawler configuration
-        batch_callback: Optional callback to run when 20 URLs are collected
+        batch_callback: Optional callback to run when URLs are collected (every 20 for processing, every 200 for upload)
 
     Returns:
         List of discovered videos (empty since we only collect URLs)
@@ -51,6 +51,7 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
 
         # Track URL count for batch processing
         last_batch_count = len(existing_urls)
+        last_upload_batch_count = len(existing_urls)
 
         # Process each query
         for query in config.search.queries:
@@ -134,9 +135,17 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
 
                     # Check if we should trigger batch processing
                     current_url_count = len(existing_urls)
-                    if batch_callback and current_url_count - last_batch_count >= 20:
-                        output.info(f"Collected {current_url_count - last_batch_count} new URLs, triggering batch processing")
-                        await batch_callback()
+                    
+                    # Check for upload batch (every 200 URLs)
+                    if batch_callback and current_url_count - last_upload_batch_count >= 200:
+                        output.info(f"Collected {current_url_count - last_upload_batch_count} new URLs, triggering full batch processing (with upload)")
+                        await batch_callback(include_upload=True)
+                        last_upload_batch_count = current_url_count
+                        last_batch_count = current_url_count  # Reset regular batch counter too
+                    # Check for regular batch (every 20 URLs, but skip if we just did upload)
+                    elif batch_callback and current_url_count - last_batch_count >= 20:
+                        output.info(f"Collected {current_url_count - last_batch_count} new URLs, triggering batch processing (without upload)")
+                        await batch_callback(include_upload=False)
                         last_batch_count = current_url_count
                 else:
                     output.info(f"No children's voice detected in {first_video.video_id} (confidence: {voice_result.confidence:.2f}) - skipping query")
