@@ -6,8 +6,6 @@ to identify children's voices in audio content.
 """
 
 import numpy as np
-import torch
-import torch.nn as nn
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -37,7 +35,7 @@ class VoiceClassifier:
 
     # Class-level shared instances for memory efficiency (from working example)
     _shared_classifier: Optional['VoiceClassifier'] = None
-    _shared_model: Optional[nn.Module] = None
+    _shared_model: Optional[Any] = None  # Changed to Any to avoid import
     _lock = threading.Lock()  # Thread safety for shared instances
 
     def __init__(self, config: AnalysisConfig):
@@ -50,8 +48,8 @@ class VoiceClassifier:
         self.config = config
         self.output = get_output_manager()
 
-        # Model parameters
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # Model parameters - initialize device lazily
+        self.device = None
         self.model_version = "1.0.0"
 
         # Feature extraction parameters
@@ -63,7 +61,7 @@ class VoiceClassifier:
         self.output.debug("Initialized voice classifier")
 
     @classmethod
-    def _get_or_create_shared_model(cls) -> nn.Module:
+    def _get_or_create_shared_model(cls) -> Any:
         """Get existing model or create new one if needed (thread-safe)"""
         with cls._lock:
             if cls._shared_model is None:
@@ -78,8 +76,14 @@ class VoiceClassifier:
             return cls._shared_model
 
     @classmethod
-    def _create_shared_model(cls) -> nn.Module:
+    def _create_shared_model(cls) -> Any:
         """Create a placeholder model for demonstration."""
+        try:
+            import torch
+            import torch.nn as nn
+        except ImportError:
+            return None
+
         class SimpleVoiceClassifier(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -125,9 +129,13 @@ class VoiceClassifier:
     @staticmethod
     def _clear_cuda_cache() -> None:
         """Clear CUDA cache if available (from working example)"""
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except ImportError:
+            pass
 
     @staticmethod
     def _force_garbage_collection() -> None:
@@ -146,8 +154,14 @@ class VoiceClassifier:
                 cls._force_garbage_collection()
                 print("✅ Voice classifier cache cleared")
 
-    def _create_placeholder_model(self) -> nn.Module:
+    def _create_placeholder_model(self) -> Any:
         """Create a placeholder model for demonstration."""
+        try:
+            import torch
+            import torch.nn as nn
+        except ImportError:
+            return None
+
         class SimpleVoiceClassifier(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -301,14 +315,27 @@ class VoiceClassifier:
             return confidence > self.config.child_voice_threshold, confidence
 
         try:
+            # Initialize device if not done yet
+            if self.device is None:
+                try:
+                    import torch
+                    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                except ImportError:
+                    self.device = 'cpu'
+
             # Prepare features for model input
             feature_vector = self._features_to_vector(features)
 
             # Run inference
-            with torch.no_grad():
-                inputs = torch.tensor(feature_vector, dtype=torch.float32).unsqueeze(0).to(self.device)
-                outputs = self.model(inputs)
-                probability = outputs.item()
+            try:
+                import torch
+                with torch.no_grad():
+                    inputs = torch.tensor(feature_vector, dtype=torch.float32).unsqueeze(0).to(self.device)
+                    outputs = self.model(inputs)
+                    probability = outputs.item()
+            except ImportError:
+                # Fallback if torch not available
+                probability = 0.5
 
             return probability > self.config.child_voice_threshold, probability
 

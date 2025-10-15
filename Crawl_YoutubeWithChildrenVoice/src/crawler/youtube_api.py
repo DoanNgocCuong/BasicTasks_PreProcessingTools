@@ -13,9 +13,18 @@ from datetime import datetime
 import googleapiclient.discovery
 from googleapiclient.errors import HttpError
 
-from ..config import YouTubeAPIConfig
-from ..models import VideoMetadata, VideoSource
-from ..utils import get_output_manager
+# Handle imports for both direct execution and module execution
+if __name__ == "__main__" and __package__ is None:
+    # Script is being run directly (not as a module)
+    # Add the parent directory to Python path for relative imports
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = "src"
+
+from config import YouTubeAPIConfig
+from models import VideoMetadata, VideoSource
+from utils import get_output_manager
 
 
 class YouTubeAPIError(Exception):

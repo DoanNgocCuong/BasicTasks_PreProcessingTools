@@ -6,8 +6,6 @@ focusing on identifying Vietnamese speech in children's voice recordings.
 """
 
 import numpy as np
-import torch
-import torch.nn as nn
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -60,7 +58,7 @@ class LanguageDetector:
 
         # Model parameters
         self.model = None
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = None  # Initialize lazily
         self.model_version = "1.0.0"
 
         # Supported languages
@@ -95,8 +93,14 @@ class LanguageDetector:
             self.output.error(f"Failed to load language detection model: {e}")
             return False
 
-    def _create_placeholder_model(self) -> nn.Module:
+    def _create_placeholder_model(self) -> Any:
         """Create a placeholder model for demonstration."""
+        try:
+            import torch
+            import torch.nn as nn
+        except ImportError:
+            return None
+
         class SimpleLanguageDetector(nn.Module):
             def __init__(self, num_languages=2):
                 super().__init__()
@@ -259,24 +263,39 @@ class LanguageDetector:
             return detected, confidence, probabilities
 
         try:
+            # Initialize device if not done yet
+            if self.device is None:
+                try:
+                    import torch
+                    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                except ImportError:
+                    self.device = 'cpu'
+
             # Prepare features for model input
             feature_vector = self._features_to_vector(features)
 
             # Run inference
-            with torch.no_grad():
-                inputs = torch.tensor(feature_vector, dtype=torch.float32).unsqueeze(0).to(self.device)
-                outputs = self.model(inputs)
-                probabilities_tensor = outputs.squeeze()
+            try:
+                import torch
+                with torch.no_grad():
+                    inputs = torch.tensor(feature_vector, dtype=torch.float32).unsqueeze(0).to(self.device)
+                    outputs = self.model(inputs)
+                    probabilities_tensor = outputs.squeeze()
 
-                # Convert to probabilities dictionary
-                probabilities = {}
-                for i, lang in enumerate(self.supported_languages):
-                    probabilities[lang.value] = float(probabilities_tensor[i])
+                    # Convert to probabilities dictionary
+                    probabilities = {}
+                    for i, lang in enumerate(self.supported_languages):
+                        probabilities[lang.value] = float(probabilities_tensor[i])
 
-                # Find most likely language
-                max_prob_idx = torch.argmax(probabilities_tensor).item()
-                detected_language = self.supported_languages[max_prob_idx]
-                confidence = float(probabilities_tensor[max_prob_idx])
+                    # Find most likely language
+                    max_prob_idx = torch.argmax(probabilities_tensor).item()
+                    detected_language = self.supported_languages[max_prob_idx]
+                    confidence = float(probabilities_tensor[max_prob_idx])
+            except ImportError:
+                # Fallback if torch not available
+                probabilities = {lang.value: 0.5 for lang in self.supported_languages}
+                detected_language = Language.UNKNOWN
+                confidence = 0.0
 
             return detected_language, confidence, probabilities
 

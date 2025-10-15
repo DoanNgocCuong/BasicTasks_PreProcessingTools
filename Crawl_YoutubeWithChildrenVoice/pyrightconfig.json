@@ -1,0 +1,28 @@
+{
+  "include": [
+    "src",
+    "tests"
+  ],
+  "exclude": [
+    "output",
+    "crawler_outputs",
+    "final_audio_files",
+    "__pycache__",
+    "*.pyc"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "pythonPlatform": "Windows",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "pythonVersion": "3.12",
+      "pythonPlatform": "Windows",
+      "extraPaths": [
+        "src"
+      ]
+    }
+  ]
+}
