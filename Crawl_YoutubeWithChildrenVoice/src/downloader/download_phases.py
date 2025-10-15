@@ -269,6 +269,27 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 output.success(f"Downloaded and processed: {video.video_id}")
             else:
                 output.warning(f"Download failed for {video.video_id}: {result.error_message}")
+                
+                # Create failed manifest record to prevent re-attempts
+                failed_record = {
+                    "video_id": video.video_id,
+                    "url": url,
+                    "output_path": None,
+                    "status": "failed",
+                    "timestamp": datetime.now().isoformat() + "Z",
+                    "duration_seconds": 0.0,
+                    "title": get_video_title(url) or video.title,
+                    "language_folder": "unknown",
+                    "download_index": len(manifest_data['records']),
+                    "classified": False
+                }
+                
+                # Update manifest with failed record
+                manifest_data['records'].append(failed_record)
+                
+                # Save manifest
+                with open(manifest_file, 'w', encoding='utf-8') as f:
+                    json.dump(manifest_data, f, indent=2, ensure_ascii=False)
 
         output.success(f"Download phase completed: {downloaded_count}/{len(urls)} URLs processed")
         return downloaded_count
