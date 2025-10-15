@@ -10,12 +10,59 @@ import json
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
+import re
 
 from ..config import CrawlerConfig
 from ..downloader import AudioDownloader
 from ..models import VideoMetadata, VideoSource
 from ..utils import get_output_manager
 from ..crawler.youtube_api import YouTubeAPIClient
+
+
+def extract_video_id(url: str) -> Optional[str]:
+    """Extract YouTube video ID from URL."""
+    try:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        if 'youtube.com' in parsed.netloc:
+            return parse_qs(parsed.query).get('v', [None])[0]
+        elif 'youtu.be' in parsed.netloc:
+            return parsed.path[1:]
+    except Exception:
+        pass
+    return None
+
+
+def get_video_title(url: str) -> Optional[str]:
+    """Get video title using available methods."""
+    try:
+        from pytube import YouTube
+        return YouTube(url).title
+    except Exception:
+        return None
+
+
+def to_camel_case(text: str, max_len: int = 40) -> str:
+    """Convert text to camelCase."""
+    try:
+        words = re.split(r'[^a-z0-9]+', (text or '').lower())
+        words = [w for w in words if w]
+        camel = ''.join(w.capitalize() for w in words)
+        return camel[:max_len] if camel else 'NoTitle'
+    except Exception:
+        return 'NoTitle'
+
+
+def build_filename(index: int, url: str, extension: str = "wav") -> str:
+    """Build consistent filename with video info."""
+    try:
+        vid = extract_video_id(url)
+        title = get_video_title(url)
+        camel_title = to_camel_case(title) if title else 'NoTitle'
+        short_id = (vid or 'noid')[:8]
+        return f"{index:04d}_{short_id}_{camel_title}.{extension}"
+    except Exception:
+        return f"{index:04d}_unknown.{extension}"
 
 
 async def get_video_transcript(video_id: str) -> Optional[str]:
@@ -167,7 +214,9 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 unclassified_dir = config.output.final_audio_dir / "unclassified"
                 unclassified_dir.mkdir(parents=True, exist_ok=True)
 
-                new_filename = f"{video.video_id}_{Path(result.output_path).name}"
+                # Use new naming convention
+                download_index = len(manifest_data['records'])
+                new_filename = build_filename(download_index, url, "wav")
                 new_path = unclassified_dir / new_filename
 
                 # Move the file
@@ -202,9 +251,9 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     "status": "success",
                     "timestamp": datetime.now().isoformat() + "Z",
                     "duration_seconds": result.duration or 0.0,
-                    "title": video.title,
+                    "title": get_video_title(url) or video.title,  # Use fetched title if available
                     "language_folder": language_info,
-                    "download_index": len(manifest_data['records']),
+                    "download_index": download_index,
                     "classified": False
                 }
 

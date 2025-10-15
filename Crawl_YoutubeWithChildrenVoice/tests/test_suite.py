@@ -10,13 +10,13 @@ from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 import numpy as np
 
-from config import CrawlerConfig
-from models import VideoMetadata, VideoSource
-from crawler.youtube_api import YouTubeAPIClient
-from downloader.audio_downloader import AudioDownloader
-from analyzer.voice_classifier import VoiceClassifier
-from analyzer.language_detector import LanguageDetector
-from filterer.api_client import FiltererAPIClient
+from src.config import CrawlerConfig
+from src.models import VideoMetadata, VideoSource
+from src.crawler.youtube_api import YouTubeAPIClient
+from src.downloader.audio_downloader import AudioDownloader
+from src.analyzer.voice_classifier import VoiceClassifier
+from src.analyzer.language_detector import LanguageDetector
+from src.analyzer.api_client import AnalysisAPIClient
 
 
 class TestCrawlerConfig:
@@ -99,7 +99,7 @@ class TestYouTubeAPIClient:
     @pytest.fixture
     def api_config(self):
         """Create test API config."""
-        from config import YouTubeAPIConfig
+        from src.config import YouTubeAPIConfig
         config = YouTubeAPIConfig()
         config.api_keys = ["test_key_1", "test_key_2"]
         return config
@@ -152,10 +152,10 @@ class TestAudioDownloader:
     @pytest.fixture
     def download_config(self):
         """Create test download config."""
-        from config import DownloadConfig
+        from src.config import DownloadConfig
         return DownloadConfig()
 
-    @patch('downloader.audio_downloader.AudioDownloader._try_yt_dlp_download')
+    @patch('src.downloader.audio_downloader.AudioDownloader._try_yt_dlp_download')
     @pytest.mark.asyncio
     async def test_download_success(self, mock_yt_dlp, download_config):
         """Test successful download."""
@@ -184,7 +184,7 @@ class TestVoiceClassifier:
     @pytest.fixture
     def analysis_config(self):
         """Create test analysis config."""
-        from config import AnalysisConfig
+        from src.config import AnalysisConfig
         return AnalysisConfig()
 
     def test_classifier_initialization(self, analysis_config):
@@ -238,7 +238,7 @@ class TestLanguageDetector:
     @pytest.fixture
     def analysis_config(self):
         """Create test analysis config."""
-        from config import AnalysisConfig
+        from src.config import AnalysisConfig
         return AnalysisConfig()
 
     def test_detector_initialization(self, analysis_config):
@@ -259,53 +259,52 @@ class TestLanguageDetector:
         assert detector.model is not None
 
 
-class TestFiltererAPIClient:
-    """Test filterer API client."""
+class TestAnalysisAPIClient:
+    """Test analysis API client."""
 
     @pytest.fixture
-    def filterer_config(self):
-        """Create test filterer config."""
-        from config import FiltererAPIConfig
-        config = FiltererAPIConfig()
+    def analysis_api_config(self):
+        """Create test analysis API config."""
+        from src.config import AnalysisAPIConfig
+        config = AnalysisAPIConfig()
         config.enabled = True
         config.server_url = "http://test-server:8000"
         return config
 
     @pytest.mark.asyncio
-    async def test_filter_videos_api_disabled(self, filterer_config):
-        """Test filtering when API is disabled."""
-        filterer_config.enabled = False
+    async def test_analyze_videos_api_disabled(self, analysis_api_config):
+        """Test analysis when API is disabled."""
+        analysis_api_config.enabled = False
 
-        async with FiltererAPIClient(filterer_config) as client:
+        async with AnalysisAPIClient(analysis_api_config) as client:
             videos = [VideoMetadata(video_id="test123", title="Test", channel_id="channel456", channel_title="Channel", source=VideoSource.YOUTUBE_API)]
-            results = await client.filter_videos(videos)
+            results = await client.analyze_videos(videos)
 
         assert len(results) == 1
-        assert results[0].passed_filter is True
+        assert results[0].is_child_voice is True  # Should default to True when API disabled
         assert results[0].video_id == "test123"
 
     @patch('aiohttp.ClientSession.post')
     @pytest.mark.asyncio
-    async def test_filter_single_video_success(self, mock_post, filterer_config):
-        """Test successful single video filtering."""
+    async def test_analyze_single_video_success(self, mock_post, analysis_api_config):
+        """Test successful single video analysis."""
         # Mock successful API response
         mock_response = Mock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={
-            "passed": True,
-            "score": 0.95,
-            "reasons": [],
+            "is_child_voice": True,
+            "confidence": 0.95,
             "metadata": {"quality": "high"}
         })
 
         mock_post.return_value.__aenter__.return_value = mock_response
 
-        async with FiltererAPIClient(filterer_config) as client:
+        async with AnalysisAPIClient(analysis_api_config) as client:
             video = VideoMetadata(video_id="test123", title="Test", channel_id="channel456", channel_title="Channel", source=VideoSource.YOUTUBE_API)
-            result = await client._filter_single_video(video)
+            result = await client._analyze_single_video(video)
 
-        assert result.passed_filter is True
-        assert result.filter_score == 0.95
+        assert result.is_child_voice is True
+        assert result.confidence == 0.95
         assert result.video_id == "test123"
 
 
@@ -318,14 +317,14 @@ class TestIntegration:
         """Test full workflow with dry run configuration."""
         # This would test the main workflow with mocked components
         # For now, just ensure the main function can be imported
-        from main import main
+        from src.main import main
 
         # The main function should be importable
         assert callable(main)
 
     def test_config_loading(self):
         """Test configuration loading from environment."""
-        from config import CrawlerConfig
+        from src.config import CrawlerConfig
 
         config = CrawlerConfig.from_env()
 

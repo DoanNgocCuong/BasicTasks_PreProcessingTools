@@ -1,0 +1,41 @@
+{
+  "total_duration_seconds": 29.146185159683228,
+  "records": [
+    {
+      "video_id": "FcFypeosrJk",
+      "url": "https://www.youtube.com/watch?v=FcFypeosrJk",
+      "output_path": "output\\final_audio\\unclassified\\0000_FcFypeos_NoTitle.wav",
+      "status": "success",
+      "timestamp": "2025-10-15T11:00:57.238443Z",
+      "duration_seconds": 9.73453164100647,
+      "title": "MC nhí Diệu Anh| Bài giới thiệu bản thân| Khóa MC02| CLB Nghệ thuật Hí Hoáy|",
+      "language_folder": "vi",
+      "download_index": 0,
+      "classified": false
+    },
+    {
+      "video_id": "zXWkkMQ5NQg",
+      "url": "https://www.youtube.com/watch?v=zXWkkMQ5NQg",
+      "output_path": "output\\final_audio\\unclassified\\0001_zXWkkMQ5_NoTitle.wav",
+      "status": "success",
+      "timestamp": "2025-10-15T11:01:08.223900Z",
+      "duration_seconds": 9.731057167053223,
+      "title": "MC nhí Quang Vinh | Giới thiệu về bản thân | Khóa MC02| CLB Nghệ thuật Hí Hoáy|",
+      "language_folder": "vi",
+      "download_index": 1,
+      "classified": false
+    },
+    {
+      "video_id": "75_yDflzQNw",
+      "url": "https://www.youtube.com/watch?v=75_yDflzQNw",
+      "output_path": "output\\final_audio\\unclassified\\0002_75_yDflz_NoTitle.wav",
+      "status": "success",
+      "timestamp": "2025-10-15T11:01:19.271568Z",
+      "duration_seconds": 9.680596351623535,
+      "title": "MC nhí Quỳnn Anh| Giới thiệu bản thân| Khóa MC02| CLB Nghệ thuật Hí Hoáy|",
+      "language_folder": "vi",
+      "download_index": 2,
+      "classified": false
+    }
+  ]
+}
