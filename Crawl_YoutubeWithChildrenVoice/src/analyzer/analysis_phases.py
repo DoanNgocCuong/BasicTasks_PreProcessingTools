@@ -25,6 +25,26 @@ except ImportError as e:
     VOICE_CLASSIFIER_AVAILABLE = False
 
 
+def migrate_legacy_classification_fields(record: dict) -> dict:
+    """
+    Migrate legacy classification fields to current naming convention.
+    
+    Args:
+        record: Manifest record dictionary
+        
+    Returns:
+        Updated record with migrated fields
+    """
+    # Migrate legacy has_children_voice field to containing_children_voice
+    if 'has_children_voice' in record and record['has_children_voice'] is not None:
+        if 'containing_children_voice' not in record or record['containing_children_voice'] is None:
+            record['containing_children_voice'] = record['has_children_voice']
+        # Remove legacy field after migration
+        del record['has_children_voice']
+    
+    return record
+
+
 async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata]) -> List[VideoMetadata]:
     """
     Run the audio analysis phase.
@@ -48,6 +68,9 @@ async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata])
         try:
             with open(manifest_file, 'r', encoding='utf-8') as f:
                 manifest_data = json.load(f)
+            # Migrate legacy classification fields in all records
+            for record in manifest_data.get('records', []):
+                migrate_legacy_classification_fields(record)
             output.debug(f"Successfully loaded manifest with {len(manifest_data.get('records', []))} records")
         except json.JSONDecodeError as e:
             output.error(f"Failed to parse manifest JSON at {manifest_file}: {e}")
@@ -217,9 +240,26 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
     analyzed_count = 0
 
     for record in manifest_data.get('records', []):
-        if record.get('classified', False):
-            # Already classified, skip
+        classified = record.get('classified', False)
+        classification_timestamp = record.get('classification_timestamp')
+        containing_children_voice = record.get('containing_children_voice')
+        
+        # Skip if already fully classified (has all required classification fields)
+        has_complete_classification = (
+            classified and 
+            classification_timestamp is not None and
+            containing_children_voice is not None
+        )
+        if has_complete_classification:
             continue
+        
+        # Re-analyze if classified but missing key fields
+        has_incomplete_classification = (
+            classified and 
+            (classification_timestamp is None or containing_children_voice is None)
+        )
+        if has_incomplete_classification:
+            output.info(f"Re-analyzing {record.get('video_id')} due to incomplete classification data (timestamp: {classification_timestamp}, children_voice: {containing_children_voice})")
 
         video_id = record.get('video_id')
         output_path_str = record.get('output_path')

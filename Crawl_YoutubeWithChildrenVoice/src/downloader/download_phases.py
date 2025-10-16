@@ -19,6 +19,26 @@ from ..utils import get_output_manager, get_file_manager
 from ..constants import DEFAULT_MAX_FILENAME_LENGTH
 
 
+def migrate_legacy_classification_fields(record: Dict) -> Dict:
+    """
+    Migrate legacy classification fields to current naming convention.
+    
+    Args:
+        record: Manifest record dictionary
+        
+    Returns:
+        Updated record with migrated fields
+    """
+    # Migrate legacy has_children_voice field to containing_children_voice
+    if 'has_children_voice' in record and record['has_children_voice'] is not None:
+        if 'containing_children_voice' not in record or record['containing_children_voice'] is None:
+            record['containing_children_voice'] = record['has_children_voice']
+        # Remove legacy field after migration
+        del record['has_children_voice']
+    
+    return record
+
+
 def extract_video_id(url: str) -> Optional[str]:
     """Extract YouTube video ID from URL."""
     try:
@@ -173,6 +193,9 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
             try:
                 with open(manifest_file, 'r', encoding='utf-8') as f:
                     manifest_data = json.load(f)
+                # Migrate legacy classification fields in all records
+                for record in manifest_data.get('records', []):
+                    migrate_legacy_classification_fields(record)
                 output.info(f"Loaded existing manifest with {len(manifest_data.get('records', []))} records")
             except json.JSONDecodeError as e:
                 output.error(f"Failed to parse existing manifest JSON at {manifest_file}: {e}")
@@ -236,6 +259,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
             # Check if already in manifest and if we should redownload
             should_redownload = False
             existing_record = None
+            classification_incomplete = False
             if video_id in existing_records:
                 existing_record = existing_records[video_id]
                 classified = existing_record.get('classified', False)
@@ -248,17 +272,27 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                     output.debug(f"Video {video_id} has all_downloads_failed=true, skipping")
                     continue
                 
+                # Check if classification data is incomplete (classified=true but missing key fields)
+                classification_incomplete = (classified and 
+                    (existing_record.get('classification_timestamp') is None or 
+                     existing_record.get('containing_children_voice') is None))
+                
                 # Conditions for redownload
                 if not classified and not file_available:
                     should_redownload = True
                 elif classified and not uploaded and not file_available:
                     should_redownload = True
+                elif classification_incomplete:
+                    # Redownload if classification data is incomplete, regardless of file availability
+                    should_redownload = True
+                    output.info(f"Redownloading {video_id} due to incomplete classification data (classified: {classified}, timestamp: {existing_record.get('classification_timestamp')}, children_voice: {existing_record.get('containing_children_voice')})")
                 
                 if not should_redownload:
                     output.debug(f"Video {video_id} already processed and meets skip conditions, skipping")
                     continue
                 else:
-                    output.info(f"Redownloading {video_id} due to missing file (classified: {classified}, uploaded: {uploaded}, file_available: {file_available})")
+                    if not classification_incomplete:
+                        output.info(f"Redownloading {video_id} due to missing file (classified: {classified}, uploaded: {uploaded}, file_available: {file_available})")
             else:
                 # New video, download
                 should_redownload = True
@@ -344,8 +378,8 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
 
                 # Create or update manifest record
                 if existing_record:
-                    # Update existing record
-                    existing_record.update({
+                    # Reset classification fields if we're redownloading due to incomplete classification
+                    update_data = {
                         "output_path": str(new_path),
                         "status": "success",
                         "timestamp": datetime.now().isoformat() + "Z",
@@ -353,7 +387,19 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                         "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,
                         "language_folder": language_info,
                         "file_available": True
-                    })
+                    }
+                    
+                    # Reset classification if it was incomplete
+                    if 'classification_incomplete' in locals() and classification_incomplete:
+                        update_data.update({
+                            "classified": False,
+                            "classification_timestamp": None,
+                            "containing_children_voice": None,
+                            "voice_analysis_confidence": 0.0
+                        })
+                        output.debug(f"Reset classification fields for {video_id} due to incomplete data")
+                    
+                    existing_record.update(update_data)
                     # Update total duration if duration changed
                     old_duration = existing_record.get('duration_seconds', 0.0) or 0.0
                     manifest_data['total_duration_seconds'] -= old_duration
