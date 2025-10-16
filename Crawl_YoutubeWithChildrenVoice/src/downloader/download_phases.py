@@ -8,7 +8,7 @@ This module contains the implementation of the audio download phase.
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 from datetime import datetime
 import re
 
@@ -33,13 +33,27 @@ def extract_video_id(url: str) -> Optional[str]:
     return None
 
 
-def get_video_title(url: str) -> Optional[str]:
-    """Get video title using available methods."""
+def get_video_title(url: str, fallback_title: Optional[str] = None, manifest_data: Optional[Dict] = None, video_id: Optional[str] = None) -> Optional[str]:
+    """Get video title using available methods with fallbacks."""
     try:
         from pytube import YouTube
-        return YouTube(url).title
+        title = YouTube(url).title
+        if title:
+            return title
     except Exception:
-        return None
+        pass
+    
+    # Fallback to provided title
+    if fallback_title:
+        return fallback_title
+    
+    # Fallback to manifest
+    if manifest_data and video_id:
+        for record in manifest_data.get('records', []):
+            if record.get('video_id') == video_id and record.get('title'):
+                return record['title']
+    
+    return None
 
 
 def to_camel_case(text: str, max_len: int = 40) -> str:
@@ -53,12 +67,13 @@ def to_camel_case(text: str, max_len: int = 40) -> str:
         return 'NoTitle'
 
 
-def build_filename(index: int, url: str, extension: str = "wav") -> str:
+def build_filename(index: int, url: str, extension: str = "wav", title: Optional[str] = None, manifest_data: Optional[Dict] = None, video_id: Optional[str] = None) -> str:
     """Build consistent filename with video info."""
     try:
         vid = extract_video_id(url)
-        title = get_video_title(url)
-        camel_title = to_camel_case(title) if title else 'NoTitle'
+        # Use provided title, or try to fetch it with fallbacks
+        video_title = title or get_video_title(url, None, manifest_data, video_id)
+        camel_title = to_camel_case(video_title) if video_title else 'NoTitle'
         short_id = (vid or 'noid')[:8]
         return f"{index:04d}_{short_id}_{camel_title}.{extension}"
     except Exception:
@@ -216,12 +231,24 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
 
                 # Use new naming convention
                 download_index = len(manifest_data['records'])
-                new_filename = build_filename(download_index, url, "wav")
+                new_filename = build_filename(download_index, url, "wav", video.title, manifest_data, video.video_id)
                 new_path = unclassified_dir / new_filename
 
                 # Move the file
                 result.output_path.rename(new_path)
                 result.output_path = new_path
+
+                # Clean up any remaining temp files in audio_outputs_dir
+                try:
+                    audio_outputs_dir = config.output.audio_outputs_dir
+                    for temp_file in audio_outputs_dir.glob("*.mp3"):
+                        try:
+                            temp_file.unlink()
+                            output.debug(f"Cleaned up temp file: {temp_file}")
+                        except Exception as e:
+                            output.warning(f"Failed to clean up temp file {temp_file}: {e}")
+                except Exception as e:
+                    output.warning(f"Error during temp file cleanup: {e}")
 
                 # Detect language using transcript (preferred method from working example)
                 language_info = "unknown"
@@ -251,7 +278,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     "status": "success",
                     "timestamp": datetime.now().isoformat() + "Z",
                     "duration_seconds": result.duration or 0.0,
-                    "title": get_video_title(url) or video.title,  # Use fetched title if available
+                    "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,  # Use fetched title if available
                     "language_folder": language_info,
                     "download_index": download_index,
                     "classified": False
@@ -270,6 +297,14 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
             else:
                 output.warning(f"Download failed for {video.video_id}: {result.error_message}")
                 
+                # Clean up temp file if it exists
+                if result.output_path and result.output_path.exists():
+                    try:
+                        result.output_path.unlink()
+                        output.debug(f"Cleaned up failed download temp file: {result.output_path}")
+                    except Exception as e:
+                        output.warning(f"Failed to clean up failed download temp file {result.output_path}: {e}")
+                
                 # Create failed manifest record to prevent re-attempts
                 failed_record = {
                     "video_id": video.video_id,
@@ -278,7 +313,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     "status": "failed",
                     "timestamp": datetime.now().isoformat() + "Z",
                     "duration_seconds": 0.0,
-                    "title": get_video_title(url) or video.title,
+                    "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,
                     "language_folder": "unknown",
                     "download_index": len(manifest_data['records']),
                     "classified": False
@@ -296,4 +331,17 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
 
     except Exception as e:
         output.error(f"Download phase failed: {e}")
+        
+        # Clean up any remaining temp files on error
+        try:
+            audio_outputs_dir = config.output.audio_outputs_dir
+            for temp_file in audio_outputs_dir.glob("*.mp3"):
+                try:
+                    temp_file.unlink()
+                    output.debug(f"Cleaned up temp file on error: {temp_file}")
+                except Exception as cleanup_e:
+                    output.warning(f"Failed to clean up temp file {temp_file}: {cleanup_e}")
+        except Exception as cleanup_e:
+            output.warning(f"Error during temp file cleanup on error: {cleanup_e}")
+        
         return 0
