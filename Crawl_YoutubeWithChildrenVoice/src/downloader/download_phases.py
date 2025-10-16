@@ -266,10 +266,16 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                 uploaded = existing_record.get('uploaded', False)
                 file_available = existing_record.get('file_available', True)  # Default to True for old records
                 all_downloads_failed = existing_record.get('all_downloads_failed', False)
+                containing_children_voice = existing_record.get('containing_children_voice')
                 
                 # Skip if all downloads have already failed
                 if all_downloads_failed:
                     output.debug(f"Video {video_id} has all_downloads_failed=true, skipping")
+                    continue
+                
+                # Skip videos that were classified as not containing children voice
+                if classified and containing_children_voice == False:
+                    output.debug(f"Video {video_id} classified as not containing children voice, skipping redownload")
                     continue
                 
                 # Check if classification data is incomplete (classified=true but missing key fields)

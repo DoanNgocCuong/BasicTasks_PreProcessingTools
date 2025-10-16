@@ -203,7 +203,7 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
                 records_to_keep.append(record)
                 continue
         else:
-            # No children's voice - remove entry and file if file exists
+            # No children's voice - keep entry but remove file if file exists
             if file_exists:
                 try:
                     output_path.unlink()
@@ -211,7 +211,8 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
                 except Exception as e:
                     output.warning(f"Failed to remove file {output_path}: {e}")
                     output.warning(f"File exists: {output_path.exists()}")
-            entries_removed += 1    # Remove duplicate entries (same video_id)
+            record['file_available'] = False
+            records_to_keep.append(record)
     seen_video_ids = set()
     unique_records = []
     duplicates_removed = 0
