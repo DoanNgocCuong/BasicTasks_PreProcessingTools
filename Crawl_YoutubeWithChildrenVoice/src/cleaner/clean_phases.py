@@ -17,6 +17,44 @@ from ..utils import get_output_manager, get_file_manager
 from .clean_manifest import clean_manifest
 
 
+async def clean_urls(config: CrawlerConfig) -> None:
+    """
+    Clean discovered URLs by removing duplicates.
+    
+    Args:
+        config: Crawler configuration
+    """
+    output = get_output_manager()
+    
+    urls_file = config.output.url_outputs_dir / "discovered_urls.txt"
+    if not urls_file.exists():
+        output.warning(f"URLs file not found: {urls_file}")
+        return
+    
+    output.info(f"Cleaning URLs file: {urls_file}")
+    
+    try:
+        with open(urls_file, 'r', encoding='utf-8') as f:
+            urls = f.read().splitlines()
+        
+        original_count = len(urls)
+        unique_urls = list(set(urls))  # Remove duplicates
+        unique_count = len(unique_urls)
+        
+        if unique_count < original_count:
+            output.info(f"Removed {original_count - unique_count} duplicate URLs")
+            
+            with open(urls_file, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(unique_urls))
+            
+            output.success(f"URLs cleaned: {unique_count} unique URLs remaining")
+        else:
+            output.info("No duplicate URLs found")
+            
+    except Exception as e:
+        output.error(f"Failed to clean URLs: {e}")
+
+
 async def run_clean_phase(config: CrawlerConfig, videos: List[VideoMetadata]) -> List[VideoMetadata]:
     """
     Run the manifest cleaning phase.
@@ -35,6 +73,9 @@ async def run_clean_phase(config: CrawlerConfig, videos: List[VideoMetadata]) ->
         if not config.clean.enabled:
             output.info("Manifest cleaning disabled - skipping clean phase")
             return videos
+
+        # Clean URLs first
+        await clean_urls(config)
 
         # Load manifest
         manifest_file = config.output.final_audio_dir / "manifest.json"
