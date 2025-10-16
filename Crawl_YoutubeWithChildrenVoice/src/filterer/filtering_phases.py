@@ -168,8 +168,9 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             output.debug(f"Corrected path for {video_id}: {output_path}")
 
         if not file_exists:
-            output.warning(f"File not found for {video_id}: {output_path} - removing from manifest")
-            entries_removed += 1
+            output.warning(f"File not found for {video_id}: {output_path} - marking as unavailable")
+            record['file_available'] = False
+            records_to_keep.append(record)
             continue
 
         # Check for children's voice
@@ -189,30 +190,30 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
                 entries_removed += 1
                 continue
 
-        # Move file
-        try:
-            output_path.rename(target_path)
-            record['output_path'] = str(target_path)
-            records_to_keep.append(record)
-            files_moved += 1
-            output.debug(f"Moved {video_id} to {language_folder} folder")
-        except Exception as e:
-            output.error(f"Failed to move file for {video_id}: {e}")
-            output.error(f"Source: {output_path}, Target: {target_path}")
-            output.error(f"Source exists: {output_path.exists()}, Target exists: {target_path.exists()}")
-            entries_removed += 1
-            continue
-    else:
-        # No children's voice - remove entry and file
-        try:
-            output_path.unlink()
-            output.debug(f"Removed file without children's voice: {video_id}")
-        except Exception as e:
-            output.warning(f"Failed to remove file {output_path}: {e}")
-            output.warning(f"File exists: {output_path.exists()}")
-        entries_removed += 1
-
-    # Remove duplicate entries (same video_id)
+            # Move file
+            try:
+                output_path.rename(target_path)
+                record['output_path'] = str(target_path)
+                records_to_keep.append(record)
+                files_moved += 1
+                output.debug(f"Moved {video_id} to {language_folder} folder")
+            except Exception as e:
+                output.error(f"Failed to move file for {video_id}: {e}")
+                output.error(f"Source: {output_path}, Target: {target_path}")
+                output.error(f"Source exists: {output_path.exists()}, Target exists: {target_path.exists()}")
+                record['file_available'] = False
+                records_to_keep.append(record)
+                continue
+        else:
+            # No children's voice - remove entry and file if file exists
+            if file_exists:
+                try:
+                    output_path.unlink()
+                    output.debug(f"Removed file without children's voice: {video_id}")
+                except Exception as e:
+                    output.warning(f"Failed to remove file {output_path}: {e}")
+                    output.warning(f"File exists: {output_path.exists()}")
+            entries_removed += 1    # Remove duplicate entries (same video_id)
     seen_video_ids = set()
     unique_records = []
     duplicates_removed = 0

@@ -74,20 +74,23 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
 
         # Phase 2: Audio Download
         output.info("Batch Phase 2: Audio Download")
-        downloaded_count = await run_download_phase_from_urls(config)
+        downloaded_count = await run_download_phase_from_urls(config, config.max_processed_urls)
         output.success(f"Batch Phase 2 complete: {downloaded_count} audios downloaded")
+        await run_clean_phase(config, [])
         create_manifest_backup("download")
 
         # Phase 3: Audio Analysis
         output.info("Batch Phase 3: Audio Analysis")
         await run_analysis_phase(config, [])
         output.success("Batch Phase 3 complete: Audio analysis finished")
+        await run_clean_phase(config, [])
         create_manifest_backup("analysis")
 
         # Phase 4: Content Filtering
         output.info("Batch Phase 4: Content Filtering")
         await run_filtering_phase(config, [])
         output.success("Batch Phase 4 complete: Content filtering finished")
+        await run_clean_phase(config, [])
         create_manifest_backup("filtering")
 
         # Phase 5: File Upload (only if requested)
@@ -95,6 +98,7 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
             output.info("Batch Phase 5: File Upload")
             await run_upload_phase(config, [])
             output.success("Batch Phase 5 complete: Files uploaded")
+            await run_clean_phase(config, [])
             create_manifest_backup("upload")
 
         output.info("=== Batch Processing Complete ===")
@@ -113,9 +117,45 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         create_manifest_backup("discovery")
 
         # Final batch processing for any remaining URLs
-        output.info("Running final batch processing")
-        await process_batch(include_upload=True)
-        create_manifest_backup("final")
+        if config.max_processed_urls is None:
+            output.info("Running final batch processing")
+            await process_batch(include_upload=True)
+            create_manifest_backup("final")
+        else:
+            # Check if there are unprocessed URLs
+            def extract_video_id_from_url(url: str) -> Optional[str]:
+                try:
+                    from urllib.parse import urlparse, parse_qs
+                    parsed = urlparse(url)
+                    if 'youtube.com' in parsed.netloc:
+                        return parse_qs(parsed.query).get('v', [None])[0]
+                    elif 'youtu.be' in parsed.netloc:
+                        return parsed.path[1:]
+                except Exception:
+                    pass
+                return None
+            
+            manifest_file = config.output.final_audio_dir / "manifest.json"
+            url_file = config.output.url_outputs_dir / "discovered_urls.txt"
+            unprocessed_count = 0
+            if url_file.exists() and manifest_file.exists():
+                try:
+                    with open(url_file, 'r', encoding='utf-8') as f:
+                        discovered_urls = set(line.strip() for line in f if line.strip())
+                    with open(manifest_file, 'r', encoding='utf-8') as f:
+                        manifest_data = json.load(f)
+                    processed_video_ids = {record['video_id'] for record in manifest_data.get('records', [])}
+                    unprocessed_urls = [url for url in discovered_urls if extract_video_id_from_url(url) not in processed_video_ids]
+                    unprocessed_count = len(unprocessed_urls)
+                except Exception as e:
+                    output.warning(f"Failed to check unprocessed count: {e}")
+            
+            if unprocessed_count > 0:
+                output.info("Running final batch processing")
+                await process_batch(include_upload=True)
+                create_manifest_backup("final")
+            else:
+                output.info("No unprocessed URLs found, skipping final batch")
 
         # Final Summary
         output.info("=== Workflow Complete ===")
@@ -205,6 +245,12 @@ Examples:
         help="Enable online mode (use API server for analysis instead of local processing)"
     )
 
+    parser.add_argument(
+        "--max-processed-urls",
+        type=int,
+        help="Maximum number of URLs to process through phases 2-5 (default: unlimited)"
+    )
+
     return parser.parse_args()
 
 
@@ -222,7 +268,8 @@ def main() -> int:
                 "max_videos": args.max_videos,
                 "output_dir": args.output_dir,
                 "verbose": args.verbose,
-                "online": args.online
+                "online": args.online,
+                "max_processed_urls": args.max_processed_urls
             }
         )
     except Exception as e:

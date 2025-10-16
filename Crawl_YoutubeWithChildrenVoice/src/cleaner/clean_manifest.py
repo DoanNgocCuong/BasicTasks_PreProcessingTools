@@ -2,9 +2,19 @@ import json
 import datetime
 import re
 import os
+from pathlib import Path
+
+def find_file_recursively(root_dir: Path, filename: str) -> Path | None:
+    """Search for a file recursively in the directory tree."""
+    for root, dirs, files in os.walk(root_dir):
+        if filename in files:
+            return Path(root) / filename
+    return None
 
 def clean_manifest(manifest_path):
-    # Check if manifest exists
+    # Get the output directory
+    manifest_dir = Path(manifest_path).parent
+    output_dir = manifest_dir.parent  # ../../output
     if not os.path.exists(manifest_path):
         print(f"Manifest file not found: {manifest_path} - creating empty manifest")
         # Create empty manifest
@@ -99,6 +109,28 @@ def clean_manifest(manifest_path):
         if 'recovered_at' not in record:
             record['recovered_at'] = now
             changes.append(f"Record {i}: Added recovered_at: {now}")
+        
+        # Check file availability
+        if 'file_available' not in record:
+            if record.get('output_path') and record['output_path'] is not None:
+                file_path = Path(record['output_path'])
+                if file_path.exists():
+                    record['file_available'] = True
+                    changes.append(f"Record {i}: Set file_available: true (file exists at {file_path})")
+                else:
+                    # Try to find the file recursively in output directory
+                    filename = file_path.name
+                    found_path = find_file_recursively(output_dir, filename)
+                    if found_path:
+                        record['output_path'] = str(found_path)
+                        record['file_available'] = True
+                        changes.append(f"Record {i}: Updated output_path to {found_path} and set file_available: true")
+                    else:
+                        record['file_available'] = False
+                        changes.append(f"Record {i}: Set file_available: false (file not found)")
+            else:
+                record['file_available'] = False
+                changes.append(f"Record {i}: Set file_available: false (no output_path)")
     
     # Remove duplicates based on video_id
     seen = {}
@@ -130,5 +162,8 @@ def clean_manifest(manifest_path):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 if __name__ == "__main__":
-    manifest_path = "../../output/final_audio/manifest.json"
+    # Use absolute path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    manifest_path = os.path.join(project_root, "output", "final_audio", "manifest.json")
     clean_manifest(manifest_path)

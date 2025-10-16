@@ -12,26 +12,47 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
 
+from constants import (
+    DEFAULT_TARGET_VIDEOS_PER_QUERY,
+    DEFAULT_MAX_RECOMMENDED_PER_QUERY,
+    DEFAULT_MIN_TARGET_COUNT,
+    DEFAULT_MAX_SIMILAR_VIDEOS_PER_CHANNEL,
+    DEFAULT_DOWNLOAD_BATCH_SIZE,
+    DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+    DEFAULT_MAX_FILENAME_LENGTH,
+    DEFAULT_MAX_CONCURRENT_UPLOADS,
+    DEFAULT_MAX_CHUNK_DURATION_SECONDS,
+    DEFAULT_CHUNK_OVERLAP_SECONDS,
+    DEFAULT_MAX_CONSECUTIVE_NO_CHILDREN,
+    DEFAULT_CHILD_VOICE_THRESHOLD,
+    DEFAULT_LANGUAGE_CONFIDENCE_THRESHOLD,
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_MIN_REQUEST_INTERVAL,
+    DEFAULT_RETRY_DELAYS,
+)
+
 
 @dataclass
 class YouTubeAPIConfig:
     """Configuration for YouTube Data API."""
     api_keys: List[str] = field(default_factory=list)
-    poll_interval_seconds: int = 300
-    max_retries: int = 3
-    retry_delays: List[int] = field(default_factory=lambda: [1, 2, 4])
-    min_request_interval: float = 0.1
+    poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS
+    max_retries: int = DEFAULT_MAX_RETRIES
+    retry_delays: List[int] = field(default_factory=lambda: DEFAULT_RETRY_DELAYS.copy())
+    min_request_interval: float = DEFAULT_MIN_REQUEST_INTERVAL
 
 
 @dataclass
 class SearchConfig:
     """Configuration for video search and collection."""
     queries: List[str] = field(default_factory=lambda: SearchConfig._load_queries_from_file())
-    target_videos_per_query: int = 20
-    max_recommended_per_query: int = 100
-    min_target_count: int = 1
+    target_videos_per_query: int = DEFAULT_TARGET_VIDEOS_PER_QUERY
+    max_recommended_per_query: int = DEFAULT_MAX_RECOMMENDED_PER_QUERY
+    min_target_count: int = DEFAULT_MIN_TARGET_COUNT
     enable_channel_exploration: bool = True
-    max_similar_videos_per_channel: int = 10
+    max_similar_videos_per_channel: int = DEFAULT_MAX_SIMILAR_VIDEOS_PER_CHANNEL
 
     @staticmethod
     def _load_queries_from_file() -> List[str]:
@@ -79,8 +100,8 @@ class DownloadConfig:
     """Configuration for audio downloading."""
     method: str = "api_assisted"  # "api_assisted" or "yt_dlp_only"
     yt_dlp_primary: bool = True
-    batch_size: int = 1
-    max_concurrent_downloads: int = 4
+    batch_size: int = DEFAULT_DOWNLOAD_BATCH_SIZE
+    max_concurrent_downloads: int = DEFAULT_MAX_CONCURRENT_DOWNLOADS
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
     cookie_settings: Optional[Dict[str, Any]] = None
 
@@ -90,11 +111,11 @@ class AnalysisConfig:
     """Configuration for audio analysis."""
     enable_language_detection: bool = True
     enable_chunking: bool = True
-    max_chunk_duration_seconds: int = 1200  # 20 minutes
-    chunk_overlap_seconds: int = 5
-    max_consecutive_no_children: int = 3
-    child_voice_threshold: float = 0.5
-    language_confidence_threshold: float = 0.8
+    max_chunk_duration_seconds: int = DEFAULT_MAX_CHUNK_DURATION_SECONDS  # 20 minutes
+    chunk_overlap_seconds: int = DEFAULT_CHUNK_OVERLAP_SECONDS
+    max_consecutive_no_children: int = DEFAULT_MAX_CONSECUTIVE_NO_CHILDREN
+    child_voice_threshold: float = DEFAULT_CHILD_VOICE_THRESHOLD
+    language_confidence_threshold: float = DEFAULT_LANGUAGE_CONFIDENCE_THRESHOLD
 
 
 @dataclass
@@ -102,8 +123,8 @@ class AnalysisAPIConfig:
     """Configuration for the analysis API."""
     enabled: bool = False  # Default to offline/local mode
     server_url: str = "http://localhost:8002"
-    timeout_seconds: int = 300
-    max_retries: int = 3
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    max_retries: int = DEFAULT_MAX_RETRIES
 
 
 @dataclass
@@ -157,6 +178,9 @@ class CrawlerConfig:
     clean: CleanConfig = field(default_factory=CleanConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+
+    # Processing limits
+    max_processed_urls: Optional[int] = None
 
     # Derived properties
     @property
@@ -414,6 +438,9 @@ def load_config(
         config.analysis_api.enabled = True
         # Optionally change server URL if needed for online mode
         # config.analysis_api.server_url = "https://api.example.com"  # Uncomment if needed
+
+    if cli_overrides.get("max_processed_urls"):
+        config.max_processed_urls = cli_overrides["max_processed_urls"]
 
     # Validate final configuration
     errors = config.validate()

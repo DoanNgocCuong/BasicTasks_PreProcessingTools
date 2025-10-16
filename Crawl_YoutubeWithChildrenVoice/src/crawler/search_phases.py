@@ -18,6 +18,7 @@ from ..models import VideoMetadata
 from ..utils import get_output_manager
 from ..analyzer.voice_classifier import VoiceClassifier
 from ..crawler.youtube_api import QuotaExceededError
+from constants import BATCH_PROCESSING_INTERVAL
 
 # Optional imports for analyzers - moved inside functions to avoid loading at import time
 ANALYZERS_AVAILABLE = True  # Will be set to False if import fails during runtime
@@ -92,7 +93,6 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
 
         # Track URL count for batch processing
         last_batch_count = len(existing_urls)
-        last_upload_batch_count = len(existing_urls)
 
         # Process each query
         for query in config.search.queries:
@@ -277,25 +277,28 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                     # Check if we should trigger batch processing
                     current_url_count = len(existing_urls)
                     
-                    # Check for upload batch (every 40 URLs)
-                    if batch_callback and current_url_count - last_upload_batch_count >= 40:
-                        output.info(f"Collected {current_url_count - last_upload_batch_count} new URLs, triggering full batch processing (with upload)")
+                    # Trigger batch processing every 20 URLs (with upload)
+                    if batch_callback and current_url_count - last_batch_count >= BATCH_PROCESSING_INTERVAL:
+                        output.info(f"Collected {current_url_count - last_batch_count} new URLs, triggering batch processing (with upload)")
                         try:
                             await batch_callback(include_upload=True)
-                            last_upload_batch_count = current_url_count
-                            last_batch_count = current_url_count  # Reset regular batch counter too
-                        except Exception as e:
-                            output.error(f"Failed to execute batch callback (with upload): {e}")
-                            import traceback
-                            output.error(f"Full traceback: {traceback.format_exc()}")
-                    # Check for regular batch (every 20 URLs, but skip if we just did upload)
-                    elif batch_callback and current_url_count - last_batch_count >= 20:
-                        output.info(f"Collected {current_url_count - last_batch_count} new URLs, triggering batch processing (without upload)")
-                        try:
-                            await batch_callback(include_upload=False)
                             last_batch_count = current_url_count
+                            
+                            # Check if we've reached max processed URLs
+                            if config.max_processed_urls is not None:
+                                manifest_file = config.output.final_audio_dir / "manifest.json"
+                                if manifest_file.exists():
+                                    try:
+                                        with open(manifest_file, 'r', encoding='utf-8') as f:
+                                            manifest_data = json.load(f)
+                                        processed_count = len(manifest_data.get('records', []))
+                                        if processed_count >= config.max_processed_urls:
+                                            output.info(f"Reached maximum processed URLs ({config.max_processed_urls}), stopping discovery")
+                                            break
+                                    except Exception as e:
+                                        output.warning(f"Failed to check processed count: {e}")
                         except Exception as e:
-                            output.error(f"Failed to execute batch callback (without upload): {e}")
+                            output.error(f"Failed to execute batch callback: {e}")
                             import traceback
                             output.error(f"Full traceback: {traceback.format_exc()}")
                 else:

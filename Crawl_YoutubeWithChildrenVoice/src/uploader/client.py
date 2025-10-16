@@ -5,6 +5,8 @@ import concurrent.futures
 import argparse
 from typing import List, Dict, Any, Optional
 
+from ..constants import DEFAULT_MAX_CONCURRENT_UPLOADS
+
 SERVER_URL = "http://103.253.20.30:8081/"
 
 # Authentication credentials
@@ -65,7 +67,7 @@ def main(manifest_path: str, folder_id: Optional[str] = None) -> Optional[str]:
     
     # Upload with multithreading
     successful_uploads = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=DEFAULT_MAX_CONCURRENT_UPLOADS) as executor:
         futures = [executor.submit(upload_file, fid, path, fname, lang) for fid, path, fname, lang, idx in uploads]
         for future in concurrent.futures.as_completed(futures):
             try:

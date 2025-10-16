@@ -16,6 +16,7 @@ from ..config import CrawlerConfig
 from ..downloader import AudioDownloader
 from ..models import VideoMetadata, VideoSource
 from ..utils import get_output_manager, get_file_manager
+from ..constants import DEFAULT_MAX_FILENAME_LENGTH
 
 
 def extract_video_id(url: str) -> Optional[str]:
@@ -55,7 +56,7 @@ def get_video_title(url: str, fallback_title: Optional[str] = None, manifest_dat
     return None
 
 
-def to_camel_case(text: str, max_len: int = 40) -> str:
+def to_camel_case(text: str, max_len: int = DEFAULT_MAX_FILENAME_LENGTH) -> str:
     """Convert text to camelCase."""
     try:
         words = re.split(r'[^a-z0-9]+', (text or '').lower())
@@ -103,12 +104,13 @@ async def get_video_transcript(video_id: str) -> Optional[str]:
         return None
 
 
-async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
+async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optional[int] = None) -> int:
     """
     Run the audio download phase by reading URLs from the discovered URLs file.
 
     Args:
         config: Crawler configuration
+        max_count: Maximum number of URLs to process (None for unlimited)
 
     Returns:
         Number of successfully downloaded audios
@@ -182,7 +184,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 output.error(f"Unexpected error loading existing manifest at {manifest_file}: {e}")
                 output.error(f"Starting with empty manifest.")
 
-        existing_video_ids = {record['video_id'] for record in manifest_data.get('records', [])}
+        existing_records = {record['video_id']: record for record in manifest_data.get('records', []) if record.get('video_id')}
 
         # Initialize downloader
         try:
@@ -213,6 +215,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 language_detector = None
 
         downloaded_count = 0
+        processed_count = 0
 
         for url in urls:
             # Extract video ID from URL
@@ -230,10 +233,29 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 output.warning(f"Could not extract video ID from URL: {url}")
                 continue
 
-            # Check if already in manifest
-            if video_id in existing_video_ids:
-                output.debug(f"Video {video_id} already processed, skipping")
-                continue
+            # Check if already in manifest and if we should redownload
+            should_redownload = False
+            existing_record = None
+            if video_id in existing_records:
+                existing_record = existing_records[video_id]
+                classified = existing_record.get('classified', False)
+                uploaded = existing_record.get('uploaded', False)
+                file_available = existing_record.get('file_available', True)  # Default to True for old records
+                
+                # Conditions for redownload
+                if not classified and not file_available:
+                    should_redownload = True
+                elif classified and not uploaded and not file_available:
+                    should_redownload = True
+                
+                if not should_redownload:
+                    output.debug(f"Video {video_id} already processed and meets skip conditions, skipping")
+                    continue
+                else:
+                    output.info(f"Redownloading {video_id} due to missing file (classified: {classified}, uploaded: {uploaded}, file_available: {file_available})")
+            else:
+                # New video, download
+                should_redownload = True
 
             # Get video metadata from discovery phase or create minimal metadata
             if video_id in video_metadata:
@@ -278,7 +300,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     continue
 
                 # Use new naming convention
-                download_index = len(manifest_data['records'])
+                download_index = existing_record.get('download_index', len(manifest_data['records'])) if existing_record else len(manifest_data['records'])
                 try:
                     new_filename = build_filename(download_index, url, "wav", video.title, manifest_data, video.video_id)
                     new_path = unclassified_dir / new_filename
@@ -314,23 +336,41 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     except Exception as e:
                         output.debug(f"Language detection failed for {video.video_id}: {e}")
 
-                # Create manifest record
-                record = {
-                    "video_id": video.video_id,
-                    "url": video.url,
-                    "output_path": str(new_path),
-                    "status": "success",
-                    "timestamp": datetime.now().isoformat() + "Z",
-                    "duration_seconds": result.duration or 0.0,
-                    "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,  # Use fetched title if available
-                    "language_folder": language_info,
-                    "download_index": download_index,
-                    "classified": False
-                }
-
-                # Update manifest data in memory
-                manifest_data['records'].append(record)
-                manifest_data['total_duration_seconds'] += record['duration_seconds']
+                # Create or update manifest record
+                if existing_record:
+                    # Update existing record
+                    existing_record.update({
+                        "output_path": str(new_path),
+                        "status": "success",
+                        "timestamp": datetime.now().isoformat() + "Z",
+                        "duration_seconds": result.duration or 0.0,
+                        "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,
+                        "language_folder": language_info,
+                        "file_available": True
+                    })
+                    # Update total duration if duration changed
+                    old_duration = existing_record.get('duration_seconds', 0.0) or 0.0
+                    manifest_data['total_duration_seconds'] -= old_duration
+                    manifest_data['total_duration_seconds'] += result.duration or 0.0
+                    record = existing_record
+                else:
+                    # Create new record
+                    record = {
+                        "video_id": video.video_id,
+                        "url": video.url,
+                        "output_path": str(new_path),
+                        "status": "success",
+                        "timestamp": datetime.now().isoformat() + "Z",
+                        "duration_seconds": result.duration or 0.0,
+                        "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,
+                        "language_folder": language_info,
+                        "download_index": download_index,
+                        "classified": False,
+                        "file_available": True
+                    }
+                    # Update manifest data in memory
+                    manifest_data['records'].append(record)
+                    manifest_data['total_duration_seconds'] += record['duration_seconds']
 
                 # Save manifest BEFORE moving file (atomic operation)
                 try:
@@ -392,6 +432,12 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
 
                 downloaded_count += 1
                 output.success(f"Downloaded and processed: {video.video_id}")
+                
+                processed_count += 1
+                # Check if we've reached the maximum count
+                if max_count is not None and processed_count >= max_count:
+                    output.info(f"Reached maximum download count ({max_count}), stopping download phase")
+                    break
             else:
                 error_msg = result.error_message if result else "Unknown download error"
                 output.warning(f"Download failed for {video_id}: {error_msg}")
@@ -421,25 +467,39 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                         output.warning(f"Failed to clean up failed download temp file {result.output_path}: {e}")
                 
                 # Create failed manifest record to prevent re-attempts
-                failed_record = {
-                    "video_id": video.video_id,
-                    "url": url,
-                    "output_path": None,
-                    "status": "failed",
-                    "timestamp": datetime.now().isoformat() + "Z",
-                    "duration_seconds": 0.0,
-                    "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,
-                    "language_folder": "unknown",
-                    "download_index": len(manifest_data['records']),
-                    "classified": False
-                }
-                
-                # Update manifest with failed record
-                manifest_data['records'].append(failed_record)
+                if existing_record:
+                    # Update existing record to failed
+                    existing_record.update({
+                        "status": "failed",
+                        "file_available": False
+                    })
+                else:
+                    failed_record = {
+                        "video_id": video.video_id,
+                        "url": url,
+                        "output_path": None,
+                        "status": "failed",
+                        "timestamp": datetime.now().isoformat() + "Z",
+                        "duration_seconds": 0.0,
+                        "title": get_video_title(url, video.title, manifest_data, video.video_id) or video.title,
+                        "language_folder": "unknown",
+                        "download_index": len(manifest_data['records']),
+                        "classified": False,
+                        "file_available": False
+                    }
+                    
+                    # Update manifest with failed record
+                    manifest_data['records'].append(failed_record)
                 
                 # Save manifest atomically
                 file_manager = get_file_manager()
                 file_manager.save_json(manifest_file, manifest_data)
+                
+                processed_count += 1
+                # Check if we've reached the maximum count
+                if max_count is not None and processed_count >= max_count:
+                    output.info(f"Reached maximum download count ({max_count}), stopping download phase")
+                    break
 
         output.success(f"Download phase completed: {downloaded_count}/{len(urls)} URLs processed")
         return downloaded_count
