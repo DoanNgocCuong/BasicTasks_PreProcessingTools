@@ -224,6 +224,8 @@ class SearchEngine:
 
             return videos
 
+        except QuotaExceededError:
+            raise
         except Exception as e:
             self.output.error(f"Channel search failed for channel {channel_id} with query '{query}': {e}")
             return []

@@ -74,7 +74,17 @@ class YouTubeAPIClient:
         self.request_count = 0
         self.last_request_time = 0.0
 
-        self.output.debug(f"Initialized YouTube API client with {len(self.api_keys)} keys")
+        # Log key information (without exposing full keys)
+        key_info = []
+        for i, key in enumerate(self.api_keys):
+            suffix = key[-4:] if key else "????"
+            status = "(current)" if i == self.current_key_index else ""
+            key_info.append(f"Key {i + 1}: ...{suffix} {status}")
+
+        self.output.info(f"Initialized YouTube API client with {len(self.api_keys)} keys:")
+        for info in key_info:
+            self.output.info(f"  {info}")
+        self.output.debug(f"Poll interval: {self.config.poll_interval_seconds}s")
 
     @property
     def _current_key(self) -> str:
@@ -89,14 +99,15 @@ class YouTubeAPIClient:
             True if successfully switched, False if no more keys
         """
         if self.current_key_index + 1 >= len(self.api_keys):
+            self.output.warning(f"No more API keys available (tried {len(self.api_keys)} keys)")
             return False
 
-        old_key = self._current_key
+        old_key_index = self.current_key_index
+        old_key_suffix = self._current_key[-4:]
         self.current_key_index += 1
+        new_key_suffix = self._current_key[-4:]
 
-        self.output.info(f"Switching to API key {self.current_key_index + 1}")
-        self.output.debug(f"Previous key: ...{old_key[-4:]}")
-        self.output.debug(f"Current key: ...{self._current_key[-4:]}")
+        self.output.info(f"Switching from API key {old_key_index + 1} (...{old_key_suffix}) to key {self.current_key_index + 1} (...{new_key_suffix})")
 
         try:
             self.youtube_service = googleapiclient.discovery.build(
@@ -105,42 +116,59 @@ class YouTubeAPIClient:
                 cache_discovery=False
             )
             self.quota_exceeded = False
+            self.output.success(f"Successfully switched to API key {self.current_key_index + 1}")
             return True
         except Exception as e:
-            self.output.error(f"Failed to initialize with new API key: {e}")
+            self.output.error(f"Failed to initialize YouTube API service with new key {self.current_key_index + 1}: {e}")
             return False
 
     def _wait_for_quota_reset(self) -> None:
         """Wait for API quota to reset by polling all keys."""
-        self.output.warning("All API keys quota exceeded - waiting for reset")
+        self.output.warning(f"All {len(self.api_keys)} API keys quota exceeded - waiting for reset")
 
         poll_interval = self.config.poll_interval_seconds
         start_time = time.time()
 
         while True:
-            self.output.info(f"Polling API keys every {poll_interval}s...")
+            self.output.info(f"Polling all {len(self.api_keys)} API keys every {poll_interval}s...")
 
             # Check all keys
             for i, key in enumerate(self.api_keys):
+                key_suffix = key[-4:] if key else "????"
+                self.output.debug(f"Testing API key {i + 1} (...{key_suffix})")
+
                 if self._test_key_quota(key):
-                    self.output.success(f"API key {i + 1} is available")
+                    self.output.success(f"API key {i + 1} (...{key_suffix}) has available quota!")
+
+                    # Switch to this key
+                    old_key_index = self.current_key_index
                     self.current_key_index = i
+
+                    if old_key_index != i:
+                        self.output.info(f"Switching from key {old_key_index + 1} to key {i + 1}")
+
                     try:
                         self.youtube_service = googleapiclient.discovery.build(
                             "youtube", "v3",
                             developerKey=self._current_key,
                             cache_discovery=False
                         )
-                        self.output.debug(f"Reinitialized YouTube API service with key {self.current_key_index + 1}")
+                        self.output.success(f"Successfully reinitialized YouTube API service with key {self.current_key_index + 1}")
                     except Exception as e:
-                        self.output.error(f"Failed to reinitialize YouTube API service: {e}")
+                        self.output.error(f"Failed to reinitialize YouTube API service with available key {i + 1}: {e}")
                         continue
+
                     self.quota_exceeded = False
+                    elapsed = int(time.time() - start_time)
+                    self.output.info(f"Quota reset detected after {elapsed // 60}m {elapsed % 60}s of waiting")
                     return
+
+                else:
+                    self.output.debug(f"API key {i + 1} (...{key_suffix}) still quota exceeded")
 
             # Wait before next poll
             elapsed = int(time.time() - start_time)
-            self.output.info(f"Elapsed: {elapsed // 60}m {elapsed % 60}s - still waiting...")
+            self.output.info(f"Elapsed: {elapsed // 60}m {elapsed % 60}s - all keys still quota exceeded, waiting {poll_interval}s...")
             time.sleep(poll_interval)
 
     def _test_key_quota(self, api_key: str) -> bool:
@@ -173,7 +201,7 @@ class YouTubeAPIClient:
         except HttpError as e:
             if e.resp.status == 403:
                 error_details = e.content.decode() if hasattr(e, 'content') else str(e)
-                if "quotaExceeded" in error_details or "dailyLimitExceeded" in error_details:
+                if "quotaExceeded" in error_details or "dailyLimitExceeded" in error_details or "quota" in error_details:
                     return False
             return False
         except Exception:
@@ -191,30 +219,50 @@ class YouTubeAPIClient:
             QuotaExceededError: If quota is exceeded and no recovery possible
             YouTubeAPIError: For other API errors
         """
-        status_code = getattr(error, 'resp', {}).get('status', 0)
+        status_code = getattr(error, 'status_code', getattr(error, 'resp', {}).get('status', 0))
+        self.output.debug(f"API error status code: {status_code}")
 
         if status_code == 403:
             error_content = error.content.decode() if hasattr(error, 'content') else str(error)
-            if "quotaExceeded" in error_content or "dailyLimitExceeded" in error_content:
+            self.output.debug(f"403 error content: {error_content}")
+            
+            # Check for quota exceeded in various ways
+            is_quota_exceeded = False
+            if "quotaExceeded" in error_content or "dailyLimitExceeded" in error_content or "quota" in error_content:
+                is_quota_exceeded = True
+            else:
+                # Try to parse as JSON
+                try:
+                    import json
+                    error_data = json.loads(error_content)
+                    if isinstance(error_data, list) and error_data:
+                        error_item = error_data[0]
+                        if error_item.get('reason') == 'quotaExceeded' or error_item.get('domain') == 'youtube.quota':
+                            is_quota_exceeded = True
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    pass
+            
+            if is_quota_exceeded:
                 self.quota_exceeded = True
-                self.output.warning(f"Quota exceeded during {operation}")
+                current_key_suffix = self._current_key[-4:] if self.api_keys else "????"
+                self.output.warning(f"YouTube API quota exceeded during '{operation}' using key {self.current_key_index + 1} (...{current_key_suffix})")
 
                 if not self._switch_to_next_key():
-                    self.output.error(f"All API keys exhausted during {operation}")
+                    self.output.error(f"All {len(self.api_keys)} API keys exhausted during '{operation}' - entering quota reset wait mode")
                     raise QuotaExceededError("All YouTube API keys quota exceeded")
 
-                self.output.info(f"Retrying {operation} with new API key")
+                self.output.info(f"Retrying '{operation}' with new API key {self.current_key_index + 1}")
                 return
 
         elif status_code == 429:
             # Rate limiting
             retry_after = getattr(error, 'resp', {}).get('retry_after', 60)
-            self.output.warning(f"Rate limited during {operation} - waiting {retry_after}s")
+            self.output.warning(f"YouTube API rate limited during '{operation}' - waiting {retry_after}s")
             time.sleep(retry_after)
             return
 
         # Other errors
-        raise YouTubeAPIError(f"YouTube API error during {operation}: {error}")
+        raise YouTubeAPIError(f"YouTube API error during '{operation}': {error}")
 
     def _make_api_request(self, operation: Callable[[], Any], max_retries: int = 3) -> Any:
         """
@@ -252,6 +300,9 @@ class YouTubeAPIClient:
                 else:
                     raise YouTubeAPIError(f"API request failed after {max_retries + 1} attempts: {e}")
 
+            except QuotaExceededError:
+                # Let quota exceeded errors bubble up immediately
+                raise
             except Exception as e:
                 if attempt < max_retries:
                     delay = self.config.retry_delays[min(attempt, len(self.config.retry_delays) - 1)]
@@ -398,11 +449,26 @@ class YouTubeAPIClient:
         Returns:
             Dictionary with quota information
         """
+        key_statuses = []
+        for i, key in enumerate(self.api_keys):
+            suffix = key[-4:] if key else "????"
+            is_current = (i == self.current_key_index)
+            status = "current" if is_current else "available"
+            if self.quota_exceeded and is_current:
+                status = "quota_exceeded"
+            key_statuses.append({
+                "index": i + 1,
+                "suffix": suffix,
+                "status": status,
+                "is_current": is_current
+            })
+
         return {
-            "current_key_index": self.current_key_index,
             "total_keys": len(self.api_keys),
+            "current_key_index": self.current_key_index + 1,  # 1-based for display
+            "current_key_suffix": self._current_key[-4:] if self.api_keys else None,
             "quota_exceeded": self.quota_exceeded,
             "request_count": self.request_count,
             "last_request_time": self.last_request_time,
-            "current_key_suffix": self._current_key[-4:] if self.api_keys else None
+            "keys": key_statuses
         }

@@ -105,6 +105,54 @@ class VideoMetadata:
             source=VideoSource.YOUTUBE_API
         )
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'VideoMetadata':
+        """Create VideoMetadata from dictionary."""
+        # Handle published_at conversion
+        published_at = None
+        if published_str := data.get('published_at'):
+            if isinstance(published_str, str):
+                try:
+                    published_at = datetime.fromisoformat(published_str.replace('Z', '+00:00'))
+                except ValueError:
+                    pass
+            elif isinstance(published_str, datetime):
+                published_at = published_str
+
+        return cls(
+            video_id=data['video_id'],
+            title=data['title'],
+            channel_id=data['channel_id'],
+            channel_title=data['channel_title'],
+            description=data.get('description', ''),
+            published_at=published_at,
+            duration_seconds=data.get('duration_seconds'),
+            view_count=data.get('view_count', 0),
+            like_count=data.get('like_count', 0),
+            comment_count=data.get('comment_count', 0),
+            thumbnail_url=data.get('thumbnail_url'),
+            tags=data.get('tags', []),
+            source=data.get('source', VideoSource.YOUTUBE_API)
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert VideoMetadata to dictionary."""
+        return {
+            'video_id': self.video_id,
+            'title': self.title,
+            'channel_id': self.channel_id,
+            'channel_title': self.channel_title,
+            'description': self.description,
+            'published_at': self.published_at.isoformat() + 'Z' if self.published_at else None,
+            'duration_seconds': self.duration_seconds,
+            'view_count': self.view_count,
+            'like_count': self.like_count,
+            'comment_count': self.comment_count,
+            'thumbnail_url': self.thumbnail_url,
+            'tags': self.tags,
+            'source': self.source.value if hasattr(self.source, 'value') else str(self.source)
+        }
+
     @staticmethod
     def _parse_iso_duration(duration_iso: str) -> Optional[float]:
         """Parse ISO 8601 duration (PT4M13S) to seconds."""

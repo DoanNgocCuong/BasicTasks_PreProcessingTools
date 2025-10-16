@@ -45,80 +45,131 @@ async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata])
             output.warning("Manifest file not found - skipping analysis phase")
             return videos
 
-        with open(manifest_file, 'r', encoding='utf-8') as f:
-            manifest_data = json.load(f)
+        try:
+            with open(manifest_file, 'r', encoding='utf-8') as f:
+                manifest_data = json.load(f)
+            output.debug(f"Successfully loaded manifest with {len(manifest_data.get('records', []))} records")
+        except json.JSONDecodeError as e:
+            output.error(f"Failed to parse manifest JSON at {manifest_file}: {e}")
+            output.error(f"Manifest file may be corrupted. Please check the file contents.")
+            return videos
+        except IOError as e:
+            output.error(f"Failed to read manifest file at {manifest_file}: {e}")
+            output.error(f"Check file permissions and disk space.")
+            return videos
+        except Exception as e:
+            output.error(f"Unexpected error loading manifest at {manifest_file}: {e}")
+            return videos
 
         # Check if we should run locally or use API
         run_locally = not config.analysis_api.enabled or config.analysis_api.server_url == "local"
 
         if run_locally:
             output.info("Running audio analysis locally")
-            return await run_local_analysis(config, manifest_data, manifest_file)
+            try:
+                return await run_local_analysis(config, manifest_data, manifest_file)
+            except Exception as e:
+                output.error(f"Local analysis failed: {e}")
+                import traceback
+                output.error(f"Full traceback: {traceback.format_exc()}")
+                return videos
         else:
             output.info("Running audio analysis via API")
             # API-based analysis
             try:
                 from .api_client import AnalysisAPIClient
                 api_client_available = True
-            except ImportError:
+            except ImportError as e:
+                output.warning(f"Analysis API client not available: {e} - falling back to local analysis")
                 api_client_available = False
 
             if not api_client_available:
                 output.warning("Analysis API client not available - falling back to local analysis")
-                return await run_local_analysis(config, manifest_data, manifest_file)
+                try:
+                    return await run_local_analysis(config, manifest_data, manifest_file)
+                except Exception as e:
+                    output.error(f"Fallback local analysis failed: {e}")
+                    import traceback
+                    output.error(f"Full traceback: {traceback.format_exc()}")
+                    return videos
 
-            from .api_client import AnalysisAPIClient
-            async with AnalysisAPIClient(config.analysis_api) as client:
-                # Convert manifest records to VideoMetadata objects for API
-                api_videos = []
-                api_audio_paths = []
-                for record in manifest_data.get('records', []):
-                    if not record.get('classified', False):
-                        video_id = record.get('video_id')
-                        output_path_str = record.get('output_path')
-                        
-                        # Skip records with missing required fields
-                        if not video_id or not output_path_str:
-                            output.warning(f"Skipping API analysis for record with missing video_id or output_path: video_id={video_id}, output_path={output_path_str}")
-                            continue
+            try:
+                from .api_client import AnalysisAPIClient
+                async with AnalysisAPIClient(config.analysis_api) as client:
+                    # Convert manifest records to VideoMetadata objects for API
+                    api_videos = []
+                    api_audio_paths = []
+                    for record in manifest_data.get('records', []):
+                        if not record.get('classified', False):
+                            video_id = record.get('video_id')
+                            output_path_str = record.get('output_path')
                             
-                        # Create minimal VideoMetadata for unclassified records
-                        video = VideoMetadata(
-                            video_id=video_id,
-                            title=record.get('title', f"Video {video_id}"),
-                            channel_id='',
-                            channel_title='',
-                            description='',
-                            source=VideoSource.MANUAL
-                        )
-                        api_videos.append(video)
-                        api_audio_paths.append(output_path_str)
+                            # Skip records with missing required fields
+                            if not video_id or not output_path_str:
+                                output.warning(f"Skipping API analysis for record with missing video_id or output_path: video_id={video_id}, output_path={output_path_str}")
+                                continue
+                                
+                            # Create minimal VideoMetadata for unclassified records
+                            video = VideoMetadata(
+                                video_id=video_id,
+                                title=record.get('title', f"Video {video_id}"),
+                                channel_id='',
+                                channel_title='',
+                                description='',
+                                source=VideoSource.MANUAL
+                            )
+                            api_videos.append(video)
+                            api_audio_paths.append(output_path_str)
 
-                if api_videos:
-                    results = await client.analyze_videos(api_videos)
+                    if api_videos:
+                        try:
+                            results = await client.analyze_videos(api_videos)
+                            output.debug(f"API analysis returned {len(results)} results")
+                        except Exception as e:
+                            output.error(f"API analysis request failed: {e}")
+                            output.error(f"API server URL: {config.analysis_api.server_url}")
+                            import traceback
+                            output.error(f"Full traceback: {traceback.format_exc()}")
+                            return videos
 
-                    # Update manifest with API results
-                    for result in results:
-                        for record in manifest_data.get('records', []):
-                            if record['video_id'] == result.video_id:
-                                record['classified'] = True
-                                record['containing_children_voice'] = result.is_child_voice
-                                record['voice_analysis_confidence'] = result.confidence
-                                record['classification_timestamp'] = datetime.now().isoformat() + "Z"
-                                break
+                        # Update manifest with API results
+                        try:
+                            for result in results:
+                                for record in manifest_data.get('records', []):
+                                    if record['video_id'] == result.video_id:
+                                        record['classified'] = True
+                                        record['containing_children_voice'] = result.is_child_voice
+                                        record['voice_analysis_confidence'] = result.confidence
+                                        record['classification_timestamp'] = datetime.now().isoformat() + "Z"
+                                        break
 
-                    # Save updated manifest
-                    file_manager = get_file_manager()
-                    file_manager.save_json(manifest_file, manifest_data)
+                            # Save updated manifest
+                            file_manager = get_file_manager()
+                            file_manager.save_json(manifest_file, manifest_data)
 
-                    output.success(f"API analysis completed: {len(results)} videos analyzed")
-                else:
-                    output.info("No unclassified videos found for API analysis")
+                            output.success(f"API analysis completed: {len(results)} videos analyzed")
+                        except Exception as e:
+                            output.error(f"Failed to update manifest with API results: {e}")
+                            output.error(f"Manifest file: {manifest_file}")
+                            import traceback
+                            output.error(f"Full traceback: {traceback.format_exc()}")
+                            return videos
+                    else:
+                        output.info("No unclassified videos found for API analysis")
 
+                return videos
+            except Exception as e:
+                output.error(f"API analysis setup failed: {e}")
+                output.error(f"Analysis API config: {config.analysis_api}")
+                import traceback
+                output.error(f"Full traceback: {traceback.format_exc()}")
                 return videos
 
     except Exception as e:
         output.error(f"Analysis phase failed: {e}")
+        output.error(f"Config output dir: {config.output.final_audio_dir}")
+        import traceback
+        output.error(f"Full traceback: {traceback.format_exc()}")
         return videos
 
 
@@ -137,11 +188,27 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
     output = get_output_manager()
 
     if VOICE_CLASSIFIER_AVAILABLE and VoiceClassifier is not None:
-        voice_classifier = VoiceClassifier(config.analysis)
+        try:
+            voice_classifier = VoiceClassifier(config.analysis)
+            output.debug("Voice classifier initialized successfully")
+        except Exception as e:
+            output.error(f"Failed to initialize voice classifier: {e}")
+            output.error(f"Analysis config: {config.analysis}")
+            import traceback
+            output.error(f"Full traceback: {traceback.format_exc()}")
+            return []
     else:
         output.warning("Voice classifier not available - skipping analysis phase")
         return []
-    voice_loaded = voice_classifier.load_model()
+    
+    try:
+        voice_loaded = voice_classifier.load_model()
+        output.debug(f"Voice classifier model loaded: {voice_loaded}")
+    except Exception as e:
+        output.error(f"Failed to load voice classifier model: {e}")
+        import traceback
+        output.error(f"Full traceback: {traceback.format_exc()}")
+        return []
 
     if not voice_loaded:
         output.warning("Voice classifier model not loaded - skipping voice analysis")
@@ -169,7 +236,18 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
             continue
 
         # Analyze for children's voice
-        voice_result = voice_classifier.classify_audio_file(output_path)
+        try:
+            voice_result = voice_classifier.classify_audio_file(output_path)
+            output.debug(f"Voice classification result for {video_id}: is_child={voice_result.is_child_voice}, confidence={voice_result.confidence}")
+        except Exception as e:
+            output.error(f"Failed to classify audio for {video_id}: {e}")
+            output.error(f"Audio file path: {output_path}")
+            output.error(f"File exists: {output_path.exists()}")
+            if output_path.exists():
+                output.error(f"File size: {output_path.stat().st_size} bytes")
+            import traceback
+            output.error(f"Full traceback: {traceback.format_exc()}")
+            continue
 
         # Update record
         record['classified'] = True
@@ -185,8 +263,14 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
         analyzed_count += 1
 
     # Save updated manifest
-    file_manager = get_file_manager()
-    file_manager.save_json(manifest_file, manifest_data)
+    try:
+        file_manager = get_file_manager()
+        file_manager.save_json(manifest_file, manifest_data)
+        output.success(f"Local analysis completed: {analyzed_count} files analyzed")
+    except Exception as e:
+        output.error(f"Failed to save updated manifest after analysis: {e}")
+        output.error(f"Manifest file: {manifest_file}")
+        import traceback
+        output.error(f"Full traceback: {traceback.format_exc()}")
 
-    output.success(f"Local analysis completed: {analyzed_count} files analyzed")
     return []

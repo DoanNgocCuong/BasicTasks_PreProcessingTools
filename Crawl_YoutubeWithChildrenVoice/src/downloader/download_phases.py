@@ -16,7 +16,6 @@ from ..config import CrawlerConfig
 from ..downloader import AudioDownloader
 from ..models import VideoMetadata, VideoSource
 from ..utils import get_output_manager, get_file_manager
-from ..crawler.youtube_api import YouTubeAPIClient
 
 
 def extract_video_id(url: str) -> Optional[str]:
@@ -119,22 +118,53 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
     try:
         # Load URLs from the file created in search phase
         url_file = config.output.url_outputs_dir / "discovered_urls.txt"
+        metadata_file = config.output.url_outputs_dir / "discovered_videos.json"
+        
+        # Load video metadata from discovery phase
+        video_metadata = {}  # video_id -> VideoMetadata
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, 'r', encoding='utf-8') as f:
+                    metadata_list = json.load(f)
+                    for video_dict in metadata_list:
+                        try:
+                            video = VideoMetadata.from_dict(video_dict)
+                            video_metadata[video.video_id] = video
+                        except Exception as e:
+                            output.warning(f"Failed to parse video metadata: {e}")
+                    output.info(f"Loaded {len(video_metadata)} video metadata records from discovery phase")
+            except Exception as e:
+                output.error(f"Failed to load video metadata from {metadata_file}: {e}")
+                output.warning("Will create minimal metadata from URLs")
+        else:
+            output.warning(f"Video metadata file not found: {metadata_file} - will create minimal metadata from URLs")
+
         if not url_file.exists():
             output.warning(f"URL file not found: {url_file} - skipping download phase")
             return 0
 
-        with open(url_file, 'r', encoding='utf-8') as f:
-            urls = [line.strip() for line in f if line.strip()]
+        try:
+            with open(url_file, 'r', encoding='utf-8') as f:
+                urls = [line.strip() for line in f if line.strip()]
+            output.info(f"Found {len(urls)} URLs to download")
+        except Exception as e:
+            output.error(f"Failed to read URL file {url_file}: {e}")
+            output.error(f"File exists: {url_file.exists()}")
+            if url_file.exists():
+                output.error(f"File size: {url_file.stat().st_size} bytes")
+            return 0
 
         if not urls:
             output.warning("No URLs found in file - skipping download phase")
             return 0
 
-        output.info(f"Found {len(urls)} URLs to download")
-
         # Load existing manifest
         manifest_file = config.output.final_audio_dir / "manifest.json"
-        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            output.error(f"Failed to create manifest directory {manifest_file.parent}: {e}")
+            return 0
 
         manifest_data = {"total_duration_seconds": 0.0, "records": []}
         if manifest_file.exists():
@@ -142,21 +172,44 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 with open(manifest_file, 'r', encoding='utf-8') as f:
                     manifest_data = json.load(f)
                 output.info(f"Loaded existing manifest with {len(manifest_data.get('records', []))} records")
+            except json.JSONDecodeError as e:
+                output.error(f"Failed to parse existing manifest JSON at {manifest_file}: {e}")
+                output.error(f"Manifest file may be corrupted. Starting with empty manifest.")
+            except IOError as e:
+                output.error(f"Failed to read existing manifest file at {manifest_file}: {e}")
+                output.error(f"Check file permissions. Starting with empty manifest.")
             except Exception as e:
-                output.warning(f"Failed to load existing manifest: {e} - starting fresh")
+                output.error(f"Unexpected error loading existing manifest at {manifest_file}: {e}")
+                output.error(f"Starting with empty manifest.")
 
         existing_video_ids = {record['video_id'] for record in manifest_data.get('records', [])}
 
-        downloader = AudioDownloader(config.download)
+        # Initialize downloader
+        try:
+            downloader = AudioDownloader(config.download)
+            output.debug("Audio downloader initialized successfully")
+        except Exception as e:
+            output.error(f"Failed to initialize audio downloader: {e}")
+            output.error(f"Download config: {config.download}")
+            import traceback
+            output.error(f"Full traceback: {traceback.format_exc()}")
+            return 0
 
         # Initialize language detector for transcript analysis
         language_detector = None
         if hasattr(config.analysis, 'enable_language_detection') and config.analysis.enable_language_detection:
-            from ..analyzer.language_detector import LanguageDetector
-            language_detector = LanguageDetector(config.analysis)
-            lang_loaded = language_detector.load_model()
-            if not lang_loaded:
-                output.warning("Language detector model not loaded - transcript analysis disabled")
+            try:
+                from ..analyzer.language_detector import LanguageDetector
+                language_detector = LanguageDetector(config.analysis)
+                lang_loaded = language_detector.load_model()
+                if not lang_loaded:
+                    output.warning("Language detector model not loaded - transcript analysis disabled")
+                    language_detector = None
+                else:
+                    output.debug("Language detector initialized successfully")
+            except Exception as e:
+                output.error(f"Failed to initialize language detector: {e}")
+                output.error(f"Analysis config: {config.analysis}")
                 language_detector = None
 
         downloaded_count = 0
@@ -164,10 +217,14 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
         for url in urls:
             # Extract video ID from URL
             video_id = None
-            if 'youtube.com/watch?v=' in url:
-                video_id = url.split('v=')[1].split('&')[0]
-            elif 'youtu.be/' in url:
-                video_id = url.split('youtu.be/')[1].split('?')[0]
+            try:
+                if 'youtube.com/watch?v=' in url:
+                    video_id = url.split('v=')[1].split('&')[0]
+                elif 'youtu.be/' in url:
+                    video_id = url.split('youtu.be/')[1].split('?')[0]
+            except Exception as e:
+                output.warning(f"Failed to extract video ID from URL {url}: {e}")
+                continue
 
             if not video_id:
                 output.warning(f"Could not extract video ID from URL: {url}")
@@ -178,40 +235,12 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 output.debug(f"Video {video_id} already processed, skipping")
                 continue
 
-            # Create VideoMetadata object for this URL
-            # We'll need to get basic info from YouTube API
-            try:
-                # Get video details from YouTube API
-                youtube_api = YouTubeAPIClient(config.youtube_api)
-                video_details = youtube_api.get_video_details_batch([video_id])
-
-                if video_id in video_details:
-                    video_metadata = video_details[video_id]
-                    video = VideoMetadata(
-                        video_id=video_metadata.video_id,
-                        title=video_metadata.title,
-                        channel_id=video_metadata.channel_id,
-                        channel_title=video_metadata.channel_title,
-                        description=video_metadata.description,
-                        published_at=video_metadata.published_at,
-                        duration_seconds=video_metadata.duration_seconds,
-                        view_count=video_metadata.view_count,
-                        source=VideoSource.MANUAL
-                    )
-                else:
-                    # Create minimal VideoMetadata
-                    video = VideoMetadata(
-                        video_id=video_id,
-                        title=f'Video {video_id}',
-                        channel_id='',
-                        channel_title='',
-                        description='',
-                        source=VideoSource.MANUAL
-                    )
-
-            except Exception as e:
-                output.warning(f"Failed to get video details for {video_id}: {e}")
-                # Create minimal VideoMetadata
+            # Get video metadata from discovery phase or create minimal metadata
+            if video_id in video_metadata:
+                video = video_metadata[video_id]
+                output.debug(f"Using metadata from discovery phase for {video_id}: {video.title}")
+            else:
+                # Create minimal VideoMetadata if not found in discovery metadata
                 video = VideoMetadata(
                     video_id=video_id,
                     title=f'Video {video_id}',
@@ -220,19 +249,50 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     description='',
                     source=VideoSource.MANUAL
                 )
+                output.debug(f"Created minimal video metadata for {video_id} (not found in discovery metadata)")
 
             # Download audio
-            result = await downloader.download_video_audio(video)
+            try:
+                result = await downloader.download_video_audio(video)
+                output.debug(f"Download result for {video_id}: success={result.success}, duration={result.duration}")
+            except Exception as e:
+                output.error(f"Download operation failed for {video_id}: {e}")
+                output.error(f"Video details: ID={video_id}, title={video.title}")
+                import traceback
+                output.error(f"Full traceback: {traceback.format_exc()}")
+                result = None
 
-            if result.success and result.output_path:
+            if result and result.success and result.output_path:
                 # Prepare file paths and manifest record BEFORE moving
                 unclassified_dir = config.output.final_audio_dir / "unclassified"
-                unclassified_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    unclassified_dir.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    output.error(f"Failed to create unclassified directory {unclassified_dir}: {e}")
+                    # Clean up temp file
+                    if result.output_path.exists():
+                        try:
+                            result.output_path.unlink()
+                        except Exception as cleanup_e:
+                            output.warning(f"Failed to clean up temp file {result.output_path}: {cleanup_e}")
+                    continue
 
                 # Use new naming convention
                 download_index = len(manifest_data['records'])
-                new_filename = build_filename(download_index, url, "wav", video.title, manifest_data, video.video_id)
-                new_path = unclassified_dir / new_filename
+                try:
+                    new_filename = build_filename(download_index, url, "wav", video.title, manifest_data, video.video_id)
+                    new_path = unclassified_dir / new_filename
+                    output.debug(f"Generated filename: {new_filename}")
+                except Exception as e:
+                    output.error(f"Failed to build filename for {video_id}: {e}")
+                    output.error(f"Download index: {download_index}, URL: {url}, Title: {video.title}")
+                    # Clean up temp file
+                    if result.output_path.exists():
+                        try:
+                            result.output_path.unlink()
+                        except Exception as cleanup_e:
+                            output.warning(f"Failed to clean up temp file {result.output_path}: {cleanup_e}")
+                    continue
 
                 # Detect language using transcript (preferred method from working example)
                 language_info = "unknown"
@@ -273,12 +333,31 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 manifest_data['total_duration_seconds'] += record['duration_seconds']
 
                 # Save manifest BEFORE moving file (atomic operation)
-                file_manager = get_file_manager()
-                if not file_manager.save_json(manifest_file, manifest_data):
-                    output.error(f"Failed to save manifest for {video.video_id} - skipping download")
+                try:
+                    file_manager = get_file_manager()
+                    if not file_manager.save_json(manifest_file, manifest_data):
+                        output.error(f"Failed to save manifest for {video_id} - skipping download")
+                        # Rollback in-memory changes
+                        manifest_data['records'].pop()
+                        manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                        # Clean up temp file
+                        if result.output_path.exists():
+                            try:
+                                result.output_path.unlink()
+                            except Exception as cleanup_e:
+                                output.warning(f"Failed to clean up temp file {result.output_path}: {cleanup_e}")
+                        continue
+                except Exception as e:
+                    output.error(f"Failed to save manifest for {video_id}: {e}")
                     # Rollback in-memory changes
                     manifest_data['records'].pop()
                     manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                    # Clean up temp file
+                    if result.output_path.exists():
+                        try:
+                            result.output_path.unlink()
+                        except Exception as cleanup_e:
+                            output.warning(f"Failed to clean up temp file {result.output_path}: {cleanup_e}")
                     continue
 
                 # Now move the file (after manifest is safely updated)
@@ -287,15 +366,16 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     result.output_path = new_path
                     output.debug(f"Successfully moved file to: {new_path}")
                 except Exception as e:
-                    output.error(f"Failed to move file for {video.video_id}: {e}")
+                    output.error(f"Failed to move file for {video_id}: {e}")
+                    output.error(f"Source: {result.output_path}, Target: {new_path}")
                     # Rollback manifest changes since file move failed
                     try:
                         manifest_data['records'].pop()
                         manifest_data['total_duration_seconds'] -= record['duration_seconds']
                         file_manager.save_json(manifest_file, manifest_data)
-                        output.debug(f"Rolled back manifest changes for {video.video_id}")
+                        output.debug(f"Rolled back manifest changes for {video_id}")
                     except Exception as rollback_e:
-                        output.error(f"Failed to rollback manifest for {video.video_id}: {rollback_e}")
+                        output.error(f"Failed to rollback manifest for {video_id}: {rollback_e}")
                     continue
 
                 # Clean up any remaining temp files in audio_outputs_dir
@@ -313,10 +393,27 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 downloaded_count += 1
                 output.success(f"Downloaded and processed: {video.video_id}")
             else:
-                output.warning(f"Download failed for {video.video_id}: {result.error_message}")
+                error_msg = result.error_message if result else "Unknown download error"
+                output.warning(f"Download failed for {video_id}: {error_msg}")
+                
+                # Log detailed error information from all attempts
+                if result and result.attempts:
+                    for i, attempt in enumerate(result.attempts):
+                        output.warning(f"  Attempt {i+1} ({attempt.method}): {'SUCCESS' if attempt.success else 'FAILED'}")
+                        if not attempt.success and attempt.error_message:
+                            # Log the full error details from the downloader
+                            output.warning(f"    Error details: {attempt.error_message}")
+                            # If it's a yt-dlp error, it might contain multiple lines - log them separately
+                            if '\n' in attempt.error_message:
+                                for line in attempt.error_message.split('\n'):
+                                    if line.strip():
+                                        output.warning(f"    {line.strip()}")
+                        if attempt.completed and attempt.end_time:
+                            duration = attempt.end_time - attempt.start_time
+                            output.warning(f"    Duration: {duration:.2f}s")
                 
                 # Clean up temp file if it exists
-                if result.output_path and result.output_path.exists():
+                if result and result.output_path and result.output_path.exists():
                     try:
                         result.output_path.unlink()
                         output.debug(f"Cleaned up failed download temp file: {result.output_path}")
@@ -349,6 +446,9 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
 
     except Exception as e:
         output.error(f"Download phase failed: {e}")
+        output.error(f"Config output dirs: final_audio={config.output.final_audio_dir}, url_outputs={config.output.url_outputs_dir}")
+        import traceback
+        output.error(f"Full traceback: {traceback.format_exc()}")
         
         # Clean up any remaining temp files on error
         try:

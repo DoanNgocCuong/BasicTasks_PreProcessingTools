@@ -35,15 +35,37 @@ async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]
             output.warning("Manifest file not found - skipping filtering phase")
             return videos
 
-        with open(manifest_file, 'r', encoding='utf-8') as f:
-            manifest_data = json.load(f)
+        try:
+            with open(manifest_file, 'r', encoding='utf-8') as f:
+                manifest_data = json.load(f)
+            output.debug(f"Successfully loaded manifest with {len(manifest_data.get('records', []))} records")
+        except json.JSONDecodeError as e:
+            output.error(f"Failed to parse manifest JSON at {manifest_file}: {e}")
+            output.error(f"Manifest file may be corrupted. Please check the file contents.")
+            return videos
+        except IOError as e:
+            output.error(f"Failed to read manifest file at {manifest_file}: {e}")
+            output.error(f"Check file permissions and disk space.")
+            return videos
+        except Exception as e:
+            output.error(f"Unexpected error loading manifest at {manifest_file}: {e}")
+            return videos
 
         # Filterer always runs locally for file operations
         output.info("Running content filtering locally")
-        return await run_local_filtering(config, manifest_data, manifest_file)
+        try:
+            return await run_local_filtering(config, manifest_data, manifest_file)
+        except Exception as e:
+            output.error(f"Local filtering failed: {e}")
+            import traceback
+            output.error(f"Full traceback: {traceback.format_exc()}")
+            return videos
 
     except Exception as e:
         output.error(f"Filtering phase failed: {e}")
+        output.error(f"Config output dir: {config.output.final_audio_dir}")
+        import traceback
+        output.error(f"Full traceback: {traceback.format_exc()}")
         return videos
 
 
@@ -98,18 +120,25 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
 
         except Exception as e:
             output.warning(f"Failed to clean up URL file {url_file}: {e}")
+            output.warning(f"File exists: {url_file.exists()}")
+            if url_file.exists():
+                output.warning(f"File size: {url_file.stat().st_size} bytes")
     else:
         output.debug(f"URL output file not found: {url_file}")
 
     # Build a map of all existing files in final_audio_files
     final_audio_dir = config.output.final_audio_dir
     existing_files = {}
-    if final_audio_dir.exists():
-        for file_path in final_audio_dir.rglob("*"):
-            if file_path.is_file() and file_path.suffix.lower() in ['.wav', '.mp3', '.m4a']:
-                existing_files[file_path.name] = file_path
-
-    output.info(f"Found {len(existing_files)} audio files in {final_audio_dir}")
+    try:
+        if final_audio_dir.exists():
+            for file_path in final_audio_dir.rglob("*"):
+                if file_path.is_file() and file_path.suffix.lower() in ['.wav', '.mp3', '.m4a']:
+                    existing_files[file_path.name] = file_path
+        output.info(f"Found {len(existing_files)} audio files in {final_audio_dir}")
+    except Exception as e:
+        output.error(f"Failed to scan final audio directory {final_audio_dir}: {e}")
+        output.error(f"Directory exists: {final_audio_dir.exists()}")
+        return []
 
     for record in manifest_data.get('records', []):
         if not record.get('classified', False):
@@ -160,20 +189,28 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
                 entries_removed += 1
                 continue
 
-            # Move file
+        # Move file
+        try:
             output_path.rename(target_path)
             record['output_path'] = str(target_path)
             records_to_keep.append(record)
             files_moved += 1
             output.debug(f"Moved {video_id} to {language_folder} folder")
-        else:
-            # No children's voice - remove entry and file
-            try:
-                output_path.unlink()
-                output.debug(f"Removed file without children's voice: {video_id}")
-            except Exception as e:
-                output.warning(f"Failed to remove file {output_path}: {e}")
+        except Exception as e:
+            output.error(f"Failed to move file for {video_id}: {e}")
+            output.error(f"Source: {output_path}, Target: {target_path}")
+            output.error(f"Source exists: {output_path.exists()}, Target exists: {target_path.exists()}")
             entries_removed += 1
+            continue
+    else:
+        # No children's voice - remove entry and file
+        try:
+            output_path.unlink()
+            output.debug(f"Removed file without children's voice: {video_id}")
+        except Exception as e:
+            output.warning(f"Failed to remove file {output_path}: {e}")
+            output.warning(f"File exists: {output_path.exists()}")
+        entries_removed += 1
 
     # Remove duplicate entries (same video_id)
     seen_video_ids = set()
@@ -200,11 +237,16 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
     manifest_data['total_duration_seconds'] = total_duration
 
     # Save updated manifest
-    file_manager = get_file_manager()
-    file_manager.save_json(manifest_file, manifest_data)
-
-    output.success(f"Local filtering completed: {files_moved} files moved, {entries_removed} entries removed, {duplicates_removed} manifest duplicates removed, {url_duplicates_removed} URL duplicates removed")
-    output.info(f"Final manifest: {len(unique_records)} entries, {total_duration:.1f}s total duration")
+    try:
+        file_manager = get_file_manager()
+        file_manager.save_json(manifest_file, manifest_data)
+        output.success(f"Local filtering completed: {files_moved} files moved, {entries_removed} entries removed, {duplicates_removed} manifest duplicates removed, {url_duplicates_removed} URL duplicates removed")
+        output.info(f"Final manifest: {len(unique_records)} entries, {total_duration:.1f}s total duration")
+    except Exception as e:
+        output.error(f"Failed to save updated manifest after filtering: {e}")
+        output.error(f"Manifest file: {manifest_file}")
+        import traceback
+        output.error(f"Full traceback: {traceback.format_exc()}")
 
     # Return videos that were kept (this is mainly for compatibility)
     # In practice, the manifest now contains the filtered results

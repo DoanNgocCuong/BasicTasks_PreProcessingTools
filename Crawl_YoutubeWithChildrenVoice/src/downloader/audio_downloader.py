@@ -79,12 +79,36 @@ class AudioDownloader:
         self.output = get_output_manager()
         self.file_manager = get_file_manager()
 
+        # Check if yt-dlp is available
+        self.yt_dlp_available = self._check_yt_dlp_availability()
+        if not self.yt_dlp_available:
+            self.output.warning("yt-dlp is not available - downloads will fail")
+            self.output.warning("Please install yt-dlp: pip install yt-dlp")
+
         # Download statistics
         self.total_downloads = 0
         self.successful_downloads = 0
         self.failed_downloads = 0
 
         self.output.debug("Initialized audio downloader")
+
+    def _check_yt_dlp_availability(self) -> bool:
+        """
+        Check if yt-dlp is available on the system.
+
+        Returns:
+            True if yt-dlp is available, False otherwise
+        """
+        try:
+            process = subprocess.run(
+                ["yt-dlp", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            return process.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+            return False
 
     async def download_videos_audio(self, videos: List[VideoMetadata]) -> List[DownloadResult]:
         """
@@ -186,6 +210,10 @@ class AudioDownloader:
         """
         attempt = DownloadAttempt(method="yt-dlp", start_time=time.time())
 
+        if not self.yt_dlp_available:
+            attempt.complete(False, "yt-dlp is not available on the system")
+            return attempt
+
         try:
             # Prepare output path
             output_dir = self.file_manager.audio_outputs_dir
@@ -226,10 +254,12 @@ class AudioDownloader:
                     attempt.output_path = actual_path
                     self.output.debug(f"yt-dlp download successful: {video.video_id}")
                 else:
-                    attempt.complete(False, "Output file not found")
+                    attempt.complete(False, "Output file not found after successful yt-dlp execution")
+                    self.output.debug(f"yt-dlp stdout: {stdout.decode() if stdout else 'None'}")
             else:
                 error_msg = stderr.decode() if stderr else "Unknown yt-dlp error"
-                attempt.complete(False, error_msg)
+                attempt.complete(False, f"yt-dlp failed with return code {process.returncode}: {error_msg}")
+                self.output.debug(f"yt-dlp stdout: {stdout.decode() if stdout else 'None'}")
 
         except Exception as e:
             attempt.complete(False, str(e))
@@ -247,6 +277,10 @@ class AudioDownloader:
             Download attempt result
         """
         attempt = DownloadAttempt(method="api_assisted", start_time=time.time())
+
+        if not self.yt_dlp_available:
+            attempt.complete(False, "yt-dlp is not available on the system")
+            return attempt
 
         try:
             # This would integrate with YouTube API to get direct download URLs
@@ -283,10 +317,12 @@ class AudioDownloader:
                     attempt.output_path = actual_path
                     self.output.debug(f"API-assisted download successful: {video.video_id}")
                 else:
-                    attempt.complete(False, "Output file not found")
+                    attempt.complete(False, "Output file not found after successful API-assisted execution")
+                    self.output.debug(f"API-assisted stdout: {stdout.decode() if stdout else 'None'}")
             else:
                 error_msg = stderr.decode() if stderr else "Unknown API-assisted error"
-                attempt.complete(False, error_msg)
+                attempt.complete(False, f"API-assisted download failed with return code {process.returncode}: {error_msg}")
+                self.output.debug(f"API-assisted stdout: {stdout.decode() if stdout else 'None'}")
 
         except Exception as e:
             attempt.complete(False, str(e))
