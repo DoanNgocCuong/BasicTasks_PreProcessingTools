@@ -110,6 +110,10 @@ def clean_manifest(manifest_path):
             record['recovered_at'] = now
             changes.append(f"Record {i}: Added recovered_at: {now}")
         
+        if 'all_downloads_failed' not in record:
+            record['all_downloads_failed'] = False
+            changes.append(f"Record {i}: Added all_downloads_failed: false")
+        
         # Check file availability
         if 'file_available' not in record:
             if record.get('output_path') and record['output_path'] is not None:

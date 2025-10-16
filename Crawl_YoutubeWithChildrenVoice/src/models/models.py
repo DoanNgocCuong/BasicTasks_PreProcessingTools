@@ -211,6 +211,7 @@ class DownloadResult:
     file_size: Optional[int] = None
     duration: Optional[float] = None
     error_message: Optional[str] = None
+    all_downloads_failed: bool = False
 
     @property
     def is_successful(self) -> bool:

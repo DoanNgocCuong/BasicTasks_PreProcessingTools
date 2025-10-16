@@ -196,6 +196,7 @@ class AudioDownloader:
         # All methods failed
         result.success = False
         result.error_message = "All download methods failed"
+        result.all_downloads_failed = True
         return result
 
     async def _try_yt_dlp_download(self, video: VideoMetadata) -> DownloadAttempt:

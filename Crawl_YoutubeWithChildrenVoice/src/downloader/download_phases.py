@@ -241,6 +241,12 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                 classified = existing_record.get('classified', False)
                 uploaded = existing_record.get('uploaded', False)
                 file_available = existing_record.get('file_available', True)  # Default to True for old records
+                all_downloads_failed = existing_record.get('all_downloads_failed', False)
+                
+                # Skip if all downloads have already failed
+                if all_downloads_failed:
+                    output.debug(f"Video {video_id} has all_downloads_failed=true, skipping")
+                    continue
                 
                 # Conditions for redownload
                 if not classified and not file_available:
@@ -471,7 +477,8 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                     # Update existing record to failed
                     existing_record.update({
                         "status": "failed",
-                        "file_available": False
+                        "file_available": False,
+                        "all_downloads_failed": True
                     })
                 else:
                     failed_record = {
@@ -485,7 +492,8 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                         "language_folder": "unknown",
                         "download_index": len(manifest_data['records']),
                         "classified": False,
-                        "file_available": False
+                        "file_available": False,
+                        "all_downloads_failed": True
                     }
                     
                     # Update manifest with failed record
