@@ -24,7 +24,7 @@ from constants import BATCH_PROCESSING_INTERVAL
 ANALYZERS_AVAILABLE = True  # Will be set to False if import fails during runtime
 
 
-async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Callable[..., Awaitable[None]]] = None) -> List[VideoMetadata]:
+async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Callable[..., Awaitable[None]]] = None, processed_counter: Optional[list] = None) -> List[VideoMetadata]:
     """
     Run the search and discovery phase.
 
@@ -278,29 +278,25 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                     current_url_count = len(existing_urls)
                     
                     # Trigger batch processing every 20 URLs (with upload)
-                    if batch_callback and current_url_count - last_batch_count >= BATCH_PROCESSING_INTERVAL:
-                        output.info(f"Collected {current_url_count - last_batch_count} new URLs, triggering batch processing (with upload)")
-                        try:
-                            await batch_callback(include_upload=True)
-                            last_batch_count = current_url_count
-                            
-                            # Check if we've reached max processed URLs
-                            if config.max_processed_urls is not None:
-                                manifest_file = config.output.final_audio_dir / "manifest.json"
-                                if manifest_file.exists():
-                                    try:
-                                        with open(manifest_file, 'r', encoding='utf-8') as f:
-                                            manifest_data = json.load(f)
-                                        processed_count = len(manifest_data.get('records', []))
-                                        if processed_count >= config.max_processed_urls:
-                                            output.info(f"Reached maximum processed URLs ({config.max_processed_urls}), stopping discovery")
-                                            break
-                                    except Exception as e:
-                                        output.warning(f"Failed to check processed count: {e}")
-                        except Exception as e:
-                            output.error(f"Failed to execute batch callback: {e}")
-                            import traceback
-                            output.error(f"Full traceback: {traceback.format_exc()}")
+                    if batch_callback:
+                        # Calculate remaining
+                        remaining = config.max_processed_urls - processed_counter[0] if processed_counter and config.max_processed_urls else None
+                        max_count = remaining if remaining and remaining > 0 else None
+                        
+                        if current_url_count - last_batch_count >= BATCH_PROCESSING_INTERVAL:
+                            output.info(f"Collected {current_url_count - last_batch_count} new URLs, triggering batch processing (with upload)")
+                            try:
+                                await batch_callback(include_upload=True, max_count=max_count)
+                                last_batch_count = current_url_count
+                                
+                                # Check if we've reached max processed URLs
+                                if processed_counter and config.max_processed_urls and processed_counter[0] >= config.max_processed_urls:
+                                    output.info(f"Reached maximum processed URLs ({config.max_processed_urls}), stopping discovery")
+                                    break
+                            except Exception as e:
+                                output.error(f"Failed to execute batch callback: {e}")
+                                import traceback
+                                output.error(f"Full traceback: {traceback.format_exc()}")
                 else:
                     output.info(f"No children's voice detected in {first_video.video_id} (confidence: {voice_result.confidence:.2f}) - skipping query")
             else:

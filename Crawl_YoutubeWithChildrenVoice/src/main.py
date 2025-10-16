@@ -67,15 +67,19 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         except Exception as e:
             output.warning(f"Failed to create manifest backup after {phase_name}: {e}")
 
+    processed_counter = [0]  # Use list to allow modification in nested functions
+
     # Define callback for batch processing (phases 2-4)
-    async def process_batch(include_upload: bool = True):
+    async def process_batch(include_upload: bool = True, max_count: Optional[int] = None):
         """Process a batch of collected URLs through phases 2-4."""
+        nonlocal processed_counter
         output.info("=== Processing Batch ===")
 
         # Phase 2: Audio Download
         output.info("Batch Phase 2: Audio Download")
-        downloaded_count = await run_download_phase_from_urls(config, config.max_processed_urls)
+        downloaded_count = await run_download_phase_from_urls(config, max_count)
         output.success(f"Batch Phase 2 complete: {downloaded_count} audios downloaded")
+        processed_counter[0] += downloaded_count
         await run_clean_phase(config, [])
         create_manifest_backup("download")
 
@@ -112,7 +116,7 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
 
         # Phase 1: Video Discovery - collects URLs, triggers batch processing every 20 URLs
         output.info("Phase 1: Video Discovery")
-        await run_search_phase(config, process_batch)
+        await run_search_phase(config, process_batch, processed_counter)
         output.success("Phase 1 complete: URL collection finished")
         create_manifest_backup("discovery")
 
@@ -150,12 +154,16 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
                 except Exception as e:
                     output.warning(f"Failed to check unprocessed count: {e}")
             
-            if unprocessed_count > 0:
+            if unprocessed_count > 0 and (config.max_processed_urls is None or processed_counter[0] < config.max_processed_urls):
+                remaining = config.max_processed_urls - processed_counter[0] if config.max_processed_urls else None
                 output.info("Running final batch processing")
-                await process_batch(include_upload=True)
+                await process_batch(include_upload=True, max_count=remaining)
                 create_manifest_backup("final")
             else:
-                output.info("No unprocessed URLs found, skipping final batch")
+                if config.max_processed_urls and processed_counter[0] >= config.max_processed_urls:
+                    output.info(f"Already reached maximum processed URLs ({config.max_processed_urls}), skipping final batch")
+                else:
+                    output.info("No unprocessed URLs found, skipping final batch")
 
         # Final Summary
         output.info("=== Workflow Complete ===")

@@ -33,12 +33,19 @@ def main(manifest_path: str, folder_id: Optional[str] = None) -> Optional[str]:
     
     records = manifest.get("records", [])
     
-    # Filter targets: classified: true, containing_children_voice: true, uploaded: false
+    # Filter targets: classified: true, containing_children_voice: true, uploaded: false, file_available: true
     targets = []
     for i, record in enumerate(records):
+        # Check for children's voice using either field name
+        has_children_voice = (
+            record.get("containing_children_voice") or 
+            record.get("has_children_voice")
+        )
+        
         if (record.get("classified") == True and 
-            record.get("containing_children_voice") == True and 
-            record.get("uploaded", False) == False):
+            has_children_voice == True and 
+            record.get("uploaded", False) == False and
+            record.get("file_available", False) == True):
             targets.append((i, record))
     
     if not targets:

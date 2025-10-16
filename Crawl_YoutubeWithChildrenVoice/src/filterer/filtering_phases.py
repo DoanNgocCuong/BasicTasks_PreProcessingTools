@@ -173,8 +173,11 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             records_to_keep.append(record)
             continue
 
-        # Check for children's voice
-        has_children_voice = record.get('containing_children_voice', False)
+        # Check for children's voice using either field name
+        has_children_voice = (
+            record.get('containing_children_voice') or 
+            record.get('has_children_voice')
+        )
 
         if has_children_voice:
             # Move to appropriate language folder
