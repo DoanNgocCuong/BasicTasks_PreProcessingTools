@@ -277,8 +277,8 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                     # Check if we should trigger batch processing
                     current_url_count = len(existing_urls)
                     
-                    # Check for upload batch (every 200 URLs)
-                    if batch_callback and current_url_count - last_upload_batch_count >= 200:
+                    # Check for upload batch (every 40 URLs)
+                    if batch_callback and current_url_count - last_upload_batch_count >= 40:
                         output.info(f"Collected {current_url_count - last_upload_batch_count} new URLs, triggering full batch processing (with upload)")
                         try:
                             await batch_callback(include_upload=True)

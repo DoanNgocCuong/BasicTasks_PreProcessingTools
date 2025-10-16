@@ -3,7 +3,7 @@ import os
 import requests
 import concurrent.futures
 import argparse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 SERVER_URL = "http://103.253.20.30:8081/"
 
@@ -24,7 +24,7 @@ def upload_file(folder_id: str, file_path: str, filename: str, language: str = "
         response.raise_for_status()
     return filename
 
-def main(manifest_path: str):
+def main(manifest_path: str, folder_id: Optional[str] = None) -> Optional[str]:
     # Read manifest
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
@@ -41,11 +41,14 @@ def main(manifest_path: str):
     
     if not targets:
         print("No files to upload.")
-        return
+        return folder_id  # Return the folder_id even if no uploads
     
-    # Start upload session
-    folder_id = start_upload_session()
-    print(f"Upload folder: {folder_id}")
+    # Start upload session or use provided folder_id
+    if folder_id is None:
+        folder_id = start_upload_session()
+        print(f"Started new upload folder: {folder_id}")
+    else:
+        print(f"Using existing upload folder: {folder_id}")
     
     # Prepare uploads
     uploads = []
@@ -88,9 +91,11 @@ def main(manifest_path: str):
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     
     print(f"Updated manifest with {len(successful_uploads)} uploaded files.")
+    return folder_id
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload classified children voice audio files.")
     parser.add_argument("manifest_path", help="Path to the manifest.json file")
+    parser.add_argument("--folder-id", help="Optional folder ID to reuse for uploads")
     args = parser.parse_args()
-    main(args.manifest_path)
+    main(args.manifest_path, args.folder_id)

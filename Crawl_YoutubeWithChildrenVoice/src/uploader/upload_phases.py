@@ -14,6 +14,9 @@ from ..utils import get_output_manager
 # Import from local client
 from .client import main as upload_main
 
+# Global variable to store the upload folder_id for the current run
+_current_upload_folder_id: Optional[str] = None
+
 
 async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List[str]] = None) -> int:
     """
@@ -56,8 +59,18 @@ async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List
 
         # Call the upload client main function
         try:
-            upload_main(str(manifest_path))
-            output.success("Phase 5 complete: Files uploaded successfully")
+            global _current_upload_folder_id
+            if _current_upload_folder_id is None:
+                # Start a new upload session for this run
+                _current_upload_folder_id = upload_main(str(manifest_path))
+                if _current_upload_folder_id:
+                    output.success(f"Phase 5 complete: Started new upload session with folder {_current_upload_folder_id}")
+                else:
+                    output.warning("Phase 5: No uploads needed, no folder created")
+            else:
+                # Reuse existing folder for this run
+                result = upload_main(str(manifest_path), _current_upload_folder_id)
+                output.success(f"Phase 5 complete: Used existing upload folder {_current_upload_folder_id}")
             return 1  # Placeholder, actual count could be returned from main
         except Exception as e:
             output.error(f"Upload client failed: {e}")
