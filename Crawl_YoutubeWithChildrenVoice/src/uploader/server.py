@@ -1,5 +1,7 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends
 import os
 import shutil
 from datetime import datetime
@@ -8,10 +10,18 @@ import string
 
 app = FastAPI(title="Upload API")
 
+security = HTTPBasic()
+
+def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    # Hardcoded credentials for demonstration - replace with secure method in production
+    if credentials.username == "admin" and credentials.password == "secret":
+        return credentials.username
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
 UPLOAD_BASE_DIR = "uploaded_files"
 
 @app.post("/start_upload")
-async def start_upload():
+async def start_upload(username: str = Depends(verify_credentials)):
     # Create a new folder with date_new_id
     date_str = datetime.now().strftime("%Y-%m-%d")
     random_id = ''.join(random.choices(string.digits, k=5))
@@ -21,7 +31,7 @@ async def start_upload():
     return {"folder_id": folder_name}
 
 @app.post("/upload/{folder_id}")
-async def upload_file(folder_id: str, language: str = "unknown", file: UploadFile = File(...)):
+async def upload_file(folder_id: str, language: str = Form("unknown"), file: UploadFile = File(...), username: str = Depends(verify_credentials)):
     folder_path = os.path.join(UPLOAD_BASE_DIR, folder_id)
     if not os.path.exists(folder_path):
         raise HTTPException(status_code=404, detail="Folder not found")

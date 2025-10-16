@@ -7,8 +7,12 @@ from typing import List, Dict, Any
 
 SERVER_URL = "http://103.253.20.30:8081/"
 
+# Authentication credentials
+USERNAME = "admin"
+PASSWORD = "secret"
+
 def start_upload_session() -> str:
-    response = requests.post(f"{SERVER_URL}/start_upload")
+    response = requests.post(f"{SERVER_URL}/start_upload", auth=(USERNAME, PASSWORD))
     response.raise_for_status()
     return response.json()["folder_id"]
 
@@ -16,7 +20,7 @@ def upload_file(folder_id: str, file_path: str, filename: str, language: str = "
     with open(file_path, "rb") as f:
         files = {"file": (filename, f)}
         data = {"language": language}
-        response = requests.post(f"{SERVER_URL}/upload/{folder_id}", files=files, data=data)
+        response = requests.post(f"{SERVER_URL}/upload/{folder_id}", files=files, data=data, auth=(USERNAME, PASSWORD))
         response.raise_for_status()
     return filename
 
