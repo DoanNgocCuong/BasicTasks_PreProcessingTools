@@ -15,7 +15,7 @@ import re
 from ..config import CrawlerConfig
 from ..downloader import AudioDownloader
 from ..models import VideoMetadata, VideoSource
-from ..utils import get_output_manager
+from ..utils import get_output_manager, get_file_manager
 from ..crawler.youtube_api import YouTubeAPIClient
 
 
@@ -225,7 +225,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
             result = await downloader.download_video_audio(video)
 
             if result.success and result.output_path:
-                # Move file to unclassified folder
+                # Prepare file paths and manifest record BEFORE moving
                 unclassified_dir = config.output.final_audio_dir / "unclassified"
                 unclassified_dir.mkdir(parents=True, exist_ok=True)
 
@@ -233,22 +233,6 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 download_index = len(manifest_data['records'])
                 new_filename = build_filename(download_index, url, "wav", video.title, manifest_data, video.video_id)
                 new_path = unclassified_dir / new_filename
-
-                # Move the file
-                result.output_path.rename(new_path)
-                result.output_path = new_path
-
-                # Clean up any remaining temp files in audio_outputs_dir
-                try:
-                    audio_outputs_dir = config.output.audio_outputs_dir
-                    for temp_file in audio_outputs_dir.glob("*.mp3"):
-                        try:
-                            temp_file.unlink()
-                            output.debug(f"Cleaned up temp file: {temp_file}")
-                        except Exception as e:
-                            output.warning(f"Failed to clean up temp file {temp_file}: {e}")
-                except Exception as e:
-                    output.warning(f"Error during temp file cleanup: {e}")
 
                 # Detect language using transcript (preferred method from working example)
                 language_info = "unknown"
@@ -284,13 +268,47 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                     "classified": False
                 }
 
-                # Update manifest
+                # Update manifest data in memory
                 manifest_data['records'].append(record)
                 manifest_data['total_duration_seconds'] += record['duration_seconds']
 
-                # Save manifest
-                with open(manifest_file, 'w', encoding='utf-8') as f:
-                    json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+                # Save manifest BEFORE moving file (atomic operation)
+                file_manager = get_file_manager()
+                if not file_manager.save_json(manifest_file, manifest_data):
+                    output.error(f"Failed to save manifest for {video.video_id} - skipping download")
+                    # Rollback in-memory changes
+                    manifest_data['records'].pop()
+                    manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                    continue
+
+                # Now move the file (after manifest is safely updated)
+                try:
+                    result.output_path.rename(new_path)
+                    result.output_path = new_path
+                    output.debug(f"Successfully moved file to: {new_path}")
+                except Exception as e:
+                    output.error(f"Failed to move file for {video.video_id}: {e}")
+                    # Rollback manifest changes since file move failed
+                    try:
+                        manifest_data['records'].pop()
+                        manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                        file_manager.save_json(manifest_file, manifest_data)
+                        output.debug(f"Rolled back manifest changes for {video.video_id}")
+                    except Exception as rollback_e:
+                        output.error(f"Failed to rollback manifest for {video.video_id}: {rollback_e}")
+                    continue
+
+                # Clean up any remaining temp files in audio_outputs_dir
+                try:
+                    audio_outputs_dir = config.output.audio_outputs_dir
+                    for temp_file in audio_outputs_dir.glob("*.mp3"):
+                        try:
+                            temp_file.unlink()
+                            output.debug(f"Cleaned up temp file: {temp_file}")
+                        except Exception as e:
+                            output.warning(f"Failed to clean up temp file {temp_file}: {e}")
+                except Exception as e:
+                    output.warning(f"Error during temp file cleanup: {e}")
 
                 downloaded_count += 1
                 output.success(f"Downloaded and processed: {video.video_id}")
@@ -322,9 +340,9 @@ async def run_download_phase_from_urls(config: CrawlerConfig) -> int:
                 # Update manifest with failed record
                 manifest_data['records'].append(failed_record)
                 
-                # Save manifest
-                with open(manifest_file, 'w', encoding='utf-8') as f:
-                    json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+                # Save manifest atomically
+                file_manager = get_file_manager()
+                file_manager.save_json(manifest_file, manifest_data)
 
         output.success(f"Download phase completed: {downloaded_count}/{len(urls)} URLs processed")
         return downloaded_count

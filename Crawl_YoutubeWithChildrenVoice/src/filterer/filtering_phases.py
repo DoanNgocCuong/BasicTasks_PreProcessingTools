@@ -12,7 +12,7 @@ from typing import List
 
 from ..config import CrawlerConfig
 from ..models import VideoMetadata
-from ..utils import get_output_manager
+from ..utils import get_output_manager, get_file_manager
 
 
 async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]) -> List[VideoMetadata]:
@@ -188,8 +188,8 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
     manifest_data['total_duration_seconds'] = total_duration
 
     # Save updated manifest
-    with open(manifest_file, 'w', encoding='utf-8') as f:
-        json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+    file_manager = get_file_manager()
+    file_manager.save_json(manifest_file, manifest_data)
 
     output.success(f"Local filtering completed: {files_moved} files moved, {entries_removed} entries removed, {duplicates_removed} manifest duplicates removed, {url_duplicates_removed} URL duplicates removed")
     output.info(f"Final manifest: {len(unique_records)} entries, {total_duration:.1f}s total duration")

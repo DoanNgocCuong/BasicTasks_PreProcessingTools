@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
+import time
 
 from .output_manager import get_output_manager
 
@@ -139,7 +140,7 @@ class FileManager:
 
     def save_json(self, file_path: Path, data: Any, indent: int = 2) -> bool:
         """
-        Save data to JSON file.
+        Save data to JSON file atomically.
 
         Args:
             file_path: Path to save JSON file
@@ -157,13 +158,25 @@ class FileManager:
             # Ensure parent directory exists
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(file_path, 'w', encoding='utf-8') as f:
+            # Write to temporary file first for atomic operation
+            temp_file = file_path.with_suffix(file_path.suffix + '.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=indent, ensure_ascii=False)
 
-            self.output.debug(f"Saved JSON to {file_path}")
+            # Atomically move temp file to final location
+            temp_file.replace(file_path)
+
+            self.output.debug(f"Saved JSON atomically to {file_path}")
             return True
         except Exception as e:
             self.output.error(f"Failed to save JSON to {file_path}: {e}")
+            # Clean up temp file if it exists
+            temp_file = file_path.with_suffix(file_path.suffix + '.tmp')
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
             return False
 
     def load_text_file(self, file_path: Path, default: str = "") -> str:
@@ -352,6 +365,42 @@ class ManifestManager:
         self.manifest_path = manifest_path
         self.file_manager = file_manager
         self.output = get_output_manager()
+        self._lock_file = manifest_path.with_suffix(manifest_path.suffix + '.lock')
+        self._lock_timeout = 30  # seconds
+
+    def acquire_lock(self) -> bool:
+        """
+        Acquire a lock on the manifest file.
+
+        Returns:
+            True if lock acquired, False otherwise
+        """
+        start_time = time.time()
+        while time.time() - start_time < self._lock_timeout:
+            try:
+                # Try to create lock file exclusively
+                self._lock_file.touch(exist_ok=False)
+                self.output.debug(f"Acquired manifest lock: {self._lock_file}")
+                return True
+            except FileExistsError:
+                # Lock file exists, wait and retry
+                time.sleep(0.1)
+                continue
+            except Exception as e:
+                self.output.warning(f"Failed to acquire manifest lock: {e}")
+                return False
+
+        self.output.warning(f"Timeout acquiring manifest lock after {self._lock_timeout}s")
+        return False
+
+    def release_lock(self) -> None:
+        """Release the manifest lock."""
+        try:
+            if self._lock_file.exists():
+                self._lock_file.unlink()
+                self.output.debug(f"Released manifest lock: {self._lock_file}")
+        except Exception as e:
+            self.output.warning(f"Failed to release manifest lock: {e}")
 
     def load_manifest(self) -> Dict[str, Any]:
         """
@@ -387,10 +436,16 @@ class ManifestManager:
         Returns:
             True if successful
         """
-        data = self.load_manifest()
-        data["records"].append(record)
-        data["total_duration_seconds"] = data.get("total_duration_seconds", 0.0) + record.get("duration_seconds", 0.0)
-        return self.save_manifest(data)
+        if not self.acquire_lock():
+            return False
+
+        try:
+            data = self.load_manifest()
+            data["records"].append(record)
+            data["total_duration_seconds"] = data.get("total_duration_seconds", 0.0) + record.get("duration_seconds", 0.0)
+            return self.save_manifest(data)
+        finally:
+            self.release_lock()
 
     def find_record(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -402,11 +457,17 @@ class ManifestManager:
         Returns:
             Record data or None if not found
         """
-        data = self.load_manifest()
-        for record in data.get("records", []):
-            if record.get("video_id") == video_id:
-                return record
-        return None
+        if not self.acquire_lock():
+            return None
+
+        try:
+            data = self.load_manifest()
+            for record in data.get("records", []):
+                if record.get("video_id") == video_id:
+                    return record
+            return None
+        finally:
+            self.release_lock()
 
     def remove_record(self, video_id: str) -> bool:
         """
@@ -418,17 +479,23 @@ class ManifestManager:
         Returns:
             True if record was found and removed
         """
-        data = self.load_manifest()
-        original_count = len(data.get("records", []))
+        if not self.acquire_lock():
+            return False
 
-        data["records"] = [
-            record for record in data.get("records", [])
-            if record.get("video_id") != video_id
-        ]
+        try:
+            data = self.load_manifest()
+            original_count = len(data.get("records", []))
 
-        if len(data["records"]) < original_count:
-            return self.save_manifest(data)
-        return False
+            data["records"] = [
+                record for record in data.get("records", [])
+                if record.get("video_id") != video_id
+            ]
+
+            if len(data["records"]) < original_count:
+                return self.save_manifest(data)
+            return False
+        finally:
+            self.release_lock()
 
     def get_statistics(self) -> Dict[str, Any]:
         """
@@ -437,16 +504,22 @@ class ManifestManager:
         Returns:
             Statistics dictionary
         """
-        data = self.load_manifest()
-        records = data.get("records", [])
+        if not self.acquire_lock():
+            return {}
 
-        return {
-            "total_records": len(records),
-            "total_duration_seconds": data.get("total_duration_seconds", 0.0),
-            "total_duration_minutes": data.get("total_duration_seconds", 0.0) / 60.0,
-            "unique_channels": len(set(r.get("channel_title", "") for r in records)),
-            "date_created": data.get("date_created", "unknown")
-        }
+        try:
+            data = self.load_manifest()
+            records = data.get("records", [])
+
+            return {
+                "total_records": len(records),
+                "total_duration_seconds": data.get("total_duration_seconds", 0.0),
+                "total_duration_minutes": data.get("total_duration_seconds", 0.0) / 60.0,
+                "unique_channels": len(set(r.get("channel_title", "") for r in records)),
+                "date_created": data.get("date_created", "unknown")
+            }
+        finally:
+            self.release_lock()
 
 
 # Global file manager instance

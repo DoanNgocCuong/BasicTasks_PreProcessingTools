@@ -13,7 +13,7 @@ from datetime import datetime
 
 from ..config import CrawlerConfig
 from ..models import VideoMetadata, VideoSource
-from ..utils import get_output_manager
+from ..utils import get_output_manager, get_file_manager
 
 # Optional imports for analyzers
 try:
@@ -100,8 +100,8 @@ async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata])
                                 break
 
                     # Save updated manifest
-                    with open(manifest_file, 'w', encoding='utf-8') as f:
-                        json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+                    file_manager = get_file_manager()
+                    file_manager.save_json(manifest_file, manifest_data)
 
                     output.success(f"API analysis completed: {len(results)} videos analyzed")
                 else:
@@ -170,8 +170,8 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
         analyzed_count += 1
 
     # Save updated manifest
-    with open(manifest_file, 'w', encoding='utf-8') as f:
-        json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+    file_manager = get_file_manager()
+    file_manager.save_json(manifest_file, manifest_data)
 
     output.success(f"Local analysis completed: {analyzed_count} files analyzed")
     return []
