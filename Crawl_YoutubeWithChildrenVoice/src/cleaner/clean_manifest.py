@@ -4,6 +4,16 @@ import re
 import os
 
 def clean_manifest(manifest_path):
+    # Check if manifest exists
+    if not os.path.exists(manifest_path):
+        print(f"Manifest file not found: {manifest_path} - creating empty manifest")
+        # Create empty manifest
+        data = {"total_duration_seconds": 0.0, "records": []}
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        print("Created empty manifest file")
+        return
+    
     # Load the manifest
     with open(manifest_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -58,7 +68,7 @@ def clean_manifest(manifest_path):
         
         # download_index
         if 'download_index' not in record:
-            if record['output_path']:
+            if record.get('output_path') and record['output_path'] is not None:
                 filename = os.path.basename(record['output_path'])
                 match = re.match(r'(\d+)_', filename)
                 if match:
@@ -95,6 +105,10 @@ def clean_manifest(manifest_path):
     new_records = []
     for record in records:
         vid = record.get('video_id')
+        if vid is None:
+            # Skip records with null video_id - they should be handled by setting status to failed
+            changes.append(f"Skipped record with null video_id during deduplication")
+            continue
         if vid not in seen:
             seen[vid] = True
             new_records.append(record)

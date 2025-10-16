@@ -107,6 +107,15 @@ class AnalysisAPIConfig:
 
 
 @dataclass
+class CleanConfig:
+    """Configuration for manifest cleaning."""
+    enabled: bool = True
+    remove_duplicates: bool = True
+    add_missing_fields: bool = True
+    fix_missing_required_fields: bool = True
+
+
+@dataclass
 class OutputConfig:
     """Configuration for output directories and files."""
     base_dir: Path = field(default_factory=lambda: Path("output"))
@@ -145,6 +154,7 @@ class CrawlerConfig:
     download: DownloadConfig = field(default_factory=DownloadConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     analysis_api: AnalysisAPIConfig = field(default_factory=AnalysisAPIConfig)
+    clean: CleanConfig = field(default_factory=CleanConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -259,6 +269,10 @@ class CrawlerConfig:
         if 'analysis_api' in data:
             analysis_api_data = data['analysis_api']
             config.analysis_api = AnalysisAPIConfig(**analysis_api_data)
+
+        if 'clean' in data:
+            clean_data = data['clean']
+            config.clean = CleanConfig(**clean_data)
 
         if 'output' in data:
             output_data = data['output']

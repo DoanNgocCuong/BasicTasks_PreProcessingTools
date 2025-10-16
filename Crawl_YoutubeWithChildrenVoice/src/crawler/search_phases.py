@@ -8,7 +8,7 @@ This module contains the implementation of the video discovery and search phase.
 
 import asyncio
 from pathlib import Path
-from typing import List, Optional, Callable, Awaitable
+from typing import List, Optional, Callable, Awaitable, Any
 
 from ..config import CrawlerConfig
 from ..crawler import SearchEngine
@@ -21,7 +21,7 @@ from ..analyzer.voice_classifier import VoiceClassifier
 ANALYZERS_AVAILABLE = True  # Will be set to False if import fails during runtime
 
 
-async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Callable[[bool], Awaitable[None]]] = None) -> List[VideoMetadata]:
+async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Callable[..., Awaitable[None]]] = None) -> List[VideoMetadata]:
     """
     Run the search and discovery phase.
 

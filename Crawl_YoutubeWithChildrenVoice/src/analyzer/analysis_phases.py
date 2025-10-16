@@ -74,17 +74,25 @@ async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata])
                 api_audio_paths = []
                 for record in manifest_data.get('records', []):
                     if not record.get('classified', False):
+                        video_id = record.get('video_id')
+                        output_path_str = record.get('output_path')
+                        
+                        # Skip records with missing required fields
+                        if not video_id or not output_path_str:
+                            output.warning(f"Skipping API analysis for record with missing video_id or output_path: video_id={video_id}, output_path={output_path_str}")
+                            continue
+                            
                         # Create minimal VideoMetadata for unclassified records
                         video = VideoMetadata(
-                            video_id=record['video_id'],
-                            title=record.get('title', f"Video {record['video_id']}"),
+                            video_id=video_id,
+                            title=record.get('title', f"Video {video_id}"),
                             channel_id='',
                             channel_title='',
                             description='',
                             source=VideoSource.MANUAL
                         )
                         api_videos.append(video)
-                        api_audio_paths.append(record.get('output_path', ''))
+                        api_audio_paths.append(output_path_str)
 
                 if api_videos:
                     results = await client.analyze_videos(api_videos)
@@ -146,8 +154,15 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
             # Already classified, skip
             continue
 
-        video_id = record['video_id']
-        output_path = Path(record['output_path'])
+        video_id = record.get('video_id')
+        output_path_str = record.get('output_path')
+
+        # Skip records with missing required fields
+        if not video_id or not output_path_str:
+            output.warning(f"Skipping analysis for record with missing video_id or output_path: video_id={video_id}, output_path={output_path_str}")
+            continue
+
+        output_path = Path(output_path_str)
 
         if not output_path.exists():
             output.warning(f"Audio file not found for {video_id}: {output_path}")

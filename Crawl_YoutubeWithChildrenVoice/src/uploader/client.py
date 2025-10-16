@@ -46,7 +46,10 @@ def main(manifest_path: str):
     # Prepare uploads
     uploads = []
     for idx, record in targets:
-        output_path = record["output_path"]
+        output_path = record.get("output_path")
+        if not output_path:
+            print(f"Skipping upload for record {idx}: missing output_path")
+            continue
         # Assuming output_path is relative to the project root
         full_path = output_path.replace("\\", os.sep)
         filename = os.path.basename(full_path)

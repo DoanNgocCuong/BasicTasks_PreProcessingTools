@@ -30,6 +30,7 @@ from .utils import get_output_manager, get_progress_tracker, get_file_manager
 from .crawler.youtube_api import YouTubeAPIClient
 from .analyzer.analysis_phases import run_analysis_phase, run_local_analysis
 from .filterer.filtering_phases import run_filtering_phase, run_local_filtering
+from .cleaner.clean_phases import run_clean_phase
 from .uploader.upload_phases import run_upload_phase
 
 # Optional import for transcript API
@@ -99,6 +100,12 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         output.info("=== Batch Processing Complete ===")
 
     try:
+        # Phase 0: Manifest Cleaning
+        output.info("Phase 0: Manifest Cleaning")
+        await run_clean_phase(config, [])
+        output.success("Phase 0 complete: Manifest cleaning finished")
+        create_manifest_backup("clean")
+
         # Phase 1: Video Discovery - collects URLs, triggers batch processing every 20 URLs
         output.info("Phase 1: Video Discovery")
         await run_search_phase(config, process_batch)

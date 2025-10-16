@@ -117,8 +117,16 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             records_to_keep.append(record)
             continue
 
-        video_id = record['video_id']
-        output_path = Path(record['output_path'])
+        video_id = record.get('video_id')
+        output_path_str = record.get('output_path')
+
+        # Skip records with missing required fields
+        if not video_id or not output_path_str:
+            output.warning(f"Skipping filtering for record with missing video_id or output_path: video_id={video_id}, output_path={output_path_str}")
+            entries_removed += 1
+            continue
+
+        output_path = Path(output_path_str)
 
         # Check if file exists at recorded path or in the file system
         file_exists = output_path.exists()
@@ -173,7 +181,11 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
     duplicates_removed = 0
 
     for record in records_to_keep:
-        video_id = record['video_id']
+        video_id = record.get('video_id')
+        if not video_id:
+            # Skip records with null video_id
+            output.warning(f"Skipping record with null video_id during deduplication")
+            continue
         if video_id in seen_video_ids:
             duplicates_removed += 1
             continue
