@@ -148,16 +148,16 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
         # Determine which videos to process
         all_records = manifest_data.get('records', [])
         if video_ids is not None:
-            # Filter to specified video IDs
-            videos_to_process = [r for r in all_records if r.get('video_id') in video_ids]
+            # Filter to specified video IDs that haven't been uploaded
+            videos_to_process = [r for r in all_records if r.get('video_id') in video_ids and not r.get('uploaded', False)]
             if not videos_to_process:
-                output.warning(f"No videos found matching the specified IDs: {video_ids}")
+                output.warning(f"No unuploaded videos found matching the specified IDs: {video_ids}")
                 return False
-            output.info(f"Processing {len(videos_to_process)} specified videos")
+            output.info(f"Processing {len(videos_to_process)} specified unuploaded videos")
         else:
-            # Process all videos
-            videos_to_process = all_records
-            output.info(f"Processing all {len(videos_to_process)} videos individually")
+            # Process all videos that haven't been uploaded
+            videos_to_process = [r for r in all_records if not r.get('uploaded', False)]
+            output.info(f"Processing all {len(videos_to_process)} unuploaded videos individually")
 
         # Process each video individually
         processed_count = 0
