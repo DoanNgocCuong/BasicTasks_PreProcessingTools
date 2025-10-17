@@ -162,6 +162,7 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
         # Process each video individually
         processed_count = 0
         failed_count = 0
+
         for record in videos_to_process:
             video_id = record.get('video_id')
             if not video_id:
@@ -171,16 +172,6 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
             output.info(f"Processing video: {video_id}")
             
             try:
-                # Phase 0: Manifest Cleaning (optional, but good practice)
-                output.debug(f"Phase 0: Manifest Cleaning for {video_id}")
-                await run_clean_phase(config, [])
-                
-                # Validate manifest after cleaning
-                if not validate_manifest_integrity(manifest_path, output):
-                    output.error(f"Manifest corrupted after cleaning phase for {video_id}")
-                    failed_count += 1
-                    continue
-                
                 # Phase 1: Audio Analysis
                 output.debug(f"Phase 1: Audio Analysis for {video_id}")
                 await run_analysis_phase(config, [], [video_id])
@@ -213,7 +204,7 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
                 
                 processed_count += 1
                 output.info(f"Completed processing video {video_id} ({processed_count}/{len(videos_to_process)})")
-                
+
             except Exception as e:
                 failed_count += 1
                 output.error(f"Failed to process video {video_id}: {e}")
