@@ -18,7 +18,7 @@ from ..models import VideoMetadata
 from ..utils import get_output_manager
 from ..analyzer.voice_classifier import VoiceClassifier
 from ..crawler.youtube_api import QuotaExceededError
-from constants import BATCH_PROCESSING_INTERVAL
+from ..constants import BATCH_PROCESSING_INTERVAL
 
 # Optional imports for analyzers - moved inside functions to avoid loading at import time
 ANALYZERS_AVAILABLE = True  # Will be set to False if import fails during runtime

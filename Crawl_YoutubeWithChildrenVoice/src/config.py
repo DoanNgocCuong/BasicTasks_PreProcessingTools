@@ -12,7 +12,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
 
-from constants import (
+from .constants import (
     DEFAULT_TARGET_VIDEOS_PER_QUERY,
     DEFAULT_MAX_RECOMMENDED_PER_QUERY,
     DEFAULT_MIN_TARGET_COUNT,
