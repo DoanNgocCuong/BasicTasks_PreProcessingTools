@@ -104,6 +104,7 @@ class DownloadConfig:
     max_concurrent_downloads: int = DEFAULT_MAX_CONCURRENT_DOWNLOADS
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
     cookie_settings: Optional[Dict[str, Any]] = None
+    timeout_seconds: int = 180  # Timeout for download operations
 
 
 @dataclass

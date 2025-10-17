@@ -89,16 +89,20 @@ async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List
         # Call the upload client main function
         try:
             global _current_upload_folder_id
+            total_uploads = 0
+            
             if _current_upload_folder_id is None:
                 # Start a new upload session for this run
-                _current_upload_folder_id = upload_main(str(upload_manifest_path))
+                _current_upload_folder_id, uploads_count = upload_main(str(upload_manifest_path))
+                total_uploads += uploads_count
                 if _current_upload_folder_id:
                     output.success(f"Phase 5 complete: Started new upload session with folder {_current_upload_folder_id}")
                 else:
                     output.warning("Phase 5: No uploads needed, no folder created")
             else:
                 # Reuse existing folder for this run
-                result = upload_main(str(upload_manifest_path), _current_upload_folder_id)
+                _current_upload_folder_id, uploads_count = upload_main(str(upload_manifest_path), _current_upload_folder_id)
+                total_uploads += uploads_count
                 output.success(f"Phase 5 complete: Used existing upload folder {_current_upload_folder_id}")
             
             # Clean up temporary manifest if created
@@ -108,7 +112,7 @@ async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List
                 except Exception as e:
                     output.warning(f"Failed to clean up temporary manifest: {e}")
             
-            return 1  # Placeholder, actual count could be returned from main
+            return total_uploads
         except Exception as e:
             output.error(f"Upload client failed: {e}")
             output.error(f"Manifest path: {upload_manifest_path}")

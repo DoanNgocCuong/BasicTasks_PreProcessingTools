@@ -356,6 +356,9 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
         
         return []  # Return empty list since we don't need to pass videos to next phase
 
+    except QuotaExceededError:
+        output.error(f"Search phase failed due to quota/API key exhaustion: {e}")
+        raise
     except Exception as e:
         output.error(f"Search phase failed: {e}")
         output.error(f"Config search settings: queries={config.search.queries}, target_videos={config.search.target_videos_per_query}")

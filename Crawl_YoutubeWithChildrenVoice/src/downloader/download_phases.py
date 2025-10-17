@@ -460,6 +460,9 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
 
                 # Now move the file (after manifest is safely updated)
                 try:
+                    if new_path.exists():
+                        new_path.unlink()  # Remove existing file
+                        output.debug(f"Removed existing file: {new_path}")
                     result.output_path.rename(new_path)
                     result.output_path = new_path
                     output.debug(f"Successfully moved file to: {new_path}")

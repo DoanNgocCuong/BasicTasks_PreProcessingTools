@@ -293,10 +293,13 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
                 return True
 
             # Phase 1: Video Discovery - collects URLs, triggers batch processing every 20 URLs
-            output.info("Phase 1: Video Discovery")
-            await run_search_phase(config, process_batch, processed_counter)
-            output.success("Phase 1 complete: URL collection finished")
-            create_manifest_backup("discovery")
+            try:
+                output.info("Phase 1: Video Discovery")
+                await run_search_phase(config, process_batch, processed_counter)
+                output.success("Phase 1 complete: URL collection finished")
+                create_manifest_backup("discovery")
+            except Exception as e:
+                output.error(f"Phase 1 failed due to API key issues or other errors: {e}. Moving on to processing existing URLs.")
 
             # Check for shutdown signal
             if shutdown_event.is_set():

@@ -42,6 +42,11 @@ def migrate_legacy_classification_fields(record: dict) -> dict:
         # Remove legacy field after migration
         del record['has_children_voice']
     
+    # Migrate legacy voice_analysis_confident field to voice_analysis_confidence
+    if 'voice_analysis_confident' in record and 'voice_analysis_confidence' not in record:
+        record['voice_analysis_confidence'] = record['voice_analysis_confident']
+        del record['voice_analysis_confident']
+    
     return record
 
 
@@ -182,13 +187,16 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
             output.warning(f"Skipping analysis for record with missing video_id or output_path: video_id={video_id}, output_path={output_path_str}")
             continue
 
-        output_path = Path(output_path_str)
+        # Make path absolute relative to workspace root
+        workspace_root = manifest_file.parents[2]  # manifest.json is at workspace/output/final_audio/manifest.json
+        output_path = workspace_root / output_path_str
 
         if not output_path.exists():
             output.warning(f"Audio file not found for {video_id}: {output_path}")
             continue
 
         # Analyze for children's voice
+        output.info(f"Analyzing audio file for {video_id}...")
         try:
             voice_result = voice_classifier.classify_audio_file(output_path)
             output.debug(f"Voice classification result for {video_id}: is_child={voice_result.is_child_voice}, confidence={voice_result.confidence}")
@@ -211,9 +219,20 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
         if voice_result.is_child_voice:
             output.info(f"Children's voice detected in {video_id} (confidence: {voice_result.confidence:.2f})")
         else:
-            output.debug(f"No children's voice in {video_id} (confidence: {voice_result.confidence:.2f})")
+            output.info(f"No children's voice in {video_id} (confidence: {voice_result.confidence:.2f})")
 
         analyzed_count += 1
+
+        # Save manifest incrementally every 2 analyses
+        if analyzed_count % 2 == 0:
+            try:
+                file_manager = get_file_manager()
+                file_manager.save_json(manifest_file, manifest_data)
+                output.debug(f"Saved manifest after {analyzed_count} analyses")
+            except Exception as e:
+                output.error(f"Failed to save manifest after {analyzed_count} analyses: {e}")
+                import traceback
+                output.error(f"Full traceback: {traceback.format_exc()}")
 
     # Save updated manifest
     try:

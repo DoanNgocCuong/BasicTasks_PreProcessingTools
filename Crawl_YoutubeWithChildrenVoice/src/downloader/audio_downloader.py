@@ -230,6 +230,7 @@ class AudioDownloader:
                 "--no-playlist",
                 "--quiet",
                 "--no-warnings",
+                "--socket-timeout", str(self.config.timeout_seconds),
                 f"https://www.youtube.com/watch?v={video.video_id}"
             ]
 
@@ -244,7 +245,15 @@ class AudioDownloader:
                 stderr=asyncio.subprocess.PIPE
             )
 
-            stdout, stderr = await process.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.config.timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                attempt.complete(False, f"yt-dlp download timed out after {self.config.timeout_seconds} seconds")
+                return attempt
 
             if process.returncode == 0:
                 # Check if file was created
@@ -298,6 +307,7 @@ class AudioDownloader:
                 "--no-playlist",
                 "--quiet",
                 "--no-warnings",
+                "--socket-timeout", str(self.config.timeout_seconds),
                 "--format", "bestaudio/best",  # More restrictive format selection
                 f"https://www.youtube.com/watch?v={video.video_id}"
             ]
@@ -308,7 +318,15 @@ class AudioDownloader:
                 stderr=asyncio.subprocess.PIPE
             )
 
-            stdout, stderr = await process.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.config.timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                attempt.complete(False, f"API-assisted download timed out after {self.config.timeout_seconds} seconds")
+                return attempt
 
             if process.returncode == 0:
                 actual_path = output_dir / f"{video.video_id}_api.mp3"

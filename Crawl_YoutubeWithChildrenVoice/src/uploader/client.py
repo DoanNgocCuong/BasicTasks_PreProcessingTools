@@ -26,7 +26,7 @@ def upload_file(folder_id: str, file_path: str, filename: str, language: str = "
         response.raise_for_status()
     return filename
 
-def main(manifest_path: str, folder_id: Optional[str] = None) -> Optional[str]:
+def main(manifest_path: str, folder_id: Optional[str] = None) -> tuple[Optional[str], int]:
     # Read manifest
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
@@ -44,7 +44,7 @@ def main(manifest_path: str, folder_id: Optional[str] = None) -> Optional[str]:
     
     if not targets:
         print("No files to upload.")
-        return folder_id  # Return the folder_id even if no uploads
+        return folder_id, 0  # Return the folder_id even if no uploads
     
     # Start upload session or use provided folder_id
     if folder_id is None:
@@ -73,12 +73,17 @@ def main(manifest_path: str, folder_id: Optional[str] = None) -> Optional[str]:
         for future in concurrent.futures.as_completed(futures):
             try:
                 filename = future.result()
-                print(f"Uploaded {filename}")
-                # Find the idx
+                # Find the corresponding upload info to get language and folder_id
+                server_path = None
+                upload_idx = None
                 for fid, path, fname, lang, idx in uploads:
                     if fname == filename:
-                        successful_uploads.append(idx)
+                        server_path = f"uploaded_files/{fid}/{lang}/{filename}"
+                        upload_idx = idx
                         break
+                print(f"✅ Uploaded to: {server_path}")
+                if upload_idx is not None:
+                    successful_uploads.append(upload_idx)
             except Exception as e:
                 print(f"Failed to upload: {e}")
     
@@ -94,7 +99,7 @@ def main(manifest_path: str, folder_id: Optional[str] = None) -> Optional[str]:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     
     print(f"Updated manifest with {len(successful_uploads)} uploaded files.")
-    return folder_id
+    return folder_id, len(successful_uploads)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload classified children voice audio files.")

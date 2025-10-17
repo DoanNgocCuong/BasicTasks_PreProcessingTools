@@ -199,9 +199,9 @@ class YouTubeAPIClient:
             return True
 
         except HttpError as e:
-            if e.resp.status == 403:
+            if e.resp.status in (403, 400):
                 error_details = e.content.decode() if hasattr(e, 'content') else str(e)
-                if "quotaExceeded" in error_details or "dailyLimitExceeded" in error_details or "quota" in error_details:
+                if "quotaExceeded" in error_details or "dailyLimitExceeded" in error_details or "quota" in error_details or "API key not valid" in error_details:
                     return False
             return False
         except Exception:
@@ -222,14 +222,17 @@ class YouTubeAPIClient:
         status_code = getattr(error, 'status_code', getattr(error, 'resp', {}).get('status', 0))
         self.output.debug(f"API error status code: {status_code}")
 
-        if status_code == 403:
+        if status_code == 403 or status_code == 400:
             error_content = error.content.decode() if hasattr(error, 'content') else str(error)
-            self.output.debug(f"403 error content: {error_content}")
+            self.output.debug(f"{status_code} error content: {error_content}")
             
             # Check for quota exceeded in various ways
             is_quota_exceeded = False
+            is_invalid_key = False
             if "quotaExceeded" in error_content or "dailyLimitExceeded" in error_content or "quota" in error_content:
                 is_quota_exceeded = True
+            elif "API key not valid" in error_content or "badRequest" in error_content:
+                is_invalid_key = True
             else:
                 # Try to parse as JSON
                 try:
@@ -239,17 +242,20 @@ class YouTubeAPIClient:
                         error_item = error_data[0]
                         if error_item.get('reason') == 'quotaExceeded' or error_item.get('domain') == 'youtube.quota':
                             is_quota_exceeded = True
+                        elif error_item.get('reason') == 'badRequest' and 'API key' in error_item.get('message', ''):
+                            is_invalid_key = True
                 except (json.JSONDecodeError, KeyError, IndexError):
                     pass
             
-            if is_quota_exceeded:
+            if is_quota_exceeded or is_invalid_key:
                 self.quota_exceeded = True
                 current_key_suffix = self._current_key[-4:] if self.api_keys else "????"
-                self.output.warning(f"YouTube API quota exceeded during '{operation}' using key {self.current_key_index + 1} (...{current_key_suffix})")
+                error_type = "quota exceeded" if is_quota_exceeded else "invalid"
+                self.output.warning(f"YouTube API {error_type} during '{operation}' using key {self.current_key_index + 1} (...{current_key_suffix})")
 
                 if not self._switch_to_next_key():
                     self.output.error(f"All {len(self.api_keys)} API keys exhausted during '{operation}' - entering quota reset wait mode")
-                    raise QuotaExceededError("All YouTube API keys quota exceeded")
+                    raise QuotaExceededError("All YouTube API keys exhausted")
 
                 self.output.info(f"Retrying '{operation}' with new API key {self.current_key_index + 1}")
                 return
