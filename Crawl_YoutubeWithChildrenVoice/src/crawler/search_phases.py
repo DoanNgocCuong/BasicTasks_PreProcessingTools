@@ -19,6 +19,8 @@ from ..utils import get_output_manager
 from ..analyzer.voice_classifier import VoiceClassifier
 from ..crawler.youtube_api import QuotaExceededError
 from ..constants import BATCH_PROCESSING_INTERVAL
+from ..analyzer.language_detector import LanguageDetector
+from ..downloader.download_phases import get_video_transcript
 
 # Optional imports for analyzers - moved inside functions to avoid loading at import time
 ANALYZERS_AVAILABLE = True  # Will be set to False if import fails during runtime
@@ -192,6 +194,22 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                         output.warning(f"Failed to clean up temporary audio file {download_result.output_path}: {e}")
                 continue
 
+            # Initialize language detector for transcript analysis
+            language_detector = None
+            if hasattr(config.analysis, 'enable_language_detection') and config.analysis.enable_language_detection:
+                try:
+                    language_detector = LanguageDetector(config.analysis)
+                    lang_loaded = language_detector.load_model()
+                    if not lang_loaded:
+                        output.warning("Language detector model not loaded - transcript analysis disabled")
+                        language_detector = None
+                    else:
+                        output.debug("Language detector initialized successfully")
+                except Exception as e:
+                    output.error(f"Failed to initialize language detector: {e}")
+                    output.error(f"Analysis config: {config.analysis}")
+                    language_detector = None
+
             # Perform voice analysis
             if download_result.output_path and download_result.output_path.exists():
                 try:
@@ -259,18 +277,42 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                     # Add channel videos to URL output file (no duplicates)
                     new_urls_added = 0
                     for channel_video in channel_videos:
-                        channel_url = channel_video.url
-                        if channel_url not in existing_urls:
+                        # Detect language for filtering
+                        language_info = "unknown"
+                        if language_detector:
                             try:
-                                with open(url_output_file, 'a', encoding='utf-8') as f:
-                                    f.write(f"{channel_url}\n")
-                                existing_urls.add(channel_url)
-                                discovered_videos[channel_video.video_id] = channel_video
-                                new_urls_added += 1
+                                # Use transcript-based detection (preferred method)
+                                transcript_result = language_detector.detect_language_from_youtube_transcript(channel_video.video_id)
+                                if transcript_result.is_successful:
+                                    language_info = transcript_result.detected_language.value
+                                    output.debug(f"Transcript language detection for {channel_video.video_id}: {language_info} (confidence: {transcript_result.confidence:.2f})")
+                                else:
+                                    # Fallback to transcript text analysis if available
+                                    transcript = await get_video_transcript(channel_video.video_id)
+                                    if transcript:
+                                        text_result = language_detector.detect_language_from_text(transcript)
+                                        if text_result.is_successful:
+                                            language_info = text_result.detected_language.value
+                                            output.debug(f"Text language detection for {channel_video.video_id}: {language_info} (confidence: {text_result.confidence:.2f})")
                             except Exception as e:
-                                output.error(f"Failed to write channel URL to output file {url_output_file}: {e}")
-                                output.error(f"Channel URL: {channel_url}")
-                                continue
+                                output.debug(f"Language detection failed for {channel_video.video_id}: {e}")
+
+                        # Only add URLs that are Vietnamese or unknown
+                        if language_info in ['vi', 'unknown']:
+                            channel_url = channel_video.url
+                            if channel_url not in existing_urls:
+                                try:
+                                    with open(url_output_file, 'a', encoding='utf-8') as f:
+                                        f.write(f"{channel_url}\n")
+                                    existing_urls.add(channel_url)
+                                    discovered_videos[channel_video.video_id] = channel_video
+                                    new_urls_added += 1
+                                except Exception as e:
+                                    output.error(f"Failed to write channel URL to output file {url_output_file}: {e}")
+                                    output.error(f"Channel URL: {channel_url}")
+                                    continue
+                        else:
+                            output.debug(f"Skipped channel video {channel_video.video_id} due to language filter: {language_info}")
 
                     output.success(f"Added {new_urls_added} additional URLs from channel {first_video.channel_title}")
 
