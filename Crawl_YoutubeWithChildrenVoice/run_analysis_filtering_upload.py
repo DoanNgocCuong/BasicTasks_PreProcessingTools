@@ -34,6 +34,76 @@ except ImportError as e:
     sys.exit(1)
 
 
+def validate_manifest_integrity(manifest_path: Path, output) -> bool:
+    """
+    Validate the integrity of the manifest file.
+    
+    Args:
+        manifest_path: Path to the manifest file
+        output: Output manager instance
+        
+    Returns:
+        True if manifest is valid, False otherwise
+    """
+    if not manifest_path.exists():
+        output.error(f"Manifest file does not exist: {manifest_path}")
+        return False
+    
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            manifest_data = json.load(f)
+        
+        # Check basic structure
+        if not isinstance(manifest_data, dict):
+            output.error("Manifest is not a valid JSON object")
+            return False
+        
+        records = manifest_data.get('records', [])
+        if not isinstance(records, list):
+            output.error("Manifest records is not a list")
+            return False
+        
+        # Check each record has required fields
+        for i, record in enumerate(records):
+            if not isinstance(record, dict):
+                output.error(f"Record {i} is not a valid object")
+                return False
+            
+            video_id = record.get('video_id')
+            if not video_id or not isinstance(video_id, str):
+                output.error(f"Record {i} missing or invalid video_id: {video_id}")
+                return False
+        
+        # Validate total_duration_seconds
+        total_duration = manifest_data.get('total_duration_seconds', 0)
+        if not isinstance(total_duration, (int, float)):
+            output.error(f"Invalid total_duration_seconds: {total_duration}")
+            return False
+        
+        # Cross-validate total duration with records
+        calculated_duration = sum(record.get('duration_seconds', 0) for record in records)
+        if abs(total_duration - calculated_duration) > 0.01:  # Allow small floating point differences
+            output.warning(f"Total duration mismatch: manifest={total_duration:.2f}, calculated={calculated_duration:.2f}")
+            # This is a warning, not an error - fix it
+            manifest_data['total_duration_seconds'] = calculated_duration
+            try:
+                with open(manifest_path, 'w', encoding='utf-8') as f:
+                    json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+                output.info(f"Fixed total duration in manifest: {calculated_duration:.2f}")
+            except Exception as e:
+                output.error(f"Failed to fix total duration: {e}")
+        
+        output.debug(f"Manifest validation passed: {len(records)} records, {total_duration:.2f}s total duration")
+        return True
+        
+    except json.JSONDecodeError as e:
+        output.error(f"Manifest contains invalid JSON: {e}")
+        return False
+    except Exception as e:
+        output.error(f"Failed to validate manifest: {e}")
+        return False
+
+
 async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_ids: Optional[List[str]] = None) -> bool:
     """
     Run the analysis, filtering, and upload phases.
@@ -65,6 +135,16 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
             output.error(f"Failed to load manifest: {e}")
             return False
 
+        # Create backup of manifest before processing
+        backup_path = manifest_path.with_suffix(manifest_path.suffix + '.backup')
+        try:
+            import shutil
+            shutil.copy2(manifest_path, backup_path)
+            output.info(f"Created manifest backup: {backup_path}")
+        except Exception as e:
+            output.error(f"Failed to create manifest backup: {e}")
+            return False
+
         # Determine which videos to process
         all_records = manifest_data.get('records', [])
         if video_ids is not None:
@@ -81,6 +161,7 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
 
         # Process each video individually
         processed_count = 0
+        failed_count = 0
         for record in videos_to_process:
             video_id = record.get('video_id')
             if not video_id:
@@ -89,26 +170,61 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
 
             output.info(f"Processing video: {video_id}")
             
-            # Phase 0: Manifest Cleaning (optional, but good practice)
-            output.debug(f"Phase 0: Manifest Cleaning for {video_id}")
-            await run_clean_phase(config, [])
-            
-            # Phase 1: Audio Analysis
-            output.debug(f"Phase 1: Audio Analysis for {video_id}")
-            await run_analysis_phase(config, [], [video_id])
-            
-            # Phase 2: Content Filtering
-            output.debug(f"Phase 2: Content Filtering for {video_id}")
-            await run_filtering_phase(config, [], [video_id])
-            
-            # Phase 3: File Upload
-            output.debug(f"Phase 3: File Upload for {video_id}")
-            upload_count = await run_upload_phase(config, [], [video_id])
-            
-            processed_count += 1
-            output.info(f"Completed processing video {video_id} ({processed_count}/{len(videos_to_process)})")
+            try:
+                # Phase 0: Manifest Cleaning (optional, but good practice)
+                output.debug(f"Phase 0: Manifest Cleaning for {video_id}")
+                await run_clean_phase(config, [])
+                
+                # Validate manifest after cleaning
+                if not validate_manifest_integrity(manifest_path, output):
+                    output.error(f"Manifest corrupted after cleaning phase for {video_id}")
+                    failed_count += 1
+                    continue
+                
+                # Phase 1: Audio Analysis
+                output.debug(f"Phase 1: Audio Analysis for {video_id}")
+                await run_analysis_phase(config, [], [video_id])
+                
+                # Validate manifest after analysis
+                if not validate_manifest_integrity(manifest_path, output):
+                    output.error(f"Manifest corrupted after analysis phase for {video_id}")
+                    failed_count += 1
+                    continue
+                
+                # Phase 2: Content Filtering
+                output.debug(f"Phase 2: Content Filtering for {video_id}")
+                await run_filtering_phase(config, [], [video_id])
+                
+                # Validate manifest after filtering
+                if not validate_manifest_integrity(manifest_path, output):
+                    output.error(f"Manifest corrupted after filtering phase for {video_id}")
+                    failed_count += 1
+                    continue
+                
+                # Phase 3: File Upload
+                output.debug(f"Phase 3: File Upload for {video_id}")
+                upload_count = await run_upload_phase(config, [], [video_id])
+                
+                # Validate manifest after upload
+                if not validate_manifest_integrity(manifest_path, output):
+                    output.error(f"Manifest corrupted after upload phase for {video_id}")
+                    failed_count += 1
+                    continue
+                
+                processed_count += 1
+                output.info(f"Completed processing video {video_id} ({processed_count}/{len(videos_to_process)})")
+                
+            except Exception as e:
+                failed_count += 1
+                output.error(f"Failed to process video {video_id}: {e}")
+                output.error(f"Continuing with next video...")
+                # Continue processing other videos even if this one fails
+                continue
 
-        output.success(f"Individual processing complete: {processed_count} videos processed")
+        if failed_count > 0:
+            output.warning(f"Processing completed with {failed_count} failed videos out of {len(videos_to_process)} total")
+
+        output.success(f"Individual processing complete: {processed_count} videos processed successfully, {failed_count} failed")
 
         # Final Summary
         output.info("=== Workflow Complete ===")
@@ -128,6 +244,14 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
                 output.warning(f"Could not load final manifest for summary: {e}")
         else:
             output.warning("Manifest file not found for final summary")
+
+        # Clean up backup on successful completion
+        try:
+            if backup_path.exists():
+                backup_path.unlink()
+                output.debug(f"Removed manifest backup after successful completion")
+        except Exception as e:
+            output.warning(f"Failed to remove backup file: {e}")
 
         return True
 
@@ -228,15 +352,41 @@ def main() -> int:
         output.success("Configuration is valid")
         return 0
 
-    # Run workflow
+    # Track manifest path for potential restoration
+    manifest_path = config.output.final_audio_dir / "manifest.json"
+    backup_path = manifest_path.with_suffix(manifest_path.suffix + '.backup')
+
+    # Run workflow with interruption handling
     try:
         success = asyncio.run(run_analysis_filtering_upload_workflow(config, video_ids))
         return 0 if success else 1
     except KeyboardInterrupt:
         output.warning("Workflow interrupted by user")
+        # Restore manifest from backup if it exists
+        if backup_path.exists():
+            try:
+                import shutil
+                shutil.copy2(backup_path, manifest_path)
+                output.info(f"Manifest restored from backup: {backup_path}")
+                # Clean up backup
+                backup_path.unlink()
+                output.debug("Backup file cleaned up")
+            except Exception as e:
+                output.error(f"Failed to restore manifest from backup: {e}")
+                output.error("Manifest may be in an inconsistent state")
+        else:
+            output.warning("No backup found - manifest may be in an inconsistent state")
         return 130
     except Exception as e:
         output.error(f"Unexpected error: {e}")
+        # Also try to restore from backup on unexpected errors
+        if backup_path.exists():
+            try:
+                import shutil
+                shutil.copy2(backup_path, manifest_path)
+                output.info(f"Manifest restored from backup due to error: {backup_path}")
+            except Exception as restore_e:
+                output.error(f"Failed to restore manifest from backup: {restore_e}")
         return 1
 
 
