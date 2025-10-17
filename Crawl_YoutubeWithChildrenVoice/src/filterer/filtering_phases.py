@@ -242,11 +242,28 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
         seen_video_ids.add(video_id)
         unique_records.append(record)
 
-    # Update manifest
-    manifest_data['records'] = unique_records
+    # Update manifest - handle partial updates when video_ids is specified
+    if video_ids is not None:
+        # Create map of processed records
+        processed_records = {record['video_id']: record for record in unique_records}
+        
+        # Update all_records with processed versions
+        updated_records = []
+        for record in all_records:
+            video_id = record.get('video_id')
+            if video_id in processed_records:
+                updated_records.append(processed_records[video_id])
+            else:
+                updated_records.append(record)
+        
+        manifest_data['records'] = updated_records
+    else:
+        # Full update when processing all records
+        manifest_data['records'] = unique_records
 
-    # Recalculate total duration
-    total_duration = sum(record.get('duration_seconds', 0) for record in unique_records)
+    # Recalculate total duration from all records
+    all_current_records = manifest_data.get('records', [])
+    total_duration = sum(record.get('duration_seconds', 0) for record in all_current_records)
     manifest_data['total_duration_seconds'] = total_duration
 
     # Save updated manifest
@@ -254,7 +271,7 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
         file_manager = get_file_manager()
         file_manager.save_json(manifest_file, manifest_data)
         output.success(f"Local filtering completed: {files_moved} files moved, {entries_removed} entries removed, {duplicates_removed} manifest duplicates removed, {url_duplicates_removed} URL duplicates removed")
-        output.info(f"Final manifest: {len(unique_records)} entries, {total_duration:.1f}s total duration")
+        output.info(f"Final manifest: {len(all_current_records)} entries, {total_duration:.1f}s total duration")
     except Exception as e:
         output.error(f"Failed to save updated manifest after filtering: {e}")
         output.error(f"Manifest file: {manifest_file}")
