@@ -1,15 +1,9 @@
-#!/usr/bin/env python3
-"""
-Analysis-Filtering-Upload Script
-
-Runs only the analysis, filtering, and upload phases of the YouTube Children's Voice Crawler.
-This script processes existing audio files in the manifest and uploads classified children's voice files.
-"""
-
 import asyncio
 import sys
 import argparse
 import json
+import os
+import time
 from pathlib import Path
 from typing import Optional, List
 
@@ -32,6 +26,79 @@ except ImportError as e:
     print(f"Import error: {e}", file=sys.stderr)
     print("This script should be run from the project root directory", file=sys.stderr)
     sys.exit(1)
+
+
+class ManifestLock:
+    """Simple file-based locking for manifest access."""
+    
+    def __init__(self, manifest_path: Path):
+        self.manifest_path = manifest_path
+        self.lock_file = manifest_path.with_suffix(manifest_path.suffix + '.lock')
+        self.lock_timeout = 300  # 5 minutes timeout
+        self._locked = False
+    
+    def acquire(self) -> bool:
+        """Acquire lock on manifest file."""
+        start_time = time.time()
+        while time.time() - start_time < self.lock_timeout:
+            try:
+                # Try to create lock file exclusively
+                with open(self.lock_file, 'x', encoding='utf-8') as f:
+                    f.write(f"{os.getpid()}\n{time.time()}")
+                self._locked = True
+                return True
+            except FileExistsError:
+                # Lock file exists, check if it's stale
+                try:
+                    with open(self.lock_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        if len(lines) >= 2:
+                            pid = int(lines[0].strip())
+                            lock_time = float(lines[1].strip())
+                            
+                            # Check if process is still running
+                            try:
+                                os.kill(pid, 0)  # Signal 0 just checks if process exists
+                                # Process exists, wait
+                                time.sleep(1)
+                                continue
+                            except OSError:
+                                # Process doesn't exist, lock is stale
+                                pass
+                        
+                    # Remove stale lock
+                    try:
+                        self.lock_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                        
+                except Exception:
+                    # Can't read lock file, assume it's stale
+                    try:
+                        self.lock_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                    continue
+                    
+        return False
+    
+    def release(self):
+        """Release lock on manifest file."""
+        if self._locked:
+            try:
+                self.lock_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            self._locked = False
+    
+    def __enter__(self):
+        if not self.acquire():
+            raise RuntimeError(f"Failed to acquire lock on {self.manifest_path}")
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
 
 
 def validate_manifest_integrity(manifest_path: Path, output) -> bool:
@@ -120,152 +187,194 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
     try:
         output.info("=== Analysis-Filtering-Upload Workflow ===")
 
-        # Check if manifest exists
+        # Get manifest path from config
         manifest_path = config.output.final_audio_dir / "manifest.json"
-        if not manifest_path.exists():
-            output.error(f"Manifest file not found: {manifest_path}")
-            output.error("Please ensure audio files have been downloaded and processed first.")
-            return False
 
-        # Load manifest to get video IDs
+        # Acquire manifest lock to prevent concurrent access
+        manifest_lock = ManifestLock(manifest_path)
+        output.debug("Acquiring manifest lock...")
+        if not manifest_lock.acquire():
+            output.error("Failed to acquire manifest lock")
+            output.error("Another instance may be running. Please wait and try again.")
+            return False
+        output.debug("Manifest lock acquired successfully")
+
         try:
-            with open(manifest_path, 'r', encoding='utf-8') as f:
-                manifest_data = json.load(f)
-        except Exception as e:
-            output.error(f"Failed to load manifest: {e}")
-            return False
-
-        # Create backup of manifest before processing
-        backup_path = manifest_path.with_suffix(manifest_path.suffix + '.backup')
-        try:
-            import shutil
-            shutil.copy2(manifest_path, backup_path)
-            output.info(f"Created manifest backup: {backup_path}")
-        except Exception as e:
-            output.error(f"Failed to create manifest backup: {e}")
-            return False
-
-        # Determine which videos to process
-        all_records = manifest_data.get('records', [])
-        if video_ids is not None:
-            # Filter to specified video IDs that meet upload criteria
-            videos_to_process = [r for r in all_records 
-                               if r.get('video_id') in video_ids 
-                               and r.get('classified', False) == True
-                               and r.get('containing_children_voice', False) == True
-                               and r.get('uploaded', False) == False
-                               and r.get('file_available', False) == True]
-            if not videos_to_process:
-                output.warning(f"No eligible videos found matching the specified IDs: {video_ids}")
-                output.warning("Videos must be: classified, contain children's voice, not uploaded, and have available files")
-                return False
-            output.info(f"Processing {len(videos_to_process)} specified eligible videos")
-        else:
-            # Process all videos that meet upload criteria
-            videos_to_process = [r for r in all_records 
-                               if r.get('classified', False) == True
-                               and r.get('containing_children_voice', False) == True
-                               and r.get('uploaded', False) == False
-                               and r.get('file_available', False) == True]
-            output.info(f"Processing all {len(videos_to_process)} eligible videos individually")
-
-        # Process each video individually
-        processed_count = 0
-        failed_count = 0
-
-        for record in videos_to_process:
-            video_id = record.get('video_id')
-            if not video_id:
-                output.warning("Skipping record with missing video_id")
-                continue
-
-            output.info(f"Processing video: {video_id}")
-            
-            try:
-                # Clean phase before processing each video
-                output.debug(f"Clean phase for {video_id}")
-                await run_clean_phase(config, [])
-                
-                # Phase 1: Audio Analysis
-                output.debug(f"Phase 1: Audio Analysis for {video_id}")
-                await run_analysis_phase(config, [], [video_id])
-                
-                # Validate manifest after analysis
-                if not validate_manifest_integrity(manifest_path, output):
-                    output.error(f"Manifest corrupted after analysis phase for {video_id}")
-                    failed_count += 1
-                    continue
-                
-                # Phase 2: Content Filtering
-                output.debug(f"Phase 2: Content Filtering for {video_id}")
-                await run_filtering_phase(config, [], [video_id])
-                
-                # Validate manifest after filtering
-                if not validate_manifest_integrity(manifest_path, output):
-                    output.error(f"Manifest corrupted after filtering phase for {video_id}")
-                    failed_count += 1
-                    continue
-                
-                # Phase 3: File Upload
-                output.debug(f"Phase 3: File Upload for {video_id}")
-                upload_count = await run_upload_phase(config, [], [video_id])
-                
-                # Validate manifest after upload
-                if not validate_manifest_integrity(manifest_path, output):
-                    output.error(f"Manifest corrupted after upload phase for {video_id}")
-                    failed_count += 1
-                    continue
-                
-                processed_count += 1
-                output.info(f"Completed processing video {video_id} ({processed_count}/{len(videos_to_process)})")
-
-            except Exception as e:
-                failed_count += 1
-                output.error(f"Failed to process video {video_id}: {e}")
-                output.error(f"Continuing with next video...")
-                # Continue processing other videos even if this one fails
-                continue
-
-        if failed_count > 0:
-            output.warning(f"Processing completed with {failed_count} failed videos out of {len(videos_to_process)} total")
-
-        output.success(f"Individual processing complete: {processed_count} videos processed successfully, {failed_count} failed")
-
-        # Final Summary
-        output.info("=== Workflow Complete ===")
-
-        # Load final manifest for summary
-        if manifest_path.exists():
+            # Load manifest to get video IDs
             try:
                 with open(manifest_path, 'r', encoding='utf-8') as f:
-                    final_manifest_data = json.load(f)
-
-                final_count = len(final_manifest_data.get('records', []))
-                total_duration = final_manifest_data.get('total_duration_seconds', 0)
-
-                output.info(f"Final collection: {final_count} children's voice files")
-                output.info(f"Total duration: {total_duration:.1f} seconds")
+                    manifest_data = json.load(f)
             except Exception as e:
-                output.warning(f"Could not load final manifest for summary: {e}")
-        else:
-            output.warning("Manifest file not found for final summary")
+                output.error(f"Failed to load manifest: {e}")
+                return False
 
-        # Clean up backup on successful completion
-        try:
-            if backup_path.exists():
-                backup_path.unlink()
-                output.debug(f"Removed manifest backup after successful completion")
-        except Exception as e:
-            output.warning(f"Failed to remove backup file: {e}")
+            # Create backup of manifest before processing
+            backup_path = manifest_path.with_suffix(manifest_path.suffix + '.backup')
+            try:
+                import shutil
+                shutil.copy2(manifest_path, backup_path)
+                output.info(f"Created manifest backup: {backup_path}")
+            except Exception as e:
+                output.error(f"Failed to create manifest backup: {e}")
+                return False
 
-        return True
+            # Determine which videos to process
+            # Reload manifest to get fresh data (phases may have modified it)
+            try:
+                with open(manifest_path, 'r', encoding='utf-8') as f:
+                    manifest_data = json.load(f)
+                output.debug("Reloaded manifest data to check for eligible videos")
+            except Exception as e:
+                output.error(f"Failed to reload manifest for video filtering: {e}")
+                return False
+                
+            all_records = manifest_data.get('records', [])
+            if video_ids is not None:
+                # Filter to specified video IDs that meet upload criteria
+                videos_to_process = [r for r in all_records 
+                                   if r.get('video_id') in video_ids 
+                                   and r.get('classified', False) == True
+                                   and r.get('containing_children_voice', False) == True
+                                   and r.get('uploaded', False) == False
+                                   and r.get('file_available', False) == True]
+                if not videos_to_process:
+                    output.warning(f"No eligible videos found matching the specified IDs: {video_ids}")
+                    output.warning("Videos must be: classified, contain children's voice, not uploaded, and have available files")
+                    return False
+                output.info(f"Processing {len(videos_to_process)} specified eligible videos")
+            else:
+                # Process all videos that meet upload criteria
+                videos_to_process = [r for r in all_records 
+                                   if r.get('classified', False) == True
+                                   and r.get('containing_children_voice', False) == True
+                                   and r.get('uploaded', False) == False
+                                   and r.get('file_available', False) == True]
+                output.info(f"Processing all {len(videos_to_process)} eligible videos individually")
+
+            # Process each video individually
+            processed_count = 0
+            failed_count = 0
+
+            for record in videos_to_process:
+                video_id = record.get('video_id')
+                if not video_id:
+                    output.warning("Skipping record with missing video_id")
+                    continue
+
+                output.info(f"Processing video: {video_id}")
+                
+                try:
+                    # Clean phase before processing each video
+                    output.debug(f"Clean phase for {video_id}")
+                    await run_clean_phase(config, [])
+                    
+                    # Reload manifest after clean phase to get fresh data
+                    try:
+                        with open(manifest_path, 'r', encoding='utf-8') as f:
+                            current_manifest = json.load(f)
+                        # Check if this video is still eligible after clean phase
+                        video_record = next((r for r in current_manifest.get('records', []) 
+                                           if r.get('video_id') == video_id), None)
+                        if not video_record:
+                            output.warning(f"Video {video_id} no longer exists in manifest after clean phase")
+                            failed_count += 1
+                            continue
+                        if not (video_record.get('classified', False) and
+                                video_record.get('containing_children_voice', False) and
+                                not video_record.get('uploaded', False) and
+                                video_record.get('file_available', False)):
+                            output.warning(f"Video {video_id} no longer eligible after clean phase")
+                            failed_count += 1
+                            continue
+                    except Exception as e:
+                        output.error(f"Failed to reload manifest after clean phase for {video_id}: {e}")
+                        failed_count += 1
+                        continue
+                    
+                    # Phase 1: Audio Analysis
+                    output.debug(f"Phase 1: Audio Analysis for {video_id}")
+                    await run_analysis_phase(config, [], [video_id])
+                    
+                    # Validate manifest after analysis
+                    if not validate_manifest_integrity(manifest_path, output):
+                        output.error(f"Manifest corrupted after analysis phase for {video_id}")
+                        failed_count += 1
+                        continue
+                    
+                    # Phase 2: Content Filtering
+                    output.debug(f"Phase 2: Content Filtering for {video_id}")
+                    await run_filtering_phase(config, [video_id])
+                    
+                    # Validate manifest after filtering
+                    if not validate_manifest_integrity(manifest_path, output):
+                        output.error(f"Manifest corrupted after filtering phase for {video_id}")
+                        failed_count += 1
+                        continue
+                    
+                    # Phase 3: File Upload
+                    output.debug(f"Phase 3: File Upload for {video_id}")
+                    upload_count = await run_upload_phase(config, [], [video_id])
+                    
+                    # Validate manifest after upload
+                    if not validate_manifest_integrity(manifest_path, output):
+                        output.error(f"Manifest corrupted after upload phase for {video_id}")
+                        failed_count += 1
+                        continue
+                    
+                    processed_count += 1
+                    output.info(f"Completed processing video {video_id} ({processed_count}/{len(videos_to_process)})")
+
+                except Exception as e:
+                    failed_count += 1
+                    output.error(f"Failed to process video {video_id}: {e}")
+                    output.error(f"Continuing with next video...")
+                    # Continue processing other videos even if this one fails
+                    continue
+
+            if failed_count > 0:
+                output.warning(f"Processing completed with {failed_count} failed videos out of {len(videos_to_process)} total")
+
+            output.success(f"Individual processing complete: {processed_count} videos processed successfully, {failed_count} failed")
+
+            # Final Summary
+            output.info("=== Workflow Complete ===")
+
+            # Load final manifest for summary
+            if manifest_path.exists():
+                try:
+                    with open(manifest_path, 'r', encoding='utf-8') as f:
+                        final_manifest_data = json.load(f)
+
+                    final_count = len(final_manifest_data.get('records', []))
+                    total_duration = final_manifest_data.get('total_duration_seconds', 0)
+
+                    output.info(f"Final collection: {final_count} children's voice files")
+                    output.info(f"Total duration: {total_duration:.1f} seconds")
+                except Exception as e:
+                    output.warning(f"Could not load final manifest for summary: {e}")
+            else:
+                output.warning("Manifest file not found for final summary")
+
+            # Clean up backup on successful completion
+            try:
+                if backup_path.exists():
+                    backup_path.unlink()
+                    output.debug(f"Removed manifest backup after successful completion")
+            except Exception as e:
+                output.warning(f"Failed to remove backup file: {e}")
+
+            return True
+
+        finally:
+            # Always release the lock
+            manifest_lock.release()
+            output.debug("Manifest lock released")
 
     except Exception as e:
         output.error(f"Workflow failed: {e}")
         import traceback
         output.error(f"Full traceback: {traceback.format_exc()}")
         return False
-
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""

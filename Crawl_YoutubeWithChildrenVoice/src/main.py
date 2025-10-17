@@ -15,16 +15,7 @@ import tempfile
 import os
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime
 from contextlib import asynccontextmanager
-
-# Handle imports for both direct execution and module execution
-if __name__ == "__main__" and __package__ is None:
-    # Script is being run directly (not as a module)
-    # Add the parent directory to Python path for relative imports
-    import os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = "src"
 
 # Handle imports for both direct execution and module execution
 if __name__ == "__main__" and __package__ is None:
@@ -36,13 +27,11 @@ if __name__ == "__main__" and __package__ is None:
 
 try:
     from .config import load_config, CrawlerConfig  # type: ignore
-    from .crawler import SearchEngine, run_search_phase  # type: ignore
-    from .downloader import AudioDownloader, run_download_phase_from_urls  # type: ignore
-    from .models import VideoMetadata, VideoSource  # type: ignore
-    from .utils import get_output_manager, get_progress_tracker, get_file_manager  # type: ignore
-    from .crawler.youtube_api import YouTubeAPIClient  # type: ignore
-    from .analyzer.analysis_phases import run_analysis_phase, run_local_analysis  # type: ignore
-    from .filterer.filtering_phases import run_filtering_phase, run_local_filtering  # type: ignore
+    from .crawler import run_search_phase  # type: ignore
+    from .downloader import run_download_phase_from_urls  # type: ignore
+    from .utils import get_output_manager, get_file_manager  # type: ignore
+    from .analyzer.analysis_phases import run_analysis_phase  # type: ignore
+    from .filterer.filtering_phases import run_filtering_phase  # type: ignore
     from .cleaner.clean_phases import run_clean_phase  # type: ignore
     from .uploader.upload_phases import run_upload_phase  # type: ignore
 except ImportError as e:
@@ -207,7 +196,7 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
         True if workflow completed successfully
     """
     output = get_output_manager()
-    progress = get_progress_tracker()
+    # progress = get_progress_tracker()  # Unused - removed to clean up imports
 
     # Recover from any corrupted files first
     recover_corrupted_files(config, output)

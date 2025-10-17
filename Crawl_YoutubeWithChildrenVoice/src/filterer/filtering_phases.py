@@ -15,13 +15,12 @@ from ..models import VideoMetadata
 from ..utils import get_output_manager, get_file_manager
 
 
-async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata], video_ids: Optional[List[str]] = None) -> List[VideoMetadata]:
+async def run_filtering_phase(config: CrawlerConfig, video_ids: Optional[List[str]] = None) -> List[VideoMetadata]:
     """
     Run the content filtering phase.
 
     Args:
         config: Crawler configuration
-        videos: Videos to filter
         video_ids: Optional list of specific video IDs to filter. If None, filters all videos.
 
     Returns:
@@ -34,7 +33,7 @@ async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]
         manifest_file = config.output.final_audio_dir / "manifest.json"
         if not manifest_file.exists():
             output.warning("Manifest file not found - skipping filtering phase")
-            return videos
+            return []
 
         try:
             with open(manifest_file, 'r', encoding='utf-8') as f:
@@ -43,14 +42,14 @@ async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]
         except json.JSONDecodeError as e:
             output.error(f"Failed to parse manifest JSON at {manifest_file}: {e}")
             output.error(f"Manifest file may be corrupted. Please check the file contents.")
-            return videos
+            return []
         except IOError as e:
             output.error(f"Failed to read manifest file at {manifest_file}: {e}")
             output.error(f"Check file permissions and disk space.")
-            return videos
+            return []
         except Exception as e:
             output.error(f"Unexpected error loading manifest at {manifest_file}: {e}")
-            return videos
+            return []
 
         # Filterer always runs locally for file operations
         output.info("Running content filtering locally")
@@ -60,14 +59,14 @@ async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]
             output.error(f"Local filtering failed: {e}")
             import traceback
             output.error(f"Full traceback: {traceback.format_exc()}")
-            return videos
+            return []
 
     except Exception as e:
         output.error(f"Filtering phase failed: {e}")
         output.error(f"Config output dir: {config.output.final_audio_dir}")
         import traceback
         output.error(f"Full traceback: {traceback.format_exc()}")
-        return videos
+        return []
 
 
 async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manifest_file: Path, video_ids: Optional[List[str]] = None) -> List[VideoMetadata]:
