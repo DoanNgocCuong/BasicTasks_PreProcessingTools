@@ -260,7 +260,7 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
 
             # Phase 4: Content Filtering
             output.info("Batch Phase 4: Content Filtering")
-            await run_filtering_phase(config, [])
+            await run_filtering_phase(config)
             output.success("Batch Phase 4 complete: Content filtering finished")
             await run_clean_phase(config, [])
             create_manifest_backup("filtering")

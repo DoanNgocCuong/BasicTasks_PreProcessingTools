@@ -196,9 +196,8 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
 
             # Check for duplicates
             if target_path.exists():
-                output.warning(f"Duplicate file detected: {target_path} - skipping")
-                entries_removed += 1
-                continue
+                target_path.unlink()  # Remove existing file to allow overwrite
+                output.debug(f"Removed existing file at target: {target_path}")
 
             # Move file
             try:

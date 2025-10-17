@@ -125,7 +125,7 @@ def main() -> int:
             asyncio.run(run_filtering_phase(config, video_ids))
         else:
             output.info("Running filtering phase for all unfiltered videos")
-            asyncio.run(run_filtering_phase(config, []))
+            asyncio.run(run_filtering_phase(config))
         output.success("Filtering phase completed")
         return 0
     except KeyboardInterrupt:
