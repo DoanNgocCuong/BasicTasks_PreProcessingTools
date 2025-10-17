@@ -148,16 +148,26 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
         # Determine which videos to process
         all_records = manifest_data.get('records', [])
         if video_ids is not None:
-            # Filter to specified video IDs that haven't been uploaded
-            videos_to_process = [r for r in all_records if r.get('video_id') in video_ids and not r.get('uploaded', False)]
+            # Filter to specified video IDs that meet upload criteria
+            videos_to_process = [r for r in all_records 
+                               if r.get('video_id') in video_ids 
+                               and r.get('classified', False) == True
+                               and r.get('containing_children_voice', False) == True
+                               and r.get('uploaded', False) == False
+                               and r.get('file_available', False) == True]
             if not videos_to_process:
-                output.warning(f"No unuploaded videos found matching the specified IDs: {video_ids}")
+                output.warning(f"No eligible videos found matching the specified IDs: {video_ids}")
+                output.warning("Videos must be: classified, contain children's voice, not uploaded, and have available files")
                 return False
-            output.info(f"Processing {len(videos_to_process)} specified unuploaded videos")
+            output.info(f"Processing {len(videos_to_process)} specified eligible videos")
         else:
-            # Process all videos that haven't been uploaded
-            videos_to_process = [r for r in all_records if not r.get('uploaded', False)]
-            output.info(f"Processing all {len(videos_to_process)} unuploaded videos individually")
+            # Process all videos that meet upload criteria
+            videos_to_process = [r for r in all_records 
+                               if r.get('classified', False) == True
+                               and r.get('containing_children_voice', False) == True
+                               and r.get('uploaded', False) == False
+                               and r.get('file_available', False) == True]
+            output.info(f"Processing all {len(videos_to_process)} eligible videos individually")
 
         # Process each video individually
         processed_count = 0
