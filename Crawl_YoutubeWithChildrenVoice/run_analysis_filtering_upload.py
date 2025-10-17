@@ -172,6 +172,10 @@ async def run_analysis_filtering_upload_workflow(config: CrawlerConfig, video_id
             output.info(f"Processing video: {video_id}")
             
             try:
+                # Clean phase before processing each video
+                output.debug(f"Clean phase for {video_id}")
+                await run_clean_phase(config, [])
+                
                 # Phase 1: Audio Analysis
                 output.debug(f"Phase 1: Audio Analysis for {video_id}")
                 await run_analysis_phase(config, [], [video_id])
