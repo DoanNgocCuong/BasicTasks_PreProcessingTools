@@ -34,7 +34,7 @@ class FileManager:
         self.output = get_output_manager()
 
         # Define output directories based on config
-        from config import get_config
+        from ..config import get_config
         config = get_config()
         self.url_outputs_dir = config.output.url_outputs_dir
         self.audio_outputs_dir = config.output.audio_outputs_dir
@@ -531,7 +531,7 @@ def get_file_manager() -> FileManager:
     global _file_manager
     if _file_manager is None:
         # Get config to determine base directory
-        from config import get_config
+        from ..config import get_config
         config = get_config()
         _file_manager = FileManager(config.output.base_dir)
     return _file_manager
