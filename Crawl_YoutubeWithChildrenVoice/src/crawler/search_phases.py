@@ -121,6 +121,13 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
 
             # Take the first video for analysis
             first_video = videos[0]
+            video_url = first_video.url
+
+            # Check if this video is already discovered - skip entire query if so
+            if video_url in existing_urls:
+                output.info(f"First video for query '{query}' already discovered ({first_video.video_id}), skipping query")
+                continue
+
             output.info(f"Analyzing first video: {first_video.video_id} - {first_video.title}")
 
             # Download audio for analysis
