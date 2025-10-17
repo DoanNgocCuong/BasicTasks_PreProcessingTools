@@ -235,7 +235,7 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
 
             # Phase 2: Audio Download
             output.info("Batch Phase 2: Audio Download")
-            downloaded_count = await run_download_phase_from_urls(config, max_count)
+            downloaded_count = await run_download_phase_from_urls(config, None)  # Process all URLs so far
             output.success(f"Batch Phase 2 complete: {downloaded_count} audios downloaded")
             processed_counter[0] += downloaded_count
             await run_clean_phase(config, [])
