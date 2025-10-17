@@ -8,7 +8,7 @@ This module contains the implementation of the audio analysis phase.
 
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 from ..config import CrawlerConfig
@@ -45,13 +45,14 @@ def migrate_legacy_classification_fields(record: dict) -> dict:
     return record
 
 
-async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata]) -> List[VideoMetadata]:
+async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata], video_ids: Optional[List[str]] = None) -> List[VideoMetadata]:
     """
     Run the audio analysis phase.
 
     Args:
         config: Crawler configuration
         videos: Videos to analyze
+        video_ids: Optional list of specific video IDs to analyze. If None, analyzes all unanalyzed videos.
 
     Returns:
         List of videos with analysis results
@@ -84,109 +85,15 @@ async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata])
             output.error(f"Unexpected error loading manifest at {manifest_file}: {e}")
             return videos
 
-        # Check if we should run locally or use API
-        run_locally = not config.analysis_api.enabled or config.analysis_api.server_url == "local"
-
-        if run_locally:
-            output.info("Running audio analysis locally")
-            try:
-                return await run_local_analysis(config, manifest_data, manifest_file)
-            except Exception as e:
-                output.error(f"Local analysis failed: {e}")
-                import traceback
-                output.error(f"Full traceback: {traceback.format_exc()}")
-                return videos
-        else:
-            output.info("Running audio analysis via API")
-            # API-based analysis
-            try:
-                from .api_client import AnalysisAPIClient
-                api_client_available = True
-            except ImportError as e:
-                output.warning(f"Analysis API client not available: {e} - falling back to local analysis")
-                api_client_available = False
-
-            if not api_client_available:
-                output.warning("Analysis API client not available - falling back to local analysis")
-                try:
-                    return await run_local_analysis(config, manifest_data, manifest_file)
-                except Exception as e:
-                    output.error(f"Fallback local analysis failed: {e}")
-                    import traceback
-                    output.error(f"Full traceback: {traceback.format_exc()}")
-                    return videos
-
-            try:
-                from .api_client import AnalysisAPIClient
-                async with AnalysisAPIClient(config.analysis_api) as client:
-                    # Convert manifest records to VideoMetadata objects for API
-                    api_videos = []
-                    api_audio_paths = []
-                    for record in manifest_data.get('records', []):
-                        if not record.get('classified', False):
-                            video_id = record.get('video_id')
-                            output_path_str = record.get('output_path')
-                            
-                            # Skip records with missing required fields
-                            if not video_id or not output_path_str:
-                                output.warning(f"Skipping API analysis for record with missing video_id or output_path: video_id={video_id}, output_path={output_path_str}")
-                                continue
-                                
-                            # Create minimal VideoMetadata for unclassified records
-                            video = VideoMetadata(
-                                video_id=video_id,
-                                title=record.get('title', f"Video {video_id}"),
-                                channel_id='',
-                                channel_title='',
-                                description='',
-                                source=VideoSource.MANUAL
-                            )
-                            api_videos.append(video)
-                            api_audio_paths.append(output_path_str)
-
-                    if api_videos:
-                        try:
-                            results = await client.analyze_videos(api_videos)
-                            output.debug(f"API analysis returned {len(results)} results")
-                        except Exception as e:
-                            output.error(f"API analysis request failed: {e}")
-                            output.error(f"API server URL: {config.analysis_api.server_url}")
-                            import traceback
-                            output.error(f"Full traceback: {traceback.format_exc()}")
-                            return videos
-
-                        # Update manifest with API results
-                        try:
-                            for result in results:
-                                for record in manifest_data.get('records', []):
-                                    if record['video_id'] == result.video_id:
-                                        record['classified'] = True
-                                        record['containing_children_voice'] = result.is_child_voice
-                                        record['voice_analysis_confidence'] = result.confidence
-                                        record['classification_timestamp'] = datetime.now().isoformat() + "Z"
-                                        break
-
-                            # Save updated manifest
-                            file_manager = get_file_manager()
-                            file_manager.save_json(manifest_file, manifest_data)
-
-                            output.success(f"API analysis completed: {len(results)} videos analyzed")
-                        except Exception as e:
-                            output.error(f"Failed to update manifest with API results: {e}")
-                            output.error(f"Manifest file: {manifest_file}")
-                            import traceback
-                            output.error(f"Full traceback: {traceback.format_exc()}")
-                            return videos
-                    else:
-                        output.info("No unclassified videos found for API analysis")
-
-                return videos
-            except Exception as e:
-                output.error(f"API analysis setup failed: {e}")
-                output.error(f"Analysis API config: {config.analysis_api}")
-                import traceback
-                output.error(f"Full traceback: {traceback.format_exc()}")
-                return videos
+        # Run audio analysis locally
+        output.info("Running audio analysis locally")
+        try:
+            return await run_local_analysis(config, manifest_data, manifest_file, video_ids)
+        except Exception as e:
+            output.error(f"Local analysis failed: {e}")
+            import traceback
+            output.error(f"Full traceback: {traceback.format_exc()}")
+            return videos
 
     except Exception as e:
         output.error(f"Analysis phase failed: {e}")
@@ -196,7 +103,7 @@ async def run_analysis_phase(config: CrawlerConfig, videos: List[VideoMetadata])
         return videos
 
 
-async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifest_file: Path) -> List[VideoMetadata]:
+async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifest_file: Path, video_ids: Optional[List[str]] = None) -> List[VideoMetadata]:
     """
     Run audio analysis locally based on manifest data.
 
@@ -204,6 +111,7 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
         config: Crawler configuration
         manifest_data: Manifest data
         manifest_file: Path to manifest file
+        video_ids: Optional list of specific video IDs to analyze. If None, analyzes all unanalyzed videos.
 
     Returns:
         List of videos with analysis results (empty for compatibility)
@@ -240,6 +148,12 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
     analyzed_count = 0
 
     for record in manifest_data.get('records', []):
+        video_id = record.get('video_id')
+        
+        # If video_ids is specified, only process those videos
+        if video_ids is not None and video_id not in video_ids:
+            continue
+            
         classified = record.get('classified', False)
         classification_timestamp = record.get('classification_timestamp')
         containing_children_voice = record.get('containing_children_voice')
@@ -261,7 +175,6 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
         if has_incomplete_classification:
             output.info(f"Re-analyzing {record.get('video_id')} due to incomplete classification data (timestamp: {classification_timestamp}, children_voice: {containing_children_voice})")
 
-        video_id = record.get('video_id')
         output_path_str = record.get('output_path')
 
         # Skip records with missing required fields

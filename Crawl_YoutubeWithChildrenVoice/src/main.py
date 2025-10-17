@@ -395,8 +395,7 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py                          # Run offline (local analysis & filtering)
-  python main.py --online                  # Run online (use API servers)
+  python main.py                          # Run with default configuration
   python main.py --config custom.json     # Use custom config file
   python main.py --queries kids,songs     # Override queries
   python main.py --max-videos 100         # Limit total videos
@@ -447,12 +446,6 @@ Examples:
     )
 
     parser.add_argument(
-        "--online",
-        action="store_true",
-        help="Enable online mode (use API server for analysis instead of local processing)"
-    )
-
-    parser.add_argument(
         "--max-processed-urls",
         type=int,
         help="Maximum number of URLs to process through phases 2-5 (default: unlimited)"
@@ -475,7 +468,6 @@ def main() -> int:
                 "max_videos": args.max_videos,
                 "output_dir": args.output_dir,
                 "verbose": args.verbose,
-                "online": args.online,
                 "max_processed_urls": args.max_processed_urls
             }
         )

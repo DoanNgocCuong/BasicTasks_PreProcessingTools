@@ -18,13 +18,14 @@ from .client import main as upload_main
 _current_upload_folder_id: Optional[str] = None
 
 
-async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List[str]] = None) -> int:
+async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List[str]] = None, video_ids: Optional[List[str]] = None) -> int:
     """
     Run the upload phase: upload classified children voice files to the server.
 
     Args:
         config: Crawler configuration
         processed_files: List of processed file paths (unused, kept for consistency)
+        video_ids: Optional list of specific video IDs to upload. If None, uploads all videos.
 
     Returns:
         Number of files uploaded
@@ -57,29 +58,73 @@ async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List
             output.error(f"Unexpected error loading manifest at {manifest_path}: {e}")
             return 0
 
+        # Filter records if video_ids specified
+        upload_manifest_path = manifest_path
+        temp_manifest_path = None
+        
+        if video_ids is not None:
+            original_records = manifest_data.get('records', [])
+            filtered_records = [r for r in original_records if r.get('video_id') in video_ids]
+            output.info(f"Uploading {len(filtered_records)} specific videos from {len(original_records)} total records")
+            
+            if not filtered_records:
+                output.info("No matching videos found for upload")
+                return 0
+                
+            # Create temporary manifest with filtered records
+            temp_manifest_data = manifest_data.copy()
+            temp_manifest_data['records'] = filtered_records
+            temp_manifest_path = manifest_path.with_suffix('.temp.json')
+            
+            try:
+                with open(temp_manifest_path, 'w', encoding='utf-8') as f:
+                    json.dump(temp_manifest_data, f, indent=2, ensure_ascii=False)
+                upload_manifest_path = temp_manifest_path
+            except Exception as e:
+                output.error(f"Failed to create temporary manifest: {e}")
+                return 0
+        else:
+            output.info(f"Uploading all {len(manifest_data.get('records', []))} records")
+
         # Call the upload client main function
         try:
             global _current_upload_folder_id
             if _current_upload_folder_id is None:
                 # Start a new upload session for this run
-                _current_upload_folder_id = upload_main(str(manifest_path))
+                _current_upload_folder_id = upload_main(str(upload_manifest_path))
                 if _current_upload_folder_id:
                     output.success(f"Phase 5 complete: Started new upload session with folder {_current_upload_folder_id}")
                 else:
                     output.warning("Phase 5: No uploads needed, no folder created")
             else:
                 # Reuse existing folder for this run
-                result = upload_main(str(manifest_path), _current_upload_folder_id)
+                result = upload_main(str(upload_manifest_path), _current_upload_folder_id)
                 output.success(f"Phase 5 complete: Used existing upload folder {_current_upload_folder_id}")
+            
+            # Clean up temporary manifest if created
+            if temp_manifest_path is not None:
+                try:
+                    temp_manifest_path.unlink(missing_ok=True)
+                except Exception as e:
+                    output.warning(f"Failed to clean up temporary manifest: {e}")
+            
             return 1  # Placeholder, actual count could be returned from main
         except Exception as e:
             output.error(f"Upload client failed: {e}")
-            output.error(f"Manifest path: {manifest_path}")
-            output.error(f"Manifest exists: {manifest_path.exists()}")
-            if manifest_path.exists():
-                output.error(f"Manifest size: {manifest_path.stat().st_size} bytes")
+            output.error(f"Manifest path: {upload_manifest_path}")
+            output.error(f"Manifest exists: {upload_manifest_path.exists()}")
+            if upload_manifest_path.exists():
+                output.error(f"Manifest size: {upload_manifest_path.stat().st_size} bytes")
             import traceback
             output.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Clean up temporary manifest on error
+            if temp_manifest_path is not None:
+                try:
+                    temp_manifest_path.unlink(missing_ok=True)
+                except Exception as cleanup_error:
+                    output.warning(f"Failed to clean up temporary manifest after error: {cleanup_error}")
+            
             return 0
     except Exception as e:
         output.error(f"Upload phase failed: {e}")

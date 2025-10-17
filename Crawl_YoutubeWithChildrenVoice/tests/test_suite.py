@@ -26,7 +26,6 @@ from models import VideoMetadata, VideoSource  # type: ignore
 # from downloader.audio_downloader import AudioDownloader
 # from analyzer.voice_classifier import VoiceClassifier
 # from analyzer.language_detector import LanguageDetector
-# from analyzer.api_client import AnalysisAPIClient
 
 
 class TestCrawlerConfig:
@@ -123,12 +122,6 @@ class TestVoiceClassifier:
 
 class TestLanguageDetector:
     """Test language detector."""
-    # Skip this test class due to import issues
-    pass
-
-
-class TestAnalysisAPIClient:
-    """Test analysis API client."""
     # Skip this test class due to import issues
     pass
 

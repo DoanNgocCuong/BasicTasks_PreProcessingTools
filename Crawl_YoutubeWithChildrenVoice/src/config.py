@@ -119,15 +119,6 @@ class AnalysisConfig:
 
 
 @dataclass
-class AnalysisAPIConfig:
-    """Configuration for the analysis API."""
-    enabled: bool = False  # Default to offline/local mode
-    server_url: str = "http://localhost:8002"
-    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
-    max_retries: int = DEFAULT_MAX_RETRIES
-
-
-@dataclass
 class CleanConfig:
     """Configuration for manifest cleaning."""
     enabled: bool = True
@@ -174,7 +165,6 @@ class CrawlerConfig:
     search: SearchConfig = field(default_factory=SearchConfig)
     download: DownloadConfig = field(default_factory=DownloadConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
-    analysis_api: AnalysisAPIConfig = field(default_factory=AnalysisAPIConfig)
     clean: CleanConfig = field(default_factory=CleanConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -254,10 +244,6 @@ class CrawlerConfig:
         if child_threshold := os.getenv('CHILD_THRESHOLD'):
             config.analysis.child_voice_threshold = float(child_threshold)
 
-        # Filterer API
-        if filterer_url := os.getenv('ANALYSIS_API_URL'):
-            config.analysis_api.server_url = filterer_url
-
         # Logging
         config.logging.debug_mode = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
 
@@ -289,10 +275,6 @@ class CrawlerConfig:
         if 'analysis' in data:
             analysis_data = data['analysis']
             config.analysis = AnalysisConfig(**analysis_data)
-
-        if 'analysis_api' in data:
-            analysis_api_data = data['analysis_api']
-            config.analysis_api = AnalysisAPIConfig(**analysis_api_data)
 
         if 'clean' in data:
             clean_data = data['clean']
@@ -347,10 +329,6 @@ class CrawlerConfig:
 
         if not (0 <= self.analysis.child_voice_threshold <= 1):
             errors.append("Child voice threshold must be between 0 and 1")
-
-        # Check analysis API
-        if self.analysis_api.enabled and not self.analysis_api.server_url:
-            errors.append("Analysis API enabled but no server URL configured")
 
         return errors
 
@@ -409,7 +387,7 @@ def load_config(
         if config_path.exists():
             file_config = CrawlerConfig.from_json_file(config_path)
             # Manually merge - copy attributes
-            for attr in ['youtube_api', 'search', 'download', 'analysis', 'analysis_api', 'output', 'logging']:
+            for attr in ['youtube_api', 'search', 'download', 'analysis', 'output', 'logging']:
                 if hasattr(file_config, attr):
                     setattr(config, attr, getattr(file_config, attr))
         else:
@@ -432,12 +410,6 @@ def load_config(
 
     if cli_overrides.get("verbose"):
         config.logging.debug_mode = cli_overrides["verbose"]
-
-    if cli_overrides.get("online"):
-        # Enable online mode - use API servers for analysis
-        config.analysis_api.enabled = True
-        # Optionally change server URL if needed for online mode
-        # config.analysis_api.server_url = "https://api.example.com"  # Uncomment if needed
 
     if cli_overrides.get("max_processed_urls"):
         config.max_processed_urls = cli_overrides["max_processed_urls"]

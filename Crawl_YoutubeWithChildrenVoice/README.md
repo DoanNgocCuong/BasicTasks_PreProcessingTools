@@ -5,6 +5,29 @@
 - **Refactoring (October 2025)**: Improved import handling in main.py to use direct imports from analysis and filtering modules, resolving Pylance type checking issues.
 - **Voice Classifier Fixes**: Fixed unbound variable issues in analysis_phases.py by properly handling optional imports and adding null checks.
 - **Error Resolution**: Resolved multiple Pylance errors related to awaitable objects and missing function arguments.
+- **Analysis-Filtering-Upload Script**: Added `run_analysis_filtering_upload.py` for processing existing audio files through analysis, filtering, and upload phases only.
+
+## Quick Start Scripts
+
+### Analysis-Filtering-Upload Script (`run_analysis_filtering_upload.py`)
+
+A standalone script for processing existing audio files through the analysis, filtering, and upload phases:
+
+```bash
+# Run with default configuration
+python run_analysis_filtering_upload.py
+
+# Use custom config file
+python run_analysis_filtering_upload.py --config custom.json
+
+# Enable verbose logging
+python run_analysis_filtering_upload.py --verbose
+
+# Validate configuration without running
+python run_analysis_filtering_upload.py --dry-run
+```
+
+This script is useful when you have already downloaded audio files and just need to analyze them for children's voices, filter the results, and upload the classified files to your server.
 
 ## Core System Functionality
 

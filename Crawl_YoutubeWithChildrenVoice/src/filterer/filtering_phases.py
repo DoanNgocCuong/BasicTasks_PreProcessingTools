@@ -8,20 +8,21 @@ This module contains the implementation of the content filtering phase.
 
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from ..config import CrawlerConfig
 from ..models import VideoMetadata
 from ..utils import get_output_manager, get_file_manager
 
 
-async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]) -> List[VideoMetadata]:
+async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata], video_ids: Optional[List[str]] = None) -> List[VideoMetadata]:
     """
     Run the content filtering phase.
 
     Args:
         config: Crawler configuration
         videos: Videos to filter
+        video_ids: Optional list of specific video IDs to filter. If None, filters all videos.
 
     Returns:
         List of videos that passed filtering
@@ -54,7 +55,7 @@ async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]
         # Filterer always runs locally for file operations
         output.info("Running content filtering locally")
         try:
-            return await run_local_filtering(config, manifest_data, manifest_file)
+            return await run_local_filtering(config, manifest_data, manifest_file, video_ids)
         except Exception as e:
             output.error(f"Local filtering failed: {e}")
             import traceback
@@ -69,7 +70,7 @@ async def run_filtering_phase(config: CrawlerConfig, videos: List[VideoMetadata]
         return videos
 
 
-async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manifest_file: Path) -> List[VideoMetadata]:
+async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manifest_file: Path, video_ids: Optional[List[str]] = None) -> List[VideoMetadata]:
     """
     Run content filtering locally based on manifest data.
 
@@ -77,6 +78,7 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
         config: Crawler configuration
         manifest_data: Manifest data
         manifest_file: Path to manifest file
+        video_ids: Optional list of specific video IDs to filter. If None, filters all videos.
 
     Returns:
         List of videos that passed filtering
@@ -85,6 +87,17 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
     records_to_keep = []
     files_moved = 0
     entries_removed = 0
+
+    # Get records to process
+    all_records = manifest_data.get('records', [])
+    if video_ids is not None:
+        # Filter to only specified video IDs
+        records_to_process = [r for r in all_records if r.get('video_id') in video_ids]
+        output.info(f"Filtering {len(records_to_process)} specific videos from {len(all_records)} total records")
+    else:
+        # Process all records
+        records_to_process = all_records
+        output.info(f"Filtering all {len(records_to_process)} records")
 
     # First, clean up URL output file by removing duplicates
     url_file = config.output.url_outputs_dir / "discovered_urls.txt"
@@ -140,7 +153,7 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
         output.error(f"Directory exists: {final_audio_dir.exists()}")
         return []
 
-    for record in manifest_data.get('records', []):
+    for record in records_to_process:
         if not record.get('classified', False):
             # Not yet classified, keep for now
             records_to_keep.append(record)
