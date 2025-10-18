@@ -7,10 +7,13 @@ to identify children's voices in audio content using wav2vec2.
 
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Generator
 from dataclasses import dataclass
 import threading
 import time
+import tempfile
+import gc
+import os
 
 from ..config import AnalysisConfig
 from ..utils import get_output_manager
@@ -558,6 +561,184 @@ class VoiceClassifier:
                 processing_time=time.time() - start_time,
                 model_version=self.model_version
             )
+
+    def _split_audio_file_into_chunks(self, audio_path: Path) -> Generator[Tuple[np.ndarray, int, int], None, None]:
+        """
+        Split a large audio file into chunks without keeping all in memory.
+
+        Yields chunks one at a time for memory efficiency. Each chunk is of duration
+        specified in config.max_chunk_duration_seconds.
+
+        Args:
+            audio_path: Path to audio file
+
+        Yields:
+            Tuple of (audio_chunk_array, chunk_index, total_chunks) where total_chunks is estimated
+        """
+        try:
+            import librosa
+
+            # Load audio file
+            y, sr = librosa.load(str(audio_path), sr=16000)
+
+            chunk_duration_seconds = self.config.max_chunk_duration_seconds
+            samples_per_chunk = chunk_duration_seconds * sr
+
+            # Calculate total chunks
+            total_samples = len(y)
+            total_chunks = int(np.ceil(total_samples / samples_per_chunk))
+
+            # Yield chunks one at a time
+            chunk_index = 0
+            offset = 0
+
+            while offset < total_samples:
+                end_offset = min(offset + int(samples_per_chunk), total_samples)
+                chunk = y[offset:end_offset].astype(np.float32)
+
+                # Normalize chunk
+                if np.max(np.abs(chunk)) > 0:
+                    chunk = chunk / np.max(np.abs(chunk))
+
+                yield chunk, chunk_index, total_chunks
+
+                # Move to next chunk
+                offset = end_offset
+                chunk_index += 1
+
+                # Garbage collection to free memory
+                gc.collect()
+
+        except Exception as e:
+            self.output.error(f"Error splitting audio file {audio_path}: {e}")
+            return
+
+    def classify_large_audio_file(self, audio_path: Path, max_chunks: int = 3) -> Dict[str, Any]:
+        """
+        Classify voices in a large audio file by processing chunks.
+
+        Processes only the first N chunks (default 3) to avoid excessive processing.
+        This is useful for long audio files where the voice classification is assumed
+        to be consistent.
+
+        Args:
+            audio_path: Path to audio file
+            max_chunks: Maximum number of chunks to process (default: 3)
+
+        Returns:
+            Dictionary containing:
+                - is_child_voice: Boolean indicating if child voice detected
+                - confidence: Overall confidence score (average of processed chunks)
+                - chunks_processed: Number of chunks actually processed
+                - total_chunks: Total number of chunks in file
+                - chunk_results: List of results for each processed chunk
+                - overall_processing_time: Total processing time
+                - model_version: Version of model used
+        """
+        overall_start_time = time.time()
+        chunk_results = []
+        chunks_processed = 0
+        total_chunks_estimate = 0
+
+        try:
+            self.output.debug(f"Starting large audio file classification for {audio_path}")
+
+            # Process chunks one at a time
+            for chunk_audio, chunk_idx, total_chunks in self._split_audio_file_into_chunks(audio_path):
+                total_chunks_estimate = total_chunks
+
+                # Only process first max_chunks
+                if chunk_idx >= max_chunks:
+                    self.output.debug(f"Reached max chunks limit ({max_chunks}), stopping processing")
+                    break
+
+                try:
+                    # Analyze this chunk
+                    result = self.analyze_audio_chunk(chunk_audio, sample_rate=16000)
+
+                    chunk_results.append({
+                        "chunk_index": chunk_idx,
+                        "is_child_voice": result.is_child_voice,
+                        "confidence": result.confidence,
+                        "features_extracted": result.features_extracted,
+                        "processing_time": result.processing_time,
+                        "model_version": result.model_version
+                    })
+
+                    chunks_processed += 1
+
+                    self.output.debug(
+                        f"Chunk {chunk_idx}/{total_chunks}: "
+                        f"child_voice={result.is_child_voice}, "
+                        f"confidence={result.confidence:.2f}"
+                    )
+
+                    # Clean up chunk data
+                    del chunk_audio
+                    gc.collect()
+
+                except Exception as e:
+                    self.output.error(f"Error processing chunk {chunk_idx}: {e}")
+                    # Continue to next chunk
+                    del chunk_audio
+                    gc.collect()
+                    continue
+
+            # Calculate overall results
+            if chunk_results:
+                # Determine overall child voice classification
+                # If any chunk has child voice with high confidence, consider it child voice
+                child_voices = [r for r in chunk_results if r["is_child_voice"]]
+                is_child_overall = len(child_voices) > 0
+
+                # Average confidence across chunks
+                avg_confidence = np.mean([r["confidence"] for r in chunk_results])
+
+                overall_processing_time = time.time() - overall_start_time
+
+                result = {
+                    "is_child_voice": is_child_overall,
+                    "confidence": float(avg_confidence),
+                    "chunks_processed": chunks_processed,
+                    "total_chunks": total_chunks_estimate,
+                    "chunk_results": chunk_results,
+                    "overall_processing_time": overall_processing_time,
+                    "model_version": self.model_version
+                }
+
+                self.output.info(
+                    f"Large audio classification complete: "
+                    f"is_child={is_child_overall}, "
+                    f"confidence={avg_confidence:.2f}, "
+                    f"chunks={chunks_processed}/{total_chunks_estimate}"
+                )
+
+                return result
+            else:
+                # No chunks processed successfully
+                return {
+                    "is_child_voice": False,
+                    "confidence": 0.0,
+                    "chunks_processed": 0,
+                    "total_chunks": total_chunks_estimate,
+                    "chunk_results": [],
+                    "overall_processing_time": time.time() - overall_start_time,
+                    "model_version": self.model_version,
+                    "error": "No chunks processed successfully"
+                }
+
+        except Exception as e:
+            self.output.error(f"Large audio file classification failed for {audio_path}: {e}")
+            return {
+                "is_child_voice": False,
+                "confidence": 0.0,
+                "chunks_processed": chunks_processed,
+                "total_chunks": total_chunks_estimate,
+                "chunk_results": chunk_results,
+                "overall_processing_time": time.time() - overall_start_time,
+                "model_version": self.model_version,
+                "error": str(e)
+            }
 
 
 # Factory function to create classifier with caching
