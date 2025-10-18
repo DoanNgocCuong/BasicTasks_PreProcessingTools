@@ -181,8 +181,9 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
 
         # Make path absolute relative to workspace root
         # Safety check: ensure manifest path has sufficient depth
-        if len(manifest_file.parents) < 2:
-            output.error(f"Cannot resolve workspace root for {video_id}: manifest path has insufficient depth")
+        if len(manifest_file.parents) < 3:
+            output.error(f"Cannot resolve workspace root for {video_id}: manifest path has insufficient depth (need 3+ parents, have {len(manifest_file.parents)})")
+            output.error(f"Manifest path: {manifest_file}")
             output.error(f"Manifest path parents: {list(manifest_file.parents)}")
             continue
         

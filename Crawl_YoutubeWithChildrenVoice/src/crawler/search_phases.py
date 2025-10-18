@@ -215,6 +215,7 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                 except Exception as e:
                     output.error(f"Failed to initialize language detector: {e}")
                     output.error(f"Analysis config: {config.analysis}")
+                    output.warning("Proceeding without language detection for channel filtering")
                     language_detector = None
 
             # Perform voice analysis
@@ -332,10 +333,14 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                         try:
                             await batch_callback(include_upload=True)
                             last_batch_count = current_url_count
+                            output.debug(f"Batch callback completed successfully, updated last_batch_count to {last_batch_count}")
                         except Exception as e:
                             output.error(f"Failed to execute batch callback: {e}")
                             import traceback
                             output.error(f"Full traceback: {traceback.format_exc()}")
+                            # Continue with next batch even if callback failed (don't lose data)
+                            last_batch_count = current_url_count
+                            output.warning(f"Continuing search despite batch callback failure, last_batch_count updated to {last_batch_count}")
                 else:
                     output.info(f"No children's voice detected in {first_video.video_id} (confidence: {voice_result.confidence:.2f}) - skipping query")
             else:

@@ -338,7 +338,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                 except Exception as e:
                     output.error(f"Failed to create unclassified directory {unclassified_dir}: {e}")
                     # Clean up temp file
-                    if result.output_path.exists():
+                    if result.output_path and result.output_path.exists():
                         try:
                             result.output_path.unlink()
                         except Exception as cleanup_e:
@@ -355,7 +355,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                     output.error(f"Failed to build filename for {video_id}: {e}")
                     output.error(f"Download index: {download_index}, URL: {url}, Title: {video.title}")
                     # Clean up temp file
-                    if result.output_path.exists():
+                    if result.output_path and result.output_path.exists():
                         try:
                             result.output_path.unlink()
                         except Exception as cleanup_e:
@@ -412,7 +412,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                     manifest_data['total_duration_seconds'] += result.duration or 0.0
                     record = existing_record
                 else:
-                    # Create new record
+                    # Create new record with all required fields
                     record = {
                         "video_id": video.video_id,
                         "url": video.url,
@@ -424,6 +424,10 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                         "language_folder": language_info,
                         "download_index": download_index,
                         "classified": False,
+                        "classification_timestamp": None,
+                        "containing_children_voice": None,
+                        "voice_analysis_confidence": 0.0,
+                        "uploaded": False,
                         "file_available": True
                     }
                     # Update manifest data in memory
@@ -436,10 +440,13 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                     if not file_manager.save_json(manifest_file, manifest_data):
                         output.error(f"Failed to save manifest for {video_id} - skipping download")
                         # Rollback in-memory changes
-                        manifest_data['records'].pop()
-                        manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                        if not existing_record:
+                            # Only pop if this was a new record append
+                            manifest_data['records'].pop()
+                            manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                        # else: existing record was modified in-place, no rollback needed yet
                         # Clean up temp file
-                        if result.output_path.exists():
+                        if result.output_path and result.output_path.exists():
                             try:
                                 result.output_path.unlink()
                             except Exception as cleanup_e:
@@ -448,10 +455,13 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                 except Exception as e:
                     output.error(f"Failed to save manifest for {video_id}: {e}")
                     # Rollback in-memory changes
-                    manifest_data['records'].pop()
-                    manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                    if not existing_record:
+                        # Only pop if this was a new record append
+                        manifest_data['records'].pop()
+                        manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                    # else: existing record was modified in-place, no rollback needed
                     # Clean up temp file
-                    if result.output_path.exists():
+                    if result.output_path and result.output_path.exists():
                         try:
                             result.output_path.unlink()
                         except Exception as cleanup_e:
@@ -460,19 +470,30 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
 
                 # Now move the file (after manifest is safely updated)
                 try:
+                    if not result.output_path:
+                        raise RuntimeError(f"Output path is None for {video_id} - cannot move file")
                     if new_path.exists():
                         new_path.unlink()  # Remove existing file
                         output.debug(f"Removed existing file: {new_path}")
                     result.output_path.rename(new_path)
+                    
+                    # Verify file actually exists at new location
+                    if not new_path.exists():
+                        raise FileNotFoundError(f"File not found at {new_path} after move (filesystem inconsistency)")
+                    
                     result.output_path = new_path
-                    output.debug(f"Successfully moved file to: {new_path}")
+                    output.debug(f"Successfully moved and verified file at: {new_path}")
                 except Exception as e:
                     output.error(f"Failed to move file for {video_id}: {e}")
                     output.error(f"Source: {result.output_path}, Target: {new_path}")
                     # Rollback manifest changes since file move failed
                     try:
-                        manifest_data['records'].pop()
-                        manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                        if not existing_record:
+                            # Only pop if this was a new record append
+                            manifest_data['records'].pop()
+                            manifest_data['total_duration_seconds'] -= record['duration_seconds']
+                        # else: existing record was modified in-place, reload from file
+                        file_manager = get_file_manager()
                         file_manager.save_json(manifest_file, manifest_data)
                         output.debug(f"Rolled back manifest changes for {video_id}")
                     except Exception as rollback_e:
@@ -547,6 +568,10 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                         "language_folder": "unknown",
                         "download_index": len(manifest_data['records']),
                         "classified": False,
+                        "classification_timestamp": None,
+                        "containing_children_voice": None,
+                        "voice_analysis_confidence": 0.0,
+                        "uploaded": False,
                         "file_available": False,
                         "all_downloads_failed": True
                     }
@@ -555,8 +580,18 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                     manifest_data['records'].append(failed_record)
                 
                 # Save manifest atomically
-                file_manager = get_file_manager()
-                file_manager.save_json(manifest_file, manifest_data)
+                try:
+                    file_manager = get_file_manager()
+                    if not file_manager.save_json(manifest_file, manifest_data):
+                        output.error(f"Failed to save manifest with failed record for {video_id}")
+                        # Rollback: remove the failed record we just added
+                        if not existing_record:
+                            manifest_data['records'].pop()
+                except Exception as e:
+                    output.error(f"Failed to save manifest for failed download {video_id}: {e}")
+                    # Rollback: remove the failed record we just added
+                    if not existing_record:
+                        manifest_data['records'].pop()
                 
                 processed_count += 1
                 # Check if we've reached the maximum count

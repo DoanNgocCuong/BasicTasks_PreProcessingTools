@@ -50,13 +50,11 @@ def clean_manifest(manifest_path):
     output_dir = manifest_dir.parent  # ../../output
     
     # Workspace root is 2 levels up from final_audio (manifest.json is at workspace/output/final_audio/manifest.json)
-    # Safety check: ensure manifest path has sufficient depth
-    if len(manifest_dir.parents) < 2:
-        print(f"Error: Cannot resolve workspace root from manifest path: {manifest_path}")
-        print(f"Manifest path has insufficient parents: {list(manifest_dir.parents)}")
+    # manifest_path.parents[0] = final_audio, [1] = output, [2] = workspace
+    if len(manifest_path.parents) < 3:
+        print(f"ERROR: Manifest path has insufficient depth. Path: {manifest_path}, Parents: {len(manifest_path.parents)}")
         return
-    
-    workspace_root = manifest_dir.parents[1]
+    workspace_root = manifest_path.parents[2]
     
     if not manifest_path.exists():
         print(f"Manifest file not found: {manifest_path} - creating empty manifest")
@@ -68,8 +66,17 @@ def clean_manifest(manifest_path):
         return
     
     # Load the manifest
-    with open(manifest_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Failed to parse manifest JSON at {manifest_path}: {e}")
+        print("Manifest file may be corrupted. Cannot proceed.")
+        return
+    except IOError as e:
+        print(f"ERROR: Failed to read manifest file at {manifest_path}: {e}")
+        print("Check file permissions. Cannot proceed.")
+        return
     
     records = data.get('records', [])
     changes = []

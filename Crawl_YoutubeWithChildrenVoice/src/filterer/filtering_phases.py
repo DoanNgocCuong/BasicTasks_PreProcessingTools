@@ -163,8 +163,8 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
 
     for record in records_to_process:
         if not record.get('classified', False):
-            # Not yet classified, keep for now
-            # But validate it has required fields
+            # Not yet classified, ALWAYS keep these for analysis phase
+            # Unclassified records should never be removed/lost
             video_id = record.get('video_id')
             if not video_id:
                 output.warning(f"Skipping unclassified record with missing video_id: {record}")
@@ -186,9 +186,9 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
         output_path = Path(output_path_str)
         if not output_path.is_absolute():
             # Safety check: ensure we can resolve workspace root
-            if len(manifest_file.parents) < 2:
+            if len(manifest_file.parents) < 3:
                 output.error(f"Cannot resolve workspace root from manifest path: {manifest_file}")
-                output.error(f"Manifest path has insufficient parents: {manifest_file.parents}")
+                output.error(f"Manifest path has insufficient parents (need 3+, have {len(manifest_file.parents)}): {manifest_file.parents}")
                 entries_removed += 1
                 continue
             workspace_root = manifest_file.parents[2]  # Go up 2 levels from final_audio/manifest.json
@@ -202,8 +202,8 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             # Convert back to relative path for consistency with original manifest format
             try:
                 # Safety check: ensure workspace root is accessible
-                if len(manifest_file.parents) < 2:
-                    output.warning(f"Could not convert to relative path for {video_id}: insufficient manifest path depth")
+                if len(manifest_file.parents) < 3:
+                    output.warning(f"Could not convert to relative path for {video_id}: insufficient manifest path depth (need 3+, have {len(manifest_file.parents)})")
                     record['output_path'] = str(correct_path)
                 else:
                     relative_path = correct_path.relative_to(manifest_file.parents[2])
@@ -238,10 +238,11 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             # Move to appropriate language folder
             language_folder = record.get('language_folder', 'unknown')
             
-            # SECURITY FIX: Sanitize language_folder to prevent path traversal attacks
-            # Remove any path separators and suspicious characters
-            language_folder = language_folder.replace('\\', '').replace('/', '').replace('..', '').strip()
-            if not language_folder:
+            # SECURITY FIX: Validate language_folder against whitelist to prevent path traversal
+            # Only allow known language codes and safe values
+            VALID_LANGUAGES = {'vi', 'en', 'unknown', 'unclassified'}
+            if language_folder not in VALID_LANGUAGES:
+                output.warning(f"Invalid language_folder '{language_folder}' for {video_id}, using 'unknown'")
                 language_folder = 'unknown'
             
             target_dir = final_audio_dir / language_folder
@@ -271,29 +272,35 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
 
             try:
                 output_path.rename(target_path)
-                # Convert to relative path for consistency with original manifest format
-                try:
-                    # Safety check: ensure workspace root is accessible
-                    if len(manifest_file.parents) < 2:
-                        output.warning(f"Could not convert target path to relative for {video_id}: insufficient manifest path depth")
-                        record['output_path'] = str(target_path)
-                    else:
-                        relative_target_path = target_path.relative_to(manifest_file.parents[2])
-                        record['output_path'] = str(relative_target_path)
-                except ValueError:
-                    # If relative_to fails, store absolute path
-                    output.warning(f"Could not convert target path to relative for {video_id}: {target_path}")
-                    record['output_path'] = str(target_path)
-                records_to_keep.append(record)
-                files_moved += 1
-                output.debug(f"Moved {video_id} to {language_folder} folder")
-            except Exception as e:
-                output.error(f"Failed to move file for {video_id}: {e}")
-                output.error(f"Source: {output_path}, Target: {target_path}")
-                output.error(f"Source exists: {output_path.exists()}, Target exists: {target_path.exists()}")
+            except FileNotFoundError:
+                # File disappeared between existence check and rename (race condition)
+                output.warning(f"Source file disappeared during rename for {video_id}: {output_path}")
                 record['file_available'] = False
                 records_to_keep.append(record)
                 continue
+            except Exception as e:
+                output.error(f"Failed to move file for {video_id}: {e}")
+                output.error(f"Source: {output_path}, Target: {target_path}")
+                record['file_available'] = False
+                records_to_keep.append(record)
+                continue
+
+            # Convert to relative path for consistency with original manifest format
+            try:
+                # Safety check: ensure workspace root is accessible
+                if len(manifest_file.parents) < 3:
+                    output.warning(f"Could not convert target path to relative for {video_id}: insufficient manifest path depth")
+                    record['output_path'] = str(target_path)
+                else:
+                    relative_target_path = target_path.relative_to(manifest_file.parents[2])
+                    record['output_path'] = str(relative_target_path)
+            except ValueError:
+                # If relative_to fails, store absolute path
+                output.warning(f"Could not convert target path to relative for {video_id}: {target_path}")
+                record['output_path'] = str(target_path)
+            records_to_keep.append(record)
+            files_moved += 1
+            output.debug(f"Moved {video_id} to {language_folder} folder")
         else:
             # No children's voice - move file to backup/trash instead of permanently deleting
             # Re-check that file still exists before moving (in case it was moved by concurrent process)
@@ -311,13 +318,28 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
                         except Exception as e:
                             output.warning(f"Failed to remove old backup copy for {video_id}: {e}")
                     
-                    output_path.rename(backup_path)
+                    try:
+                        output_path.rename(backup_path)
+                    except FileNotFoundError:
+                        # File disappeared during processing (race condition)
+                        output.warning(f"Source file disappeared during backup move for {video_id}: {output_path}")
+                        record['file_available'] = False
+                        records_to_keep.append(record)
+                        continue
+                    except Exception as e:
+                        backup_target = final_audio_dir / "backups" / "no_children_voice" / output_path.name
+                        output.warning(f"Failed to move file to backup for {video_id}: {e}")
+                        output.warning(f"Source: {output_path}, Backup target: {backup_target}")
+                        output.warning(f"Source exists: {output_path.exists()}")
+                        record['file_available'] = False
+                        records_to_keep.append(record)
+                        continue
                     
                     # Update record to point to backup location (as relative path)
                     try:
                         # Convert backup path to relative for consistency
-                        if len(manifest_file.parents) < 2:
-                            output.warning(f"Could not convert backup path to relative for {video_id}: insufficient manifest path depth")
+                        if len(manifest_file.parents) < 3:
+                            output.warning(f"Could not convert backup path to relative for {video_id}: insufficient manifest path depth (need 3+, have {len(manifest_file.parents)})")
                             record['output_path'] = str(backup_path)
                         else:
                             relative_backup_path = backup_path.relative_to(manifest_file.parents[2])
