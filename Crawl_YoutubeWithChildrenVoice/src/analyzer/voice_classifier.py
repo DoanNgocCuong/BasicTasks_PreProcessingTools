@@ -2,17 +2,49 @@
 Voice Classifier - Classify voices as children or adults
 
 This module provides machine learning-based voice classification
-to identify children's voices in audio content.
+to identify children's voices in audio content using wav2vec2.
 """
 
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 import threading
+import time
 
 from ..config import AnalysisConfig
 from ..utils import get_output_manager
+
+from typing import TYPE_CHECKING
+
+# Optional imports for wav2vec2
+if TYPE_CHECKING:
+    import torch
+    import torch.nn as nn
+    from transformers import Wav2Vec2Processor
+    from transformers.models.wav2vec2.modeling_wav2vec2 import (
+        Wav2Vec2Model,
+        Wav2Vec2PreTrainedModel,
+    )
+    WAV2VEC_AVAILABLE = True
+else:
+    try:
+        import torch
+        import torch.nn as nn
+        from transformers import Wav2Vec2Processor
+        from transformers.models.wav2vec2.modeling_wav2vec2 import (
+            Wav2Vec2Model,
+            Wav2Vec2PreTrainedModel,
+        )
+        WAV2VEC_AVAILABLE = True
+    except (ImportError, OSError) as e:
+        print(f"Warning: wav2vec2 dependencies not available: {e}")
+        torch = None
+        nn = None
+        Wav2Vec2Processor = None
+        Wav2Vec2Model = None
+        Wav2Vec2PreTrainedModel = None
+        WAV2VEC_AVAILABLE = False
 
 
 @dataclass
@@ -25,17 +57,71 @@ class VoiceClassificationResult:
     model_version: str
 
 
+# Conditional class definitions
+BaseModule = nn if WAV2VEC_AVAILABLE else object
+BasePreTrained = Wav2Vec2PreTrainedModel if WAV2VEC_AVAILABLE else object
+
+class ModelHead(BaseModule):  # type: ignore
+    """Classification head."""
+
+    def __init__(self, config=None, num_labels=None):
+        if BaseModule is not object:
+            super().__init__()
+            self.dense = nn.Linear(config.hidden_size, config.hidden_size)  # type: ignore
+            self.dropout = nn.Dropout(config.final_dropout)  # type: ignore
+            self.out_proj = nn.Linear(config.hidden_size, num_labels)  # type: ignore
+        else:
+            pass
+
+    def forward(self, features, **kwargs):
+        if BaseModule is not object:
+            x = features
+            x = self.dropout(x)
+            x = self.dense(x)
+            x = torch.tanh(x)  # type: ignore
+            x = self.dropout(x)
+            x = self.out_proj(x)
+            return x
+        else:
+            return None
+
+
+class AgeGenderModel(BasePreTrained):  # type: ignore
+    """Speech age and gender classifier."""
+
+    def __init__(self, config=None):
+        if BasePreTrained is not object:
+            super().__init__(config)
+            self.config = config
+            self.wav2vec2 = Wav2Vec2Model(config)  # type: ignore
+            self.age = ModelHead(config, 1)
+            self.gender = ModelHead(config, 3)
+            self.init_weights()
+        else:
+            pass
+
+    def forward(self, input_values):
+        if BasePreTrained is not object:
+            outputs = self.wav2vec2(input_values)
+            hidden_states = outputs[0]
+            hidden_states = torch.mean(hidden_states, dim=1)  # type: ignore
+            logits_age = self.age(hidden_states)
+            logits_gender = torch.softmax(self.gender(hidden_states), dim=1)  # type: ignore
+            return hidden_states, logits_age, logits_gender
+        else:
+            return None, None, None
+
+
 class VoiceClassifier:
     """
-    Machine learning model for classifying voices as children or adults.
+    Machine learning model for classifying voices as children or adults using wav2vec2.
 
-    Uses acoustic features and deep learning to identify children's voices
+    Uses wav2vec2 model with age and gender classification heads to identify children's voices
     with high accuracy. Includes model caching and memory management.
     """
 
-    # Class-level shared instances for memory efficiency (from working example)
+    # Class-level shared instances for memory efficiency
     _shared_classifier: Optional['VoiceClassifier'] = None
-    _shared_model: Optional[Any] = None  # Changed to Any to avoid import
     _lock = threading.Lock()  # Thread safety for shared instances
 
     def __init__(self, config: AnalysisConfig):
@@ -47,144 +133,183 @@ class VoiceClassifier:
         """
         self.config = config
         self.output = get_output_manager()
+        self.wav2vec_available = WAV2VEC_AVAILABLE
 
-        # Model parameters - initialize device lazily
-        self.device = None
-        self.model_version = "1.0.0"
+        # Set default values from config
+        self.model_name = config.wav2vec2_model
+        self.child_threshold = config.child_voice_threshold
+        self.age_threshold = config.language_confidence_threshold
 
-        # Feature extraction parameters
-        self.sample_rate = 16000
-        self.n_mfcc = 13
-        self.n_fft = 400
-        self.hop_length = 160
+        if not self.wav2vec_available:
+            self.output.warning("wav2vec2 dependencies not available - using fallback classification")
+            self.model_version = "fallback-1.0.0"
+            return
 
-        self.output.debug("Initialized voice classifier")
+        # Model parameters (only set when wav2vec is available)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # type: ignore
+        self.model_version = "wav2vec2-1.0.0"
+
+        # Initialize model and processor
+        self.processor = None
+        self.model = None
+
+        self.output.debug("Initialized wav2vec2 voice classifier")
 
     @classmethod
-    def _get_or_create_shared_model(cls) -> Any:
-        """Get existing model or create new one if needed (thread-safe)"""
+    def _get_or_create_shared_instance(cls, config: AnalysisConfig) -> 'VoiceClassifier':
+        """Get existing classifier or create new one (thread-safe)"""
         with cls._lock:
-            if cls._shared_model is None:
-                print("🚀 Loading voice classification model for the first time...")
-                # Create model using class method
-                cls._shared_model = cls._create_shared_model()
-                if cls._shared_model is not None:
-                    cls._shared_model.eval()
-                print("✅ Voice classification model loaded and cached")
+            if cls._shared_classifier is None:
+                print("🚀 Loading wav2vec2 model for the first time...")
+                classifier = VoiceClassifier(config)
+                classifier._load_model_and_processor()
+                cls._shared_classifier = classifier
+                print("✅ wav2vec2 model loaded and cached")
             else:
-                print("🔄 Reusing existing voice classification model")
-            return cls._shared_model
+                print("🔄 Reusing existing wav2vec2 model")
+            return cls._shared_classifier
 
-    @classmethod
-    def _create_shared_model(cls) -> Any:
-        """Create a placeholder model for demonstration."""
+    def _load_model_and_processor(self) -> None:
+        """Load model and processor with memory optimizations."""
+        if not self.wav2vec_available:
+            return
+
         try:
-            import torch
-            import torch.nn as nn
-        except ImportError:
-            return None
+            self.output.debug("Loading wav2vec2 model...")
+            self.processor = Wav2Vec2Processor.from_pretrained(self.model_name)  # type: ignore
+            self.model = AgeGenderModel.from_pretrained(self.model_name)  # type: ignore
+            self.model = self.model.to(self.device)  # type: ignore
 
-        class SimpleVoiceClassifier(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(13, 64)  # 13 MFCC features
-                self.fc2 = nn.Linear(64, 32)
-                self.fc3 = nn.Linear(32, 1)
-                self.dropout = nn.Dropout(0.3)
+            # Enable memory-efficient mode
+            self.model.eval()  # type: ignore
+            if torch.cuda.is_available():  # type: ignore
+                # Enable gradient checkpointing for memory efficiency
+                if hasattr(self.model, 'gradient_checkpointing_enable'):
+                    self.model.gradient_checkpointing_enable()  # type: ignore
 
-            def forward(self, x):
-                x = torch.relu(self.fc1(x))
-                x = self.dropout(x)
-                x = torch.relu(self.fc2(x))
-                x = self.dropout(x)
-                x = torch.sigmoid(self.fc3(x))
-                return x
-
-        return SimpleVoiceClassifier()
-
-    def load_model(self, model_path: Optional[Path] = None) -> bool:
-        """
-        Load the voice classification model with caching.
-
-        Args:
-            model_path: Path to model file (optional)
-
-        Returns:
-            True if model loaded successfully
-        """
-        try:
-            # Get shared model instance
-            self.model = self._get_or_create_shared_model()
-
-            # Clear CUDA cache before loading models (from working example)
-            self._clear_cuda_cache()
-
-            self.output.debug("Voice classification model loaded")
-            return True
-
+            self.output.debug("wav2vec2 model loaded successfully!")
         except Exception as e:
-            self.output.error(f"Failed to load voice classification model: {e}")
-            return False
+            self.output.error(f"Error loading wav2vec2 model: {e}")
+            raise
 
     @staticmethod
     def _clear_cuda_cache() -> None:
-        """Clear CUDA cache if available (from working example)"""
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        except ImportError:
-            pass
-
-    @staticmethod
-    def _force_garbage_collection() -> None:
-        """Force garbage collection (from working example)"""
-        import gc
-        gc.collect()
+        """Clear CUDA cache if available."""
+        if not WAV2VEC_AVAILABLE:
+            return
+        if torch.cuda.is_available():  # type: ignore
+            torch.cuda.empty_cache()  # type: ignore
+            torch.cuda.synchronize()  # type: ignore
 
     @classmethod
     def clear_model_cache(cls) -> None:
         """Clear cached model instances to free memory (thread-safe)"""
         with cls._lock:
-            if cls._shared_model is not None:
-                print("🗑️ Clearing voice classifier cache...")
+            if cls._shared_classifier is not None:
+                print("🗑️ Clearing wav2vec2 classifier cache...")
                 cls._clear_cuda_cache()
-                cls._shared_model = None
-                cls._force_garbage_collection()
-                print("✅ Voice classifier cache cleared")
+                cls._shared_classifier = None
+                print("✅ wav2vec2 classifier cache cleared")
 
-    def _create_placeholder_model(self) -> Any:
-        """Create a placeholder model for demonstration."""
+    def _preprocess_audio(self, audio_path: Path) -> Optional[np.ndarray]:
+        """
+        Preprocess audio file for wav2vec2 model.
+
+        Args:
+            audio_path: Path to audio file
+
+        Returns:
+            Preprocessed audio array or None if error
+        """
         try:
-            import torch
-            import torch.nn as nn
-        except ImportError:
+            import librosa
+
+            # Load audio at 16kHz (wav2vec2 requirement)
+            speech_array, original_sr = librosa.load(audio_path, sr=16000)
+
+            # Normalize audio
+            if np.max(np.abs(speech_array)) > 0:
+                speech_array = speech_array / np.max(np.abs(speech_array))
+
+            return speech_array.astype(np.float32)
+
+        except Exception as e:
+            self.output.error(f"Error preprocessing audio {audio_path}: {e}")
             return None
 
-        class SimpleVoiceClassifier(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(13, 64)  # 13 MFCC features
-                self.fc2 = nn.Linear(64, 32)
-                self.fc3 = nn.Linear(32, 1)
-                self.dropout = nn.Dropout(0.3)
+    def _predict_age_gender(self, speech_array: np.ndarray) -> Tuple[Optional[float], Optional[float], Optional[np.ndarray], str]:
+        """
+        Predict age and gender from audio array.
 
-            def forward(self, x):
-                x = torch.relu(self.fc1(x))
-                x = self.dropout(x)
-                x = torch.relu(self.fc2(x))
-                x = self.dropout(x)
-                x = torch.sigmoid(self.fc3(x))
-                return x
+        Args:
+            speech_array: Audio array
 
-        model = SimpleVoiceClassifier()
-        model.eval()  # Set to evaluation mode
-        return model
+        Returns:
+            Tuple of (age_normalized, age_years, gender_probs, status)
+        """
+        if not self.wav2vec_available:
+            return None, None, None, "wav2vec_unavailable"
+
+        try:
+            # Clear CUDA cache before processing
+            self._clear_cuda_cache()
+
+            # Process audio
+            inputs = self.processor(speech_array, sampling_rate=16000)  # type: ignore
+            input_values = inputs['input_values'][0]
+            input_values = input_values.reshape(1, -1)
+
+            # Move to device
+            input_values = torch.from_numpy(input_values).to(self.device)  # type: ignore
+
+            # Prediction
+            with torch.no_grad():  # type: ignore
+                hidden_states, age_logits, gender_probs = self.model(input_values)  # type: ignore
+
+                # Age prediction (0-1 scale, 0=0 years, 1=100 years)
+                age_normalized = float(age_logits.squeeze().cpu())
+                age_years = age_normalized * 100  # Convert to years
+
+                # Gender prediction probabilities [female, male, child]
+                gender_probs = gender_probs.squeeze().cpu().numpy()
+
+                # Clear intermediate tensors
+                del input_values, hidden_states, age_logits
+                self._clear_cuda_cache()
+
+                return age_normalized, age_years, gender_probs, "success"
+
+        except Exception as e:
+            self.output.error(f"Error predicting age/gender: {e}")
+            self._clear_cuda_cache()
+            return None, None, None, "error"
+
+    def _classify_age_group(self, age_normalized: Optional[float], gender_probs: Optional[np.ndarray]) -> Tuple[str, float]:
+        """
+        Classify as child or adult based on age and gender predictions.
+
+        Args:
+            age_normalized: Normalized age (0-1)
+            gender_probs: Gender probabilities [female, male, child]
+
+        Returns:
+            Tuple of (label, confidence)
+        """
+        child_prob = gender_probs[2] if gender_probs is not None else 0
+
+        # Check child probability
+        if child_prob > self.child_threshold:
+            return "child", child_prob
+
+        # Or check age
+        if age_normalized is not None and age_normalized < self.age_threshold:
+            return "child", age_normalized
+
+        return "adult", 1 - child_prob
 
     def classify_audio_file(self, audio_path: Path) -> VoiceClassificationResult:
         """
-        Classify voices in an audio file.
+        Classify voices in an audio file using wav2vec2 or fallback method.
 
         Args:
             audio_path: Path to audio file
@@ -196,10 +321,12 @@ class VoiceClassifier:
         start_time = time.time()
 
         try:
-            # Extract features from audio
-            features = self._extract_features(audio_path)
+            if not self.wav2vec_available:
+                return self._fallback_classification(audio_path, start_time)
 
-            if features is None:
+            # Preprocess audio
+            speech_array = self._preprocess_audio(audio_path)
+            if speech_array is None:
                 return VoiceClassificationResult(
                     is_child_voice=False,
                     confidence=0.0,
@@ -208,11 +335,32 @@ class VoiceClassifier:
                     model_version=self.model_version
                 )
 
-            # Classify using model
-            prediction, confidence = self._classify_features(features)
+            # Get predictions
+            age_norm, age_years, gender_probs, status = self._predict_age_gender(speech_array)
+
+            if status == "error":
+                return VoiceClassificationResult(
+                    is_child_voice=False,
+                    confidence=0.0,
+                    features_extracted={},
+                    processing_time=time.time() - start_time,
+                    model_version=self.model_version
+                )
+
+            # Classify age group
+            final_label, confidence = self._classify_age_group(age_norm, gender_probs)
+
+            # Prepare features dict
+            features = {
+                "age_normalized": age_norm or 0.0,
+                "age_years": age_years or 0.0,
+                "gender_female_prob": gender_probs[0] if gender_probs is not None else 0.0,
+                "gender_male_prob": gender_probs[1] if gender_probs is not None else 0.0,
+                "gender_child_prob": gender_probs[2] if gender_probs is not None else 0.0,
+            }
 
             return VoiceClassificationResult(
-                is_child_voice=prediction,
+                is_child_voice=final_label == "child",
                 confidence=confidence,
                 features_extracted=features,
                 processing_time=time.time() - start_time,
@@ -229,21 +377,67 @@ class VoiceClassifier:
                 model_version=self.model_version
             )
 
-    def _extract_features(self, audio_path: Path) -> Optional[Dict[str, float]]:
+    def _fallback_classification(self, audio_path: Path, start_time: float) -> VoiceClassificationResult:
         """
-        Extract acoustic features from audio file.
+        Fallback classification using MFCC features when wav2vec2 is not available.
+
+        Args:
+            audio_path: Path to audio file
+            start_time: Start time for timing
+
+        Returns:
+            Classification result using fallback method
+        """
+        try:
+            # Extract MFCC features (similar to old implementation)
+            features = self._extract_mfcc_features(audio_path)
+            if features is None:
+                return VoiceClassificationResult(
+                    is_child_voice=False,
+                    confidence=0.0,
+                    features_extracted={},
+                    processing_time=time.time() - start_time,
+                    model_version="fallback-mfcc"
+                )
+
+            # Simple heuristic: higher spectral centroid suggests younger voice
+            centroid = features.get('spectral_centroid', 3000)
+            confidence = min(max((centroid - 2000) / 2000, 0.0), 1.0)
+            is_child = confidence > self.config.child_voice_threshold
+
+            return VoiceClassificationResult(
+                is_child_voice=is_child,
+                confidence=confidence,
+                features_extracted=features,
+                processing_time=time.time() - start_time,
+                model_version="fallback-mfcc"
+            )
+
+        except Exception as e:
+            self.output.error(f"Fallback classification failed: {e}")
+            return VoiceClassificationResult(
+                is_child_voice=False,
+                confidence=0.0,
+                features_extracted={},
+                processing_time=time.time() - start_time,
+                model_version="fallback-error"
+            )
+
+    def _extract_mfcc_features(self, audio_path: Path) -> Optional[Dict[str, float]]:
+        """
+        Extract MFCC features for fallback classification.
 
         Args:
             audio_path: Path to audio file
 
         Returns:
-            Dictionary of extracted features
+            Dictionary of extracted MFCC features
         """
         try:
             import librosa
 
             # Load audio
-            audio, sr = librosa.load(audio_path, sr=self.sample_rate)
+            audio, sr = librosa.load(audio_path, sr=16000)
 
             if len(audio) == 0:
                 return None
@@ -252,19 +446,17 @@ class VoiceClassifier:
             mfccs = librosa.feature.mfcc(
                 y=audio,
                 sr=sr,
-                n_mfcc=self.n_mfcc,
-                n_fft=self.n_fft,
-                hop_length=self.hop_length
+                n_mfcc=13,
+                n_fft=400,
+                hop_length=160
             )
 
             # Compute statistics
             features = {}
-            for i in range(self.n_mfcc):
+            for i in range(13):
                 mfcc_coeffs = mfccs[i]
                 features[f'mfcc_{i}_mean'] = float(np.mean(mfcc_coeffs))
                 features[f'mfcc_{i}_std'] = float(np.std(mfcc_coeffs))
-                features[f'mfcc_{i}_min'] = float(np.min(mfcc_coeffs))
-                features[f'mfcc_{i}_max'] = float(np.max(mfcc_coeffs))
 
             # Additional features
             features['rms_energy'] = float(np.mean(librosa.feature.rms(y=audio)))
@@ -275,86 +467,11 @@ class VoiceClassifier:
             return features
 
         except ImportError:
-            self.output.warning("librosa not available - using mock features")
-            return self._mock_features()
-        except Exception as e:
-            self.output.error(f"Feature extraction failed: {e}")
+            self.output.warning("librosa not available - cannot perform fallback classification")
             return None
-
-    def _mock_features(self) -> Dict[str, float]:
-        """Generate mock features for testing."""
-        features = {}
-        for i in range(self.n_mfcc):
-            features[f'mfcc_{i}_mean'] = np.random.normal(0, 1)
-            features[f'mfcc_{i}_std'] = np.random.uniform(0.1, 2.0)
-            features[f'mfcc_{i}_min'] = np.random.normal(-2, 1)
-            features[f'mfcc_{i}_max'] = np.random.normal(2, 1)
-
-        features['rms_energy'] = np.random.uniform(0.01, 0.1)
-        features['zero_crossing_rate'] = np.random.uniform(0.01, 0.2)
-        features['spectral_centroid'] = np.random.uniform(1000, 5000)
-        features['spectral_bandwidth'] = np.random.uniform(500, 2000)
-
-        return features
-
-    def _classify_features(self, features: Dict[str, float]) -> tuple[bool, float]:
-        """
-        Classify features using the model.
-
-        Args:
-            features: Extracted audio features
-
-        Returns:
-            Tuple of (is_child_voice, confidence)
-        """
-        if self.model is None:
-            # Fallback: use simple heuristic based on spectral centroid
-            # Children's voices typically have higher fundamental frequencies
-            centroid = features.get('spectral_centroid', 3000)
-            confidence = min(max((centroid - 2000) / 2000, 0.0), 1.0)
-            return confidence > self.config.child_voice_threshold, confidence
-
-        try:
-            # Initialize device if not done yet
-            if self.device is None:
-                try:
-                    import torch
-                    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                except ImportError:
-                    self.device = 'cpu'
-
-            # Ensure model is on the correct device
-            if self.model is not None:
-                self.model.to(self.device)
-
-            # Prepare features for model input
-            feature_vector = self._features_to_vector(features)
-
-            # Run inference
-            try:
-                import torch
-                with torch.no_grad():
-                    inputs = torch.tensor(feature_vector, dtype=torch.float32).unsqueeze(0).to(self.device)
-                    outputs = self.model(inputs)
-                    probability = outputs.item()
-            except ImportError:
-                # Fallback if torch not available
-                probability = 0.5
-
-            return probability > self.config.child_voice_threshold, probability
-
         except Exception as e:
-            self.output.error(f"Model inference failed: {e}")
-            return False, 0.0
-
-    def _features_to_vector(self, features: Dict[str, float]) -> np.ndarray:
-        """Convert feature dictionary to model input vector."""
-        # Use only MFCC means for the simple model
-        vector = []
-        for i in range(self.n_mfcc):
-            vector.append(features.get(f'mfcc_{i}_mean', 0.0))
-
-        return np.array(vector, dtype=np.float32)
+            self.output.error(f"MFCC feature extraction failed: {e}")
+            return None
 
     def analyze_audio_chunk(self, audio_chunk: np.ndarray, sample_rate: int) -> VoiceClassificationResult:
         """
@@ -371,10 +488,19 @@ class VoiceClassifier:
         start_time = time.time()
 
         try:
-            # Extract features from audio chunk
-            features = self._extract_features_from_array(audio_chunk, sample_rate)
+            # Resample if needed
+            if sample_rate != 16000:
+                import librosa
+                audio_chunk = librosa.resample(audio_chunk, orig_sr=sample_rate, target_sr=16000)
 
-            if features is None:
+            # Normalize
+            if np.max(np.abs(audio_chunk)) > 0:
+                audio_chunk = audio_chunk / np.max(np.abs(audio_chunk))
+
+            # Get predictions
+            age_norm, age_years, gender_probs, status = self._predict_age_gender(audio_chunk.astype(np.float32))
+
+            if status == "error":
                 return VoiceClassificationResult(
                     is_child_voice=False,
                     confidence=0.0,
@@ -384,10 +510,18 @@ class VoiceClassifier:
                 )
 
             # Classify
-            prediction, confidence = self._classify_features(features)
+            final_label, confidence = self._classify_age_group(age_norm, gender_probs)
+
+            features = {
+                "age_normalized": age_norm or 0.0,
+                "age_years": age_years or 0.0,
+                "gender_female_prob": gender_probs[0] if gender_probs is not None else 0.0,
+                "gender_male_prob": gender_probs[1] if gender_probs is not None else 0.0,
+                "gender_child_prob": gender_probs[2] if gender_probs is not None else 0.0,
+            }
 
             return VoiceClassificationResult(
-                is_child_voice=prediction,
+                is_child_voice=final_label == "child",
                 confidence=confidence,
                 features_extracted=features,
                 processing_time=time.time() - start_time,
@@ -404,43 +538,8 @@ class VoiceClassifier:
                 model_version=self.model_version
             )
 
-    def _extract_features_from_array(self, audio: np.ndarray, sr: int) -> Optional[Dict[str, float]]:
-        """Extract features from audio array."""
-        try:
-            import librosa
 
-            if len(audio) == 0:
-                return None
-
-            # Resample if necessary
-            if sr != self.sample_rate:
-                audio = librosa.resample(audio, orig_sr=sr, target_sr=self.sample_rate)
-
-            # Extract MFCC features
-            mfccs = librosa.feature.mfcc(
-                y=audio,
-                sr=self.sample_rate,
-                n_mfcc=self.n_mfcc,
-                n_fft=self.n_fft,
-                hop_length=self.hop_length
-            )
-
-            # Compute statistics
-            features = {}
-            for i in range(self.n_mfcc):
-                mfcc_coeffs = mfccs[i]
-                features[f'mfcc_{i}_mean'] = float(np.mean(mfcc_coeffs))
-                features[f'mfcc_{i}_std'] = float(np.std(mfcc_coeffs))
-
-            # Additional features
-            features['rms_energy'] = float(np.mean(librosa.feature.rms(y=audio)))
-            features['zero_crossing_rate'] = float(np.mean(librosa.feature.zero_crossing_rate(audio)))
-
-            return features
-
-        except ImportError:
-            self.output.warning("librosa not available - using mock features")
-            return self._mock_features()
-        except Exception as e:
-            self.output.error(f"Feature extraction from array failed: {e}")
-            return None
+# Factory function to create classifier with caching
+def get_voice_classifier(config: AnalysisConfig) -> VoiceClassifier:
+    """Get voice classifier instance with model caching."""
+    return VoiceClassifier._get_or_create_shared_instance(config)

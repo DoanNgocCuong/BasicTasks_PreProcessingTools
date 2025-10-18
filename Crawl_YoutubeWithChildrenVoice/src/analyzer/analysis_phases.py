@@ -136,19 +136,6 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
     else:
         output.warning("Voice classifier not available - skipping analysis phase")
         return []
-    
-    try:
-        voice_loaded = voice_classifier.load_model()
-        output.debug(f"Voice classifier model loaded: {voice_loaded}")
-    except Exception as e:
-        output.error(f"Failed to load voice classifier model: {e}")
-        import traceback
-        output.error(f"Full traceback: {traceback.format_exc()}")
-        return []
-
-    if not voice_loaded:
-        output.warning("Voice classifier model not loaded - skipping voice analysis")
-        return []
 
     analyzed_count = 0
 

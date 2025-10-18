@@ -117,6 +117,7 @@ class AnalysisConfig:
     max_consecutive_no_children: int = DEFAULT_MAX_CONSECUTIVE_NO_CHILDREN
     child_voice_threshold: float = DEFAULT_CHILD_VOICE_THRESHOLD
     language_confidence_threshold: float = DEFAULT_LANGUAGE_CONFIDENCE_THRESHOLD
+    wav2vec2_model: str = "audeering/wav2vec2-large-robust-6-ft-age-gender"
 
 
 @dataclass
@@ -244,6 +245,14 @@ class CrawlerConfig:
 
         if child_threshold := os.getenv('CHILD_THRESHOLD'):
             config.analysis.child_voice_threshold = float(child_threshold)
+
+        if age_threshold := os.getenv('AGE_THRESHOLD'):
+            config.analysis.language_confidence_threshold = float(age_threshold)
+
+        # Model configuration
+        if wav2vec_model := os.getenv('WAV2VEC2_MODEL'):
+            # Store in analysis config for voice classifier to access
+            config.analysis.wav2vec2_model = wav2vec_model
 
         # Logging
         config.logging.debug_mode = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
