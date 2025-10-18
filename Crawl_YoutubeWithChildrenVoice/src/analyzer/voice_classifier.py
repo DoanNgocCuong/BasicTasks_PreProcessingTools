@@ -183,6 +183,10 @@ class VoiceClassifier:
             self.model = AgeGenderModel.from_pretrained(self.model_name)  # type: ignore
             self.model = self.model.to(self.device)  # type: ignore
 
+            # Log device information
+            device_type = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"  # type: ignore
+            self.output.info(f"✨ wav2vec2 model running on {device_type}")
+
             # Enable memory-efficient mode
             self.model.eval()  # type: ignore
             

@@ -44,8 +44,11 @@ def migrate_legacy_classification_fields(record: dict) -> dict:
         del record['has_children_voice']
     
     # Migrate legacy voice_analysis_confident field to voice_analysis_confidence
-    if 'voice_analysis_confident' in record and 'voice_analysis_confidence' not in record:
-        record['voice_analysis_confidence'] = record['voice_analysis_confident']
+    if 'voice_analysis_confident' in record:
+        # Use the new field if it exists, otherwise use the old one
+        if 'voice_analysis_confidence' not in record or record['voice_analysis_confidence'] is None:
+            record['voice_analysis_confidence'] = record['voice_analysis_confident']
+        # Always remove legacy field after migration
         del record['voice_analysis_confident']
     
     return record
@@ -199,38 +202,49 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
             output.error(f"Full traceback: {traceback.format_exc()}")
             continue
 
-        # Update record
+        # Update record with classification results
         record['classified'] = True
         record['containing_children_voice'] = voice_result.is_child_voice
         record['voice_analysis_confidence'] = voice_result.confidence
         record['classification_timestamp'] = datetime.now().isoformat() + "Z"
+        
+        # Clean up any legacy fields
+        if 'voice_analysis_confident' in record:
+            del record['voice_analysis_confident']
 
         if voice_result.is_child_voice:
-            output.info(f"Children's voice detected in {video_id} (confidence: {voice_result.confidence:.2f})")
+            output.info(f"✅ Children's voice detected in {video_id} (confidence: {voice_result.confidence:.2f})")
         else:
-            output.info(f"No children's voice in {video_id} (confidence: {voice_result.confidence:.2f})")
+            output.info(f"⏭️ No children's voice in {video_id} (confidence: {voice_result.confidence:.2f})")
 
         analyzed_count += 1
 
-        # Save manifest incrementally every 2 analyses
-        if analyzed_count % 2 == 0:
-            try:
-                file_manager = get_file_manager()
-                file_manager.save_json(manifest_file, manifest_data)
-                output.debug(f"Saved manifest after {analyzed_count} analyses")
-            except Exception as e:
-                output.error(f"Failed to save manifest after {analyzed_count} analyses: {e}")
-                import traceback
-                output.error(f"Full traceback: {traceback.format_exc()}")
+        # Save manifest after every analysis for data safety
+        try:
+            file_manager = get_file_manager()
+            success = file_manager.save_json(manifest_file, manifest_data)
+            if success:
+                output.debug(f"Manifest updated and saved after analysis #{analyzed_count} for {video_id}")
+            else:
+                output.error(f"Failed to save manifest after analyzing {video_id} (analysis #{analyzed_count})")
+        except Exception as e:
+            output.error(f"Exception while saving manifest after analyzing {video_id} (analysis #{analyzed_count}): {e}")
+            import traceback
+            output.error(f"Full traceback: {traceback.format_exc()}")
 
-    # Save updated manifest
+    # Final save of updated manifest
     try:
         file_manager = get_file_manager()
-        file_manager.save_json(manifest_file, manifest_data)
-        output.success(f"Local analysis completed: {analyzed_count} files analyzed")
+        success = file_manager.save_json(manifest_file, manifest_data)
+        if success:
+            output.success(f"✅ Local analysis completed: {analyzed_count} files analyzed and manifest saved successfully")
+        else:
+            output.error(f"❌ Local analysis completed but final manifest save failed for {manifest_file}")
+            output.error(f"   {analyzed_count} files were analyzed but changes may not be persisted")
     except Exception as e:
-        output.error(f"Failed to save updated manifest after analysis: {e}")
-        output.error(f"Manifest file: {manifest_file}")
+        output.error(f"❌ Failed to save updated manifest after analysis: {e}")
+        output.error(f"   Manifest file: {manifest_file}")
+        output.error(f"   {analyzed_count} files were analyzed but changes may not be persisted")
         import traceback
         output.error(f"Full traceback: {traceback.format_exc()}")
 
