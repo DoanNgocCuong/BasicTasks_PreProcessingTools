@@ -158,6 +158,25 @@ class FileManager:
             # Ensure parent directory exists
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
+            # Convert numpy types to native Python types for JSON serialization
+            import numpy as np
+            
+            def convert_numpy_types(obj):
+                """Recursively convert numpy types to Python types"""
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {k: convert_numpy_types(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [convert_numpy_types(item) for item in obj]
+                return obj
+            
+            data = convert_numpy_types(data)
+
             # Write to temporary file first for atomic operation
             temp_file = file_path.with_suffix(file_path.suffix + '.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:

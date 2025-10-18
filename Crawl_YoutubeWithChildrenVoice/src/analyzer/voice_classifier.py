@@ -338,10 +338,10 @@ class VoiceClassifier:
         if gender_probs is None:
             # Fallback to age-only classification if gender probs not available
             if age_normalized is not None and age_normalized < self.age_threshold:
-                return "child", age_normalized
+                return "child", float(age_normalized)
             return "adult", 0.5  # Default confidence when data unavailable
 
-        child_prob = gender_probs[2]
+        child_prob = float(gender_probs[2])  # Explicitly convert numpy float to Python float
 
         # Check child probability
         if child_prob > self.child_threshold:
@@ -349,9 +349,9 @@ class VoiceClassifier:
 
         # Or check age
         if age_normalized is not None and age_normalized < self.age_threshold:
-            return "child", age_normalized
+            return "child", float(age_normalized)
 
-        return "adult", 1.0 - child_prob
+        return "adult", float(1.0 - child_prob)
 
     def classify_audio_file(self, audio_path: Path) -> VoiceClassificationResult:
         """
@@ -401,11 +401,11 @@ class VoiceClassifier:
 
             # Prepare features dict
             features = {
-                "age_normalized": age_norm or 0.0,
-                "age_years": age_years or 0.0,
-                "gender_female_prob": gender_probs[0] if gender_probs is not None else 0.0,
-                "gender_male_prob": gender_probs[1] if gender_probs is not None else 0.0,
-                "gender_child_prob": gender_probs[2] if gender_probs is not None else 0.0,
+                "age_normalized": float(age_norm) if age_norm is not None else 0.0,
+                "age_years": float(age_years) if age_years is not None else 0.0,
+                "gender_female_prob": float(gender_probs[0]) if gender_probs is not None else 0.0,
+                "gender_male_prob": float(gender_probs[1]) if gender_probs is not None else 0.0,
+                "gender_child_prob": float(gender_probs[2]) if gender_probs is not None else 0.0,
             }
 
             return VoiceClassificationResult(
@@ -574,11 +574,11 @@ class VoiceClassifier:
             final_label, confidence = self._classify_age_group(age_norm, gender_probs)
 
             features = {
-                "age_normalized": age_norm or 0.0,
-                "age_years": age_years or 0.0,
-                "gender_female_prob": gender_probs[0] if gender_probs is not None else 0.0,
-                "gender_male_prob": gender_probs[1] if gender_probs is not None else 0.0,
-                "gender_child_prob": gender_probs[2] if gender_probs is not None else 0.0,
+                "age_normalized": float(age_norm) if age_norm is not None else 0.0,
+                "age_years": float(age_years) if age_years is not None else 0.0,
+                "gender_female_prob": float(gender_probs[0]) if gender_probs is not None else 0.0,
+                "gender_male_prob": float(gender_probs[1]) if gender_probs is not None else 0.0,
+                "gender_child_prob": float(gender_probs[2]) if gender_probs is not None else 0.0,
             }
 
             return VoiceClassificationResult(
