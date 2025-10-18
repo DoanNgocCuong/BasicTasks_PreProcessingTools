@@ -104,7 +104,7 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
             try:
                 videos = await search_engine._search_single_query(query)
                 output.debug(f"Found {len(videos)} videos for query '{query}'")
-            except QuotaExceededError:
+            except QuotaExceededError as e:
                 output.error(f"YouTube API quota exceeded during search for query '{query}' - all keys exhausted")
                 output.info("Search phase will stop processing additional queries")
                 break  # Stop processing further queries
@@ -175,9 +175,9 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
 
             # Load voice classifier
             try:
-                voice_classifier = VoiceClassifier(config.analysis)
-                voice_loaded = voice_classifier.load_model()
-                output.debug(f"Voice classifier model loaded: {voice_loaded}")
+                from ..analyzer.voice_classifier import get_voice_classifier
+                voice_classifier = get_voice_classifier(config.analysis)
+                output.debug("Voice classifier initialized successfully using cached singleton")
             except Exception as e:
                 output.error(f"Failed to initialize/load voice classifier: {e}")
                 output.error(f"Analysis config: {config.analysis}")
@@ -191,8 +191,8 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
                         output.warning(f"Failed to clean up temporary audio file {download_result.output_path}: {e}")
                 continue
 
-            if not voice_loaded:
-                output.warning("Voice classifier model not loaded - skipping analysis")
+            if voice_classifier is None:
+                output.warning("Voice classifier is None - skipping analysis")
                 # Clean up downloaded audio
                 if download_result.output_path and download_result.output_path.exists():
                     try:
@@ -356,7 +356,7 @@ async def run_search_phase(config: CrawlerConfig, batch_callback: Optional[Calla
         
         return []  # Return empty list since we don't need to pass videos to next phase
 
-    except QuotaExceededError:
+    except QuotaExceededError as e:
         output.error(f"Search phase failed due to quota/API key exhaustion: {e}")
         raise
     except Exception as e:

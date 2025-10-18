@@ -230,9 +230,9 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
 
     for record in records_to_keep:
         video_id = record.get('video_id')
-        if not video_id:
-            # Skip records with null video_id
-            output.warning(f"Skipping record with null video_id during deduplication")
+        if video_id is None or video_id == '':
+            # Skip records with null or empty video_id
+            output.warning(f"Skipping record with null or empty video_id during deduplication")
             continue
         if video_id in seen_video_ids:
             duplicates_removed += 1
@@ -242,7 +242,7 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
 
     # Update manifest - handle partial updates when video_ids is specified
     if video_ids is not None:
-        # Create map of processed records
+        # Create map of processed records (safe because unique_records all have video_ids)
         processed_records = {record['video_id']: record for record in unique_records}
         
         # Update all_records with processed versions

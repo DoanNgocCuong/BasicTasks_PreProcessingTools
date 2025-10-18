@@ -396,7 +396,7 @@ async def run_download_phase_from_urls(config: CrawlerConfig, max_count: Optiona
                     }
                     
                     # Reset classification if it was incomplete
-                    if 'classification_incomplete' in locals() and classification_incomplete:
+                    if classification_incomplete:
                         update_data.update({
                             "classified": False,
                             "classification_timestamp": None,

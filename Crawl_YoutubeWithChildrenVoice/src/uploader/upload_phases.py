@@ -6,7 +6,7 @@ Handles uploading classified children voice files to the server.
 import json
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ..config import CrawlerConfig
 from ..utils import get_output_manager
@@ -18,6 +18,16 @@ from .client import main as upload_main
 _current_upload_folder_id: Optional[str] = None
 
 
+def reset_upload_session() -> None:
+    """
+    Reset the upload session folder ID.
+    Should be called at the start of a new crawler workflow to ensure
+    a fresh upload session is created.
+    """
+    global _current_upload_folder_id
+    _current_upload_folder_id = None
+
+
 def _count_uploadable_files(records: List[dict]) -> int:
     """Count the number of records that are eligible for upload."""
     return sum(1 for r in records if 
@@ -27,7 +37,7 @@ def _count_uploadable_files(records: List[dict]) -> int:
         r.get("file_available", False) == True)
 
 
-def _get_records_to_process(manifest_data: dict, video_ids: Optional[List[str]]) -> tuple[List[dict], bool]:
+def _get_records_to_process(manifest_data: dict, video_ids: Optional[List[str]]) -> Tuple[List[dict], bool]:
     """Get the records to process, optionally filtered by video_ids."""
     records = manifest_data.get('records', [])
     if video_ids is not None:

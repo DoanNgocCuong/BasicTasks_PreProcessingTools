@@ -58,7 +58,7 @@ class VoiceClassificationResult:
 
 
 # Conditional class definitions
-BaseModule = nn if WAV2VEC_AVAILABLE else object
+BaseModule = nn.Module if WAV2VEC_AVAILABLE else object
 BasePreTrained = Wav2Vec2PreTrainedModel if WAV2VEC_AVAILABLE else object
 
 class ModelHead(BaseModule):  # type: ignore
@@ -295,7 +295,13 @@ class VoiceClassifier:
         Returns:
             Tuple of (label, confidence)
         """
-        child_prob = gender_probs[2] if gender_probs is not None else 0
+        if gender_probs is None:
+            # Fallback to age-only classification if gender probs not available
+            if age_normalized is not None and age_normalized < self.age_threshold:
+                return "child", age_normalized
+            return "adult", 0.5  # Default confidence when data unavailable
+
+        child_prob = gender_probs[2]
 
         # Check child probability
         if child_prob > self.child_threshold:
@@ -305,7 +311,7 @@ class VoiceClassifier:
         if age_normalized is not None and age_normalized < self.age_threshold:
             return "child", age_normalized
 
-        return "adult", 1 - child_prob
+        return "adult", 1.0 - child_prob
 
     def classify_audio_file(self, audio_path: Path) -> VoiceClassificationResult:
         """
@@ -317,12 +323,15 @@ class VoiceClassifier:
         Returns:
             Classification result
         """
-        import time
         start_time = time.time()
 
         try:
             if not self.wav2vec_available:
                 return self._fallback_classification(audio_path, start_time)
+
+            # Ensure model is loaded
+            if self.model is None or self.processor is None:
+                self._load_model_and_processor()
 
             # Preprocess audio
             speech_array = self._preprocess_audio(audio_path)
@@ -484,10 +493,22 @@ class VoiceClassifier:
         Returns:
             Classification result
         """
-        import time
         start_time = time.time()
 
         try:
+            if not self.wav2vec_available:
+                return VoiceClassificationResult(
+                    is_child_voice=False,
+                    confidence=0.0,
+                    features_extracted={},
+                    processing_time=time.time() - start_time,
+                    model_version="fallback-1.0.0"
+                )
+
+            # Ensure model is loaded
+            if self.model is None or self.processor is None:
+                self._load_model_and_processor()
+
             # Resample if needed
             if sample_rate != 16000:
                 import librosa

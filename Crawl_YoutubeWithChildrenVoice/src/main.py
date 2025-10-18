@@ -33,7 +33,7 @@ try:
     from .analyzer.analysis_phases import run_analysis_phase  # type: ignore
     from .filterer.filtering_phases import run_filtering_phase  # type: ignore
     from .cleaner.clean_phases import run_clean_phase  # type: ignore
-    from .uploader.upload_phases import run_upload_phase  # type: ignore
+    from .uploader.upload_phases import run_upload_phase, reset_upload_session  # type: ignore
 except ImportError as e:
     print(f"Import error: {e}", file=sys.stderr)
     print("This script should be run as a module: python -m src.main", file=sys.stderr)
@@ -197,6 +197,9 @@ async def run_crawler_workflow(config: CrawlerConfig) -> bool:
     """
     output = get_output_manager()
     # progress = get_progress_tracker()  # Unused - removed to clean up imports
+
+    # Reset upload session state for fresh workflow
+    reset_upload_session()
 
     # Recover from any corrupted files first
     recover_corrupted_files(config, output)

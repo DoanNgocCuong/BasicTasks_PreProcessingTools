@@ -17,11 +17,12 @@ from ..utils import get_output_manager, get_file_manager
 
 # Optional imports for analyzers
 try:
-    from .voice_classifier import VoiceClassifier
+    from .voice_classifier import VoiceClassifier, get_voice_classifier
     VOICE_CLASSIFIER_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Voice classifier not available: {e}")
     VoiceClassifier = None
+    get_voice_classifier = None
     VOICE_CLASSIFIER_AVAILABLE = False
 
 
@@ -123,10 +124,11 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
     """
     output = get_output_manager()
 
-    if VOICE_CLASSIFIER_AVAILABLE and VoiceClassifier is not None:
+    if VOICE_CLASSIFIER_AVAILABLE and VoiceClassifier is not None and get_voice_classifier is not None:
         try:
-            voice_classifier = VoiceClassifier(config.analysis)
-            output.debug("Voice classifier initialized successfully")
+            # Use factory function to get cached singleton with preloading
+            voice_classifier = get_voice_classifier(config.analysis)
+            output.debug("Voice classifier initialized successfully using cached singleton")
         except Exception as e:
             output.error(f"Failed to initialize voice classifier: {e}")
             output.error(f"Analysis config: {config.analysis}")
