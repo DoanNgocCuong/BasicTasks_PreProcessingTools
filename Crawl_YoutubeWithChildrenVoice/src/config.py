@@ -112,7 +112,7 @@ class AnalysisConfig:
     """Configuration for audio analysis."""
     enable_language_detection: bool = True
     enable_chunking: bool = True
-    max_chunk_duration_seconds: int = DEFAULT_MAX_CHUNK_DURATION_SECONDS  # 20 minutes
+    max_chunk_duration_seconds: int = DEFAULT_MAX_CHUNK_DURATION_SECONDS  
     chunk_overlap_seconds: int = DEFAULT_CHUNK_OVERLAP_SECONDS
     max_consecutive_no_children: int = DEFAULT_MAX_CONSECUTIVE_NO_CHILDREN
     child_voice_threshold: float = DEFAULT_CHILD_VOICE_THRESHOLD
