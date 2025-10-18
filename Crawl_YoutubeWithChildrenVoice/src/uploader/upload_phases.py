@@ -18,6 +18,24 @@ from .client import main as upload_main
 _current_upload_folder_id: Optional[str] = None
 
 
+def _count_uploadable_files(records: List[dict]) -> int:
+    """Count the number of records that are eligible for upload."""
+    return sum(1 for r in records if 
+        r.get("classified") == True and 
+        r.get("containing_children_voice") == True and 
+        r.get("uploaded", False) == False and
+        r.get("file_available", False) == True)
+
+
+def _get_records_to_process(manifest_data: dict, video_ids: Optional[List[str]]) -> tuple[List[dict], bool]:
+    """Get the records to process, optionally filtered by video_ids."""
+    records = manifest_data.get('records', [])
+    if video_ids is not None:
+        filtered_records = [r for r in records if r.get('video_id') in video_ids]
+        return filtered_records, True
+    return records, False
+
+
 async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List[str]] = None, video_ids: Optional[List[str]] = None) -> int:
     """
     Run the upload phase: upload classified children voice files to the server.
@@ -59,21 +77,24 @@ async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List
             return 0
 
         # Filter records if video_ids specified
-        upload_manifest_path = manifest_path
-        temp_manifest_path = None
+        records_to_process, is_filtered = _get_records_to_process(manifest_data, video_ids)
+        to_upload_count = _count_uploadable_files(records_to_process)
         
-        if video_ids is not None:
-            original_records = manifest_data.get('records', [])
-            filtered_records = [r for r in original_records if r.get('video_id') in video_ids]
-            output.info(f"Uploading {len(filtered_records)} specific videos from {len(original_records)} total records")
+        if is_filtered:
+            output.info(f"Uploading {to_upload_count} files from {len(manifest_data.get('records', []))} total records")
             
-            if not filtered_records:
+            if not records_to_process:
                 output.info("No matching videos found for upload")
                 return 0
-                
-            # Create temporary manifest with filtered records
+        else:
+            output.info(f"Uploading {to_upload_count} files from {len(records_to_process)} total records")
+
+        # Create temporary manifest if filtered
+        upload_manifest_path = manifest_path
+        temp_manifest_path = None
+        if is_filtered:
             temp_manifest_data = manifest_data.copy()
-            temp_manifest_data['records'] = filtered_records
+            temp_manifest_data['records'] = records_to_process
             temp_manifest_path = manifest_path.with_suffix('.temp.json')
             
             try:
@@ -83,8 +104,6 @@ async def run_upload_phase(config: CrawlerConfig, processed_files: Optional[List
             except Exception as e:
                 output.error(f"Failed to create temporary manifest: {e}")
                 return 0
-        else:
-            output.info(f"Uploading all {len(manifest_data.get('records', []))} records")
 
         # Call the upload client main function
         try:
