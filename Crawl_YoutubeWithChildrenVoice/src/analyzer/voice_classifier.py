@@ -185,6 +185,11 @@ class VoiceClassifier:
 
             # Enable memory-efficient mode
             self.model.eval()  # type: ignore
+            
+            # Convert to float16 (half precision) for GPU memory savings
+            if torch.cuda.is_available():  # type: ignore
+                self.model = self.model.half()  # type: ignore
+            
             if torch.cuda.is_available():  # type: ignore
                 # Enable gradient checkpointing for memory efficiency
                 if hasattr(self.model, 'gradient_checkpointing_enable'):
@@ -262,19 +267,21 @@ class VoiceClassifier:
             input_values = inputs['input_values'][0]
             input_values = input_values.reshape(1, -1)
 
-            # Move to device
+            # Move to device and convert to float16 if on GPU
             input_values = torch.from_numpy(input_values).to(self.device)  # type: ignore
+            if torch.cuda.is_available():  # type: ignore
+                input_values = input_values.half()  # type: ignore
 
             # Prediction
             with torch.no_grad():  # type: ignore
                 hidden_states, age_logits, gender_probs = self.model(input_values)  # type: ignore
 
                 # Age prediction (0-1 scale, 0=0 years, 1=100 years)
-                age_normalized = float(age_logits.squeeze().cpu())
+                age_normalized = float(age_logits.squeeze().cpu().float())
                 age_years = age_normalized * 100  # Convert to years
 
                 # Gender prediction probabilities [female, male, child]
-                gender_probs = gender_probs.squeeze().cpu().numpy()
+                gender_probs = gender_probs.squeeze().cpu().float().numpy()
 
                 # Clear intermediate tensors
                 del input_values, hidden_states, age_logits
@@ -566,8 +573,8 @@ class VoiceClassifier:
         """
         Split a large audio file into chunks without keeping all in memory.
 
-        Yields chunks one at a time for memory efficiency. Each chunk is of duration
-        specified in config.max_chunk_duration_seconds.
+        Uses librosa's offset/duration to stream chunks directly without loading entire file.
+        Each chunk is of duration specified in config.max_chunk_duration_seconds.
 
         Args:
             audio_path: Path to audio file
@@ -577,37 +584,55 @@ class VoiceClassifier:
         """
         try:
             import librosa
-
-            # Load audio file
-            y, sr = librosa.load(str(audio_path), sr=16000)
+            import soundfile as sf
 
             chunk_duration_seconds = self.config.max_chunk_duration_seconds
-            samples_per_chunk = chunk_duration_seconds * sr
+            sr = 16000
+            
+            # Get total duration without loading entire file
+            try:
+                with sf.SoundFile(str(audio_path)) as f:
+                    total_frames = len(f)
+                    file_sr = f.samplerate
+                total_duration_seconds = total_frames / file_sr
+            except Exception as e:
+                self.output.error(f"Could not read audio duration: {e}")
+                return
 
             # Calculate total chunks
-            total_samples = len(y)
-            total_chunks = int(np.ceil(total_samples / samples_per_chunk))
-
-            # Yield chunks one at a time
+            total_chunks = int(np.ceil(total_duration_seconds / chunk_duration_seconds))
+            
+            # Stream load chunks one at a time using offset/duration
             chunk_index = 0
-            offset = 0
+            offset_seconds = 0.0
 
-            while offset < total_samples:
-                end_offset = min(offset + int(samples_per_chunk), total_samples)
-                chunk = y[offset:end_offset].astype(np.float32)
+            while offset_seconds < total_duration_seconds:
+                # Load only this chunk
+                chunk, _ = librosa.load(
+                    str(audio_path),
+                    sr=sr,
+                    offset=offset_seconds,
+                    duration=chunk_duration_seconds,
+                    mono=True
+                )
+
+                if len(chunk) == 0:
+                    break
 
                 # Normalize chunk
                 if np.max(np.abs(chunk)) > 0:
                     chunk = chunk / np.max(np.abs(chunk))
 
-                yield chunk, chunk_index, total_chunks
+                yield chunk.astype(np.float32), chunk_index, total_chunks
 
                 # Move to next chunk
-                offset = end_offset
+                offset_seconds += chunk_duration_seconds
                 chunk_index += 1
 
-                # Garbage collection to free memory
+                # Explicit cleanup
+                del chunk
                 gc.collect()
+                self._clear_cuda_cache()
 
         except Exception as e:
             self.output.error(f"Error splitting audio file {audio_path}: {e}")
@@ -673,16 +698,14 @@ class VoiceClassifier:
                         f"confidence={result.confidence:.2f}"
                     )
 
-                    # Clean up chunk data
-                    del chunk_audio
-                    gc.collect()
-
                 except Exception as e:
                     self.output.error(f"Error processing chunk {chunk_idx}: {e}")
-                    # Continue to next chunk
+                
+                finally:
+                    # Always cleanup chunk data, even if error occurred
                     del chunk_audio
                     gc.collect()
-                    continue
+                    self._clear_cuda_cache()
 
             # Calculate overall results
             if chunk_results:
