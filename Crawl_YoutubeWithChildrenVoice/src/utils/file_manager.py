@@ -150,6 +150,7 @@ class FileManager:
         Returns:
             True if successful, False otherwise
         """
+        temp_file = None  # Initialize for cleanup in exception handler
         try:
             # Create backup if file exists
             if file_path.exists():
@@ -190,8 +191,7 @@ class FileManager:
         except Exception as e:
             self.output.error(f"Failed to save JSON to {file_path}: {e}")
             # Clean up temp file if it exists
-            temp_file = file_path.with_suffix(file_path.suffix + '.tmp')
-            if temp_file.exists():
+            if temp_file and temp_file.exists():
                 try:
                     temp_file.unlink()
                 except Exception:
@@ -394,7 +394,10 @@ class ManifestManager:
         Returns:
             True if lock acquired, False otherwise
         """
+        import random
+        
         start_time = time.time()
+        attempt = 0
         while time.time() - start_time < self._lock_timeout:
             try:
                 # Try to create lock file exclusively
@@ -402,8 +405,11 @@ class ManifestManager:
                 self.output.debug(f"Acquired manifest lock: {self._lock_file}")
                 return True
             except FileExistsError:
-                # Lock file exists, wait and retry
-                time.sleep(0.1)
+                # Lock file exists, wait and retry with exponential backoff
+                attempt += 1
+                # Exponential backoff: 0.01s, 0.02s, 0.04s, 0.08s... capped at 1s
+                wait_time = min(0.01 * (2 ** attempt), 1.0) * (0.5 + random.random())
+                time.sleep(wait_time)
                 continue
             except Exception as e:
                 self.output.warning(f"Failed to acquire manifest lock: {e}")
