@@ -22,7 +22,7 @@ DEFAULT_MAX_FILENAME_LENGTH = 40  # Maximum length for camelCase filenames
 DEFAULT_MAX_CONCURRENT_UPLOADS = 5  # Maximum concurrent upload workers
 
 # Analysis configuration
-DEFAULT_MAX_CHUNK_DURATION_SECONDS = 1200  # 20 minutes
+DEFAULT_MAX_CHUNK_DURATION_SECONDS = 30  # 30 seconds per chunk for memory efficiency
 DEFAULT_CHUNK_OVERLAP_SECONDS = 5
 DEFAULT_MAX_CONSECUTIVE_NO_CHILDREN = 3
 DEFAULT_CHILD_VOICE_THRESHOLD = 0.5

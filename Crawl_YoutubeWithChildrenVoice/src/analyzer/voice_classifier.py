@@ -249,6 +249,8 @@ class VoiceClassifier:
         """
         Predict age and gender from audio array.
 
+        Splits very long audio into smaller segments to avoid GPU memory overflow.
+
         Args:
             speech_array: Audio array
 
@@ -262,32 +264,56 @@ class VoiceClassifier:
             # Clear CUDA cache before processing
             self._clear_cuda_cache()
 
-            # Process audio
-            inputs = self.processor(speech_array, sampling_rate=16000)  # type: ignore
-            input_values = inputs['input_values'][0]
-            input_values = input_values.reshape(1, -1)
+            # Split very long audio into smaller segments (10 seconds each for inference)
+            # This prevents GPU memory overflow on very long chunks
+            segment_duration_seconds = 10
+            sr = 16000
+            segment_samples = segment_duration_seconds * sr
+            
+            # Collect predictions from all segments
+            all_age_preds = []
+            all_gender_probs = []
+            
+            offset = 0
+            while offset < len(speech_array):
+                end_offset = min(offset + segment_samples, len(speech_array))
+                segment = speech_array[offset:end_offset]
+                
+                # Process this segment
+                inputs = self.processor(segment, sampling_rate=16000)  # type: ignore
+                input_values = inputs['input_values'][0]
+                input_values = input_values.reshape(1, -1)
 
-            # Move to device and convert to float16 if on GPU
-            input_values = torch.from_numpy(input_values).to(self.device)  # type: ignore
-            if torch.cuda.is_available():  # type: ignore
-                input_values = input_values.half()  # type: ignore
+                # Move to device and convert to float16 if on GPU
+                input_values = torch.from_numpy(input_values).to(self.device)  # type: ignore
+                if torch.cuda.is_available():  # type: ignore
+                    input_values = input_values.half()  # type: ignore
 
-            # Prediction
-            with torch.no_grad():  # type: ignore
-                hidden_states, age_logits, gender_probs = self.model(input_values)  # type: ignore
+                # Prediction
+                with torch.no_grad():  # type: ignore
+                    hidden_states, age_logits, gender_probs = self.model(input_values)  # type: ignore
 
-                # Age prediction (0-1 scale, 0=0 years, 1=100 years)
-                age_normalized = float(age_logits.squeeze().cpu().float())
-                age_years = age_normalized * 100  # Convert to years
+                    # Collect predictions
+                    age_normalized = float(age_logits.squeeze().cpu().float())
+                    all_age_preds.append(age_normalized)
+                    
+                    gender_probs_array = gender_probs.squeeze().cpu().float().numpy()
+                    all_gender_probs.append(gender_probs_array)
 
-                # Gender prediction probabilities [female, male, child]
-                gender_probs = gender_probs.squeeze().cpu().float().numpy()
-
-                # Clear intermediate tensors
-                del input_values, hidden_states, age_logits
-                self._clear_cuda_cache()
-
+                    # Clear intermediate tensors
+                    del input_values, hidden_states, age_logits
+                    self._clear_cuda_cache()
+                
+                offset = end_offset
+            
+            # Average predictions across segments
+            if all_age_preds:
+                age_normalized = float(np.mean(all_age_preds))
+                age_years = age_normalized * 100
+                gender_probs = np.mean(all_gender_probs, axis=0)
                 return age_normalized, age_years, gender_probs, "success"
+            else:
+                return None, None, None, "no_segments"
 
         except Exception as e:
             self.output.error(f"Error predicting age/gender: {e}")

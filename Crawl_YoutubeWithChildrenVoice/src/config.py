@@ -212,7 +212,13 @@ class CrawlerConfig:
     def from_env(cls) -> 'CrawlerConfig':
         """Create configuration from environment variables."""
         # Load .env file if it exists
-        load_dotenv()
+        # Try loading from project root first, then from current directory
+        env_path = Path(__file__).parent.parent / '.env'
+        if env_path.exists():
+            load_dotenv(env_path)
+        else:
+            # Fallback to current directory
+            load_dotenv()
         
         config = cls()
 
