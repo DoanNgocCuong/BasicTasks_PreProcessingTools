@@ -4,6 +4,38 @@ import re
 import os
 from pathlib import Path
 
+
+def convert_numpy_types(obj):
+    """
+    Recursively convert numpy types to native Python types for JSON serialization.
+    
+    Args:
+        obj: Object to convert
+        
+    Returns:
+        Object with numpy types converted to Python types
+    """
+    try:
+        import numpy as np
+        
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+    except ImportError:
+        # numpy not available, continue without conversion
+        pass
+    
+    if isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(item) for item in obj]
+    
+    return obj
+
+
 def find_file_recursively(root_dir: Path, filename: str) -> Path | None:
     """Search for a file recursively in the directory tree."""
     for root, dirs, files in os.walk(root_dir):
@@ -12,10 +44,21 @@ def find_file_recursively(root_dir: Path, filename: str) -> Path | None:
     return None
 
 def clean_manifest(manifest_path):
-    # Get the output directory
-    manifest_dir = Path(manifest_path).parent
+    # Get the output directory and workspace root
+    manifest_path = Path(manifest_path)
+    manifest_dir = manifest_path.parent
     output_dir = manifest_dir.parent  # ../../output
-    if not os.path.exists(manifest_path):
+    
+    # Workspace root is 2 levels up from final_audio (manifest.json is at workspace/output/final_audio/manifest.json)
+    # Safety check: ensure manifest path has sufficient depth
+    if len(manifest_dir.parents) < 2:
+        print(f"Error: Cannot resolve workspace root from manifest path: {manifest_path}")
+        print(f"Manifest path has insufficient parents: {list(manifest_dir.parents)}")
+        return
+    
+    workspace_root = manifest_dir.parents[1]
+    
+    if not manifest_path.exists():
         print(f"Manifest file not found: {manifest_path} - creating empty manifest")
         # Create empty manifest
         data = {"total_duration_seconds": 0.0, "records": []}
@@ -118,6 +161,11 @@ def clean_manifest(manifest_path):
         if 'file_available' not in record:
             if record.get('output_path') and record['output_path'] is not None:
                 file_path = Path(record['output_path'])
+                # Handle both absolute and relative paths
+                if not file_path.is_absolute():
+                    # Convert relative path to absolute for checking
+                    file_path = workspace_root / record['output_path']
+                
                 if file_path.exists():
                     record['file_available'] = True
                     changes.append(f"Record {i}: Set file_available: true (file exists at {file_path})")
@@ -126,7 +174,13 @@ def clean_manifest(manifest_path):
                     filename = file_path.name
                     found_path = find_file_recursively(output_dir, filename)
                     if found_path:
-                        record['output_path'] = str(found_path)
+                        # Convert found absolute path back to relative for consistency
+                        try:
+                            relative_path = found_path.relative_to(workspace_root)
+                            record['output_path'] = str(relative_path)
+                        except ValueError:
+                            # If relative_to fails, store absolute path as fallback
+                            record['output_path'] = str(found_path)
                         record['file_available'] = True
                         changes.append(f"Record {i}: Updated output_path to {found_path} and set file_available: true")
                     else:
@@ -161,9 +215,16 @@ def clean_manifest(manifest_path):
     else:
         print("No changes made.")
     
-    # Save back
-    with open(manifest_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    # Save back with numpy type conversion for consistency with file_manager
+    try:
+        # Convert numpy types before saving
+        data = convert_numpy_types(data)
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving manifest: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     # Use absolute path

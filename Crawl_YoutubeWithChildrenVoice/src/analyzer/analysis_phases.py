@@ -180,6 +180,12 @@ async def run_local_analysis(config: CrawlerConfig, manifest_data: dict, manifes
             continue
 
         # Make path absolute relative to workspace root
+        # Safety check: ensure manifest path has sufficient depth
+        if len(manifest_file.parents) < 2:
+            output.error(f"Cannot resolve workspace root for {video_id}: manifest path has insufficient depth")
+            output.error(f"Manifest path parents: {list(manifest_file.parents)}")
+            continue
+        
         workspace_root = manifest_file.parents[2]  # manifest.json is at workspace/output/final_audio/manifest.json
         output_path = workspace_root / output_path_str
 

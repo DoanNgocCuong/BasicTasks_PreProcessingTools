@@ -140,13 +140,22 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
 
     # Build a map of all existing files in final_audio_files
     final_audio_dir = config.output.final_audio_dir
-    existing_files = {}
+    existing_files = {}  # Maps filename -> path (for quick lookup by name)
     try:
         if final_audio_dir.exists():
             for file_path in final_audio_dir.rglob("*"):
                 if file_path.is_file() and file_path.suffix.lower() in ['.wav', '.mp3', '.m4a']:
-                    existing_files[file_path.name] = file_path
-        output.info(f"Found {len(existing_files)} audio files in {final_audio_dir}")
+                    file_name = file_path.name
+                    # Check if this filename already exists (duplicate detected)
+                    if file_name in existing_files:
+                        existing_path = existing_files[file_name]
+                        output.warning(f"Duplicate filename found: '{file_name}' exists in multiple locations:")
+                        output.warning(f"  - {existing_path}")
+                        output.warning(f"  - {file_path}")
+                        output.warning(f"  Using first occurrence, but this may cause issues")
+                    else:
+                        existing_files[file_name] = file_path
+        output.info(f"Found {len(existing_files)} unique audio files in {final_audio_dir}")
     except Exception as e:
         output.error(f"Failed to scan final audio directory {final_audio_dir}: {e}")
         output.error(f"Directory exists: {final_audio_dir.exists()}")
@@ -155,6 +164,12 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
     for record in records_to_process:
         if not record.get('classified', False):
             # Not yet classified, keep for now
+            # But validate it has required fields
+            video_id = record.get('video_id')
+            if not video_id:
+                output.warning(f"Skipping unclassified record with missing video_id: {record}")
+                entries_removed += 1
+                continue
             records_to_keep.append(record)
             continue
 
@@ -167,14 +182,36 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             entries_removed += 1
             continue
 
+        # Convert to absolute path if relative (manifest.json is at workspace/output/final_audio/manifest.json)
         output_path = Path(output_path_str)
+        if not output_path.is_absolute():
+            # Safety check: ensure we can resolve workspace root
+            if len(manifest_file.parents) < 2:
+                output.error(f"Cannot resolve workspace root from manifest path: {manifest_file}")
+                output.error(f"Manifest path has insufficient parents: {manifest_file.parents}")
+                entries_removed += 1
+                continue
+            workspace_root = manifest_file.parents[2]  # Go up 2 levels from final_audio/manifest.json
+            output_path = workspace_root / output_path_str
 
         # Check if file exists at recorded path or in the file system
         file_exists = output_path.exists()
         if not file_exists and output_path.name in existing_files:
             # File exists but path is wrong, update path
             correct_path = existing_files[output_path.name]
-            record['output_path'] = str(correct_path)
+            # Convert back to relative path for consistency with original manifest format
+            try:
+                # Safety check: ensure workspace root is accessible
+                if len(manifest_file.parents) < 2:
+                    output.warning(f"Could not convert to relative path for {video_id}: insufficient manifest path depth")
+                    record['output_path'] = str(correct_path)
+                else:
+                    relative_path = correct_path.relative_to(manifest_file.parents[2])
+                    record['output_path'] = str(relative_path)
+            except ValueError:
+                # If relative_to fails, store absolute path
+                output.warning(f"Could not convert to relative path for {video_id}: {correct_path}")
+                record['output_path'] = str(correct_path)
             output_path = correct_path
             file_exists = True
             output.debug(f"Corrected path for {video_id}: {output_path}")
@@ -185,24 +222,68 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             records_to_keep.append(record)
             continue
 
+        # CRITICAL FIX #3: Validate that classified records have ALL required classification fields
+        containing_children_voice = record.get('containing_children_voice')
+        classification_timestamp = record.get('classification_timestamp')
+        
+        # Check if classification is complete
+        if containing_children_voice is None or classification_timestamp is None:
+            output.warning(f"Skipping {video_id}: classified=True but missing required fields (containing_children_voice={containing_children_voice}, classification_timestamp={classification_timestamp})")
+            record['file_available'] = False
+            records_to_keep.append(record)
+            continue
+
         # Check for children's voice
-        if record.get('containing_children_voice'):
+        if containing_children_voice:
             # Move to appropriate language folder
             language_folder = record.get('language_folder', 'unknown')
+            
+            # SECURITY FIX: Sanitize language_folder to prevent path traversal attacks
+            # Remove any path separators and suspicious characters
+            language_folder = language_folder.replace('\\', '').replace('/', '').replace('..', '').strip()
+            if not language_folder:
+                language_folder = 'unknown'
+            
             target_dir = final_audio_dir / language_folder
             target_dir.mkdir(parents=True, exist_ok=True)
 
             target_path = target_dir / output_path.name
 
-            # Check for duplicates
+            # Handle potential race condition: check and remove target if exists
             if target_path.exists():
-                target_path.unlink()  # Remove existing file to allow overwrite
-                output.debug(f"Removed existing file at target: {target_path}")
+                try:
+                    target_path.unlink()  # Remove existing file to allow overwrite
+                    output.debug(f"Removed existing file at target: {target_path}")
+                except Exception as e:
+                    output.error(f"Failed to remove existing target file for {video_id}: {e}")
+                    output.error(f"Target path: {target_path}")
+                    record['file_available'] = False
+                    records_to_keep.append(record)
+                    continue
 
-            # Move file
+            # Move file with error handling
+            if not output_path.exists():
+                # File might have been moved by another process
+                output.warning(f"Source file disappeared during processing for {video_id}: {output_path}")
+                record['file_available'] = False
+                records_to_keep.append(record)
+                continue
+
             try:
                 output_path.rename(target_path)
-                record['output_path'] = str(target_path)
+                # Convert to relative path for consistency with original manifest format
+                try:
+                    # Safety check: ensure workspace root is accessible
+                    if len(manifest_file.parents) < 2:
+                        output.warning(f"Could not convert target path to relative for {video_id}: insufficient manifest path depth")
+                        record['output_path'] = str(target_path)
+                    else:
+                        relative_target_path = target_path.relative_to(manifest_file.parents[2])
+                        record['output_path'] = str(relative_target_path)
+                except ValueError:
+                    # If relative_to fails, store absolute path
+                    output.warning(f"Could not convert target path to relative for {video_id}: {target_path}")
+                    record['output_path'] = str(target_path)
                 records_to_keep.append(record)
                 files_moved += 1
                 output.debug(f"Moved {video_id} to {language_folder} folder")
@@ -214,16 +295,49 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
                 records_to_keep.append(record)
                 continue
         else:
-            # No children's voice - keep entry but remove file if file exists
-            if file_exists:
+            # No children's voice - move file to backup/trash instead of permanently deleting
+            # Re-check that file still exists before moving (in case it was moved by concurrent process)
+            if output_path.exists():
                 try:
-                    output_path.unlink()
-                    output.debug(f"Removed file without children's voice: {video_id}")
+                    # Move to backup directory for no-children-voice files
+                    backup_dir = final_audio_dir / "backups" / "no_children_voice"
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    backup_path = backup_dir / output_path.name
+                    
+                    # If file already exists in backup, remove old copy first
+                    if backup_path.exists():
+                        try:
+                            backup_path.unlink()
+                        except Exception as e:
+                            output.warning(f"Failed to remove old backup copy for {video_id}: {e}")
+                    
+                    output_path.rename(backup_path)
+                    
+                    # Update record to point to backup location (as relative path)
+                    try:
+                        # Convert backup path to relative for consistency
+                        if len(manifest_file.parents) < 2:
+                            output.warning(f"Could not convert backup path to relative for {video_id}: insufficient manifest path depth")
+                            record['output_path'] = str(backup_path)
+                        else:
+                            relative_backup_path = backup_path.relative_to(manifest_file.parents[2])
+                            record['output_path'] = str(relative_backup_path)
+                    except ValueError:
+                        # If relative_to fails, store absolute path
+                        output.warning(f"Could not convert backup path to relative for {video_id}: {backup_path}")
+                        record['output_path'] = str(backup_path)
+                    
+                    output.debug(f"Moved file without children's voice to backup: {video_id} -> {backup_path}")
                 except Exception as e:
-                    output.warning(f"Failed to remove file {output_path}: {e}")
-                    output.warning(f"File exists: {output_path.exists()}")
+                    backup_target = final_audio_dir / "backups" / "no_children_voice" / output_path.name
+                    output.warning(f"Failed to move file to backup for {video_id}: {e}")
+                    output.warning(f"Source: {output_path}, Backup target: {backup_target}")
+                    output.warning(f"Source exists: {output_path.exists()}")
+            else:
+                output.debug(f"File already missing for {video_id}, skipping backup move")
             record['file_available'] = False
             records_to_keep.append(record)
+
     seen_video_ids = set()
     unique_records = []
     duplicates_removed = 0
@@ -236,32 +350,61 @@ async def run_local_filtering(config: CrawlerConfig, manifest_data: dict, manife
             continue
         if video_id in seen_video_ids:
             duplicates_removed += 1
+            output.debug(f"Removing duplicate record for video_id: {video_id}")
             continue
         seen_video_ids.add(video_id)
         unique_records.append(record)
 
     # Update manifest - handle partial updates when video_ids is specified
     if video_ids is not None:
-        # Create map of processed records (safe because unique_records all have video_ids)
-        processed_records = {record['video_id']: record for record in unique_records}
+        # When filtering specific videos, ensure we don't introduce duplicates
+        # Create map of all processed video_ids for quick lookup
+        processed_video_ids = {record.get('video_id') for record in unique_records}
         
-        # Update all_records with processed versions
-        updated_records = []
+        # Build final records list:
+        # 1. Keep processed records (with updates)
+        # 2. Keep non-processed records (unchanged)
+        # But remove ANY duplicates by video_id
+        final_seen_ids = set()
+        final_records = []
+        
+        # First add all processed records
+        for record in unique_records:
+            video_id = record.get('video_id')
+            if video_id and video_id not in final_seen_ids:
+                final_records.append(record)
+                final_seen_ids.add(video_id)
+        
+        # Then add non-processed records that aren't duplicates
         for record in all_records:
             video_id = record.get('video_id')
-            if video_id in processed_records:
-                updated_records.append(processed_records[video_id])
-            else:
-                updated_records.append(record)
+            if video_id not in processed_video_ids and video_id not in final_seen_ids and video_id:
+                final_records.append(record)
+                final_seen_ids.add(video_id)
         
-        manifest_data['records'] = updated_records
+        manifest_data['records'] = final_records
+        output.debug(f"Partial update: {len(unique_records)} records processed, {len(all_records) - len(unique_records)} records unchanged, total {len(final_records)}")
     else:
         # Full update when processing all records
         manifest_data['records'] = unique_records
+        output.debug(f"Full update: {len(unique_records)} records after deduplication")
 
     # Recalculate total duration from all records
     all_current_records = manifest_data.get('records', [])
-    total_duration = sum(record.get('duration_seconds', 0) for record in all_current_records)
+    # Safely sum durations - handle non-numeric values
+    total_duration = 0
+    for record in all_current_records:
+        duration = record.get('duration_seconds', 0)
+        # Safely convert to float, defaulting to 0 if invalid
+        try:
+            if duration is None:
+                total_duration += 0
+            else:
+                total_duration += float(duration)
+        except (ValueError, TypeError):
+            # Invalid duration value, skip it
+            output.warning(f"Invalid duration_seconds for video_id {record.get('video_id')}: {duration}")
+            continue
     manifest_data['total_duration_seconds'] = total_duration
 
     # Save updated manifest
