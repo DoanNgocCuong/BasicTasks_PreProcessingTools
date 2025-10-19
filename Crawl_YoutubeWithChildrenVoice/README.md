@@ -34,4 +34,8 @@ python src/main.py [OPTIONS]
 
 Để tái sử dụng crawler cho mục đích khác (ví dụ: tìm video về động vật, âm nhạc, v.v.), chỉ cần thay đổi file `analysis_phases.py` để phân tích nội dung theo ý muốn.
 
-**Lưu ý**: Nhớ thay đổi `queries.txt` cho mỗi batch để có kết quả tìm kiếm đa dạng.
+**Lưu ý**:
+
+- Nhớ thay đổi `queries.txt` cho mỗi batch để có kết quả tìm kiếm đa dạng.
+- Trước khi chạy các phase, cần khởi động API server bằng cách chạy `python src/uploader/start_server.py`.
+- Để thay đổi URL API, chỉnh sửa biến `SERVER_URL` trong file `src/uploader/client.py`.
