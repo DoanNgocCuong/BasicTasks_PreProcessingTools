@@ -34,6 +34,43 @@ python src/main.py [OPTIONS]
 
 Để tái sử dụng crawler cho mục đích khác (ví dụ: tìm video về động vật, âm nhạc, v.v.), chỉ cần thay đổi file `analysis_phases.py` để phân tích nội dung theo ý muốn.
 
+## Cấu Hình .env
+
+File `.env` chứa các biến cấu hình cho hệ thống. Dưới đây là giải thích chi tiết về từng trường:
+
+### YouTube API Configuration
+
+- `YOUTUBE_API_KEY_1`, `YOUTUBE_API_KEY_2`, `YOUTUBE_API_KEY_3`: Các khóa API YouTube Data v3. Hệ thống sẽ sử dụng các khóa này để truy vấn YouTube. Nếu một khóa hết quota, hệ thống sẽ tự động chuyển sang khóa tiếp theo.
+- `POLL_INTERVAL_SECONDS`: Khoảng thời gian chờ giữa các lần gọi API YouTube (giây). Giá trị mặc định 300 giây giúp tránh bị rate limit.
+
+### Audio Processing Configuration
+
+- `MAX_AUDIO_DURATION_SECONDS`: Thời lượng tối đa của mỗi đoạn audio được xử lý (giây). Audio dài hơn sẽ được chia thành các chunk nhỏ hơn để phân tích.
+- `AUDIO_QUALITY`: Chất lượng audio tải xuống (high/medium/low). Hiện tại chưa được sử dụng trong code chính.
+
+### Model Configuration
+
+- `WHISPER_MODEL_SIZE`: Kích thước mô hình Whisper cho nhận dạng ngôn ngữ. Hiện tại chưa được sử dụng trong code chính.
+- `WAV2VEC2_MODEL`: Mô hình wav2vec2 sử dụng để phát hiện giọng nói trẻ em và phân loại tuổi. Mặc định là "audeering/wav2vec2-large-robust-24-ft-age-gender".
+
+### Processing Configuration
+
+- `MAX_WORKERS`: Số worker tối đa cho xử lý đa luồng. Hiện tại chưa được sử dụng trực tiếp.
+- `CHILD_THRESHOLD`: Ngưỡng xác suất để phân loại giọng nói là trẻ em (0.0-1.0). Giá trị cao hơn làm cho việc phát hiện trẻ em nghiêm ngặt hơn.
+- `AGE_THRESHOLD`: Ngưỡng độ tin cậy cho việc phát hiện ngôn ngữ (0.0-1.0). Ảnh hưởng đến độ chính xác của việc phân loại ngôn ngữ.
+
+### Debug Configuration
+
+- `DEBUG_MODE`: Bật chế độ debug (true/false). Khi bật, hệ thống sẽ ghi log chi tiết hơn.
+- `LOG_LEVEL`: Mức độ log (INFO/DEBUG/WARNING/ERROR). Kiểm soát lượng thông tin được ghi vào log.
+
+### File Paths
+
+- `OUTPUT_DIR`: Thư mục đầu ra chính (tùy chọn). Nếu không chỉ định, sử dụng giá trị mặc định.
+- `TEMP_AUDIO_DIR`: Thư mục tạm thời cho audio (tùy chọn). Nếu không chỉ định, sử dụng giá trị mặc định.
+
+**Lưu ý**: Để thay đổi cấu hình, chỉnh sửa file `.env` và khởi động lại hệ thống.
+
 **Lưu ý**:
 
 - Nhớ thay đổi `queries.txt` cho mỗi batch để có kết quả tìm kiếm đa dạng.
