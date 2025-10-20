@@ -69,12 +69,13 @@ File `.env` chứa các biến cấu hình cho hệ thống. Dưới đây là g
 - `OUTPUT_DIR`: Thư mục đầu ra chính (tùy chọn). Nếu không chỉ định, sử dụng giá trị mặc định.
 - `TEMP_AUDIO_DIR`: Thư mục tạm thời cho audio (tùy chọn). Nếu không chỉ định, sử dụng giá trị mặc định.
 
-**Lưu ý**: Để thay đổi cấu hình, chỉnh sửa file `.env` và khởi động lại hệ thống.
+**Lưu ý về cấu hình .env**: Để thay đổi cấu hình, chỉnh sửa file `.env` và khởi động lại hệ thống.
 
-**Lưu ý**:
+**Lưu ý chung**:
 
 - Nhớ thay đổi `queries.txt` cho mỗi batch để có kết quả tìm kiếm đa dạng.
 - Trước khi chạy bất kỳ phase nào, hãy chạy `python sort_queries.py` để sắp xếp queries từ ngắn đến dài và loại bỏ trùng lặp. Điều này giúp bắt đầu với queries rộng hơn trước, tăng khả năng tìm thấy nhiều kết quả hơn.
 - Trước khi chạy các phase, cần khởi động API server bằng cách chạy `python src/uploader/start_server.py`.
 - Để thay đổi URL API, chỉnh sửa biến `SERVER_URL` trong file `src/uploader/client.py`.
 - Để biết đường dẫn chính xác của các file đã upload trên server, kiểm tra output console trong phase upload. Mỗi file sẽ hiển thị đường dẫn dạng `uploaded_files/{folder_id}/{language}/{filename}`, và `folder_id` được hiển thị khi bắt đầu session upload.
+- Cảnh báo: Thư mục `output/*/backups/` có thể chứa nhiều file backup được tạo ra trong quá trình chạy. Không commit các file này lên git, giữ chúng local, và thỉnh thoảng xóa chúng khi mọi thứ ổn định để tiết kiệm dung lượng.
